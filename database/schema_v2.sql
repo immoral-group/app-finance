@@ -369,6 +369,7 @@ CREATE TABLE IF NOT EXISTS partners (
   phone VARCHAR(50),
   commission_type VARCHAR(50) DEFAULT 'percentage', -- 'percentage' o 'fixed'
   default_commission_rate DECIMAL(5, 2), -- % by default
+  department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
   payment_info TEXT,
   is_active BOOLEAN DEFAULT true,
   notes TEXT,

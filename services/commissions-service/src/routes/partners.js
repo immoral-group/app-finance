@@ -20,6 +20,7 @@ router.get('/', async (req, res) => {
             .from('partners')
             .select(`
         *,
+        department:departments(id, name, code),
         clients:partner_clients(
           client:clients(id, name)
         )
@@ -56,11 +57,11 @@ router.post('/', async (req, res) => {
     try {
         const schema = Joi.object({
             name: Joi.string().required(),
-            email: Joi.string().email().required(),
+            email: Joi.string().email().allow('', null),
             phone: Joi.string().allow(''),
-            default_commission_percentage: Joi.number().min(0).max(100).default(10),
-            payment_method: Joi.string().valid('bank_transfer', 'paypal', 'other').default('bank_transfer'),
-            bank_details: Joi.string().allow(''),
+            department_id: Joi.string().uuid().required(),
+            default_commission_rate: Joi.number().min(0).max(100).default(10),
+            payment_info: Joi.string().allow(''),
             notes: Joi.string().allow('')
         });
 
@@ -133,6 +134,26 @@ router.post('/:id/clients', async (req, res) => {
     } catch (err) {
         console.error('Error assigning client:', err);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * DELETE /partners/:id
+ * Delete a partner
+ */
+router.delete('/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { error } = await supabase
+            .from('partners')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Partner deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting partner:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
@@ -246,6 +267,64 @@ router.post('/commissions/calculate', async (req, res) => {
 });
 
 /**
+ * GET /partners/commissions/annual/:year
+ * Get partner commissions for the entire year
+ */
+router.get('/commissions/annual/:year', async (req, res) => {
+    try {
+        const { year } = req.params;
+        const { partner_id } = req.query;
+
+        let query = supabase
+            .from('monthly_partner_commissions')
+            .select(`
+                *,
+                partner:partners(name, email, payment_info),
+                client:clients(name)
+            `)
+            .eq('fiscal_year', parseInt(year))
+            .order('fiscal_month', { ascending: true })
+            .order('created_at');
+
+        if (partner_id) {
+            query = query.eq('partner_id', partner_id);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            return res.status(500).json({ error: 'Failed to fetch annual commissions', details: error.message });
+        }
+
+        const mappedData = data.map(c => {
+            let actualNotes = c.notes || '';
+            let client_is_paid = false;
+            if (actualNotes.includes('[COBRADO]')) {
+                client_is_paid = true;
+                actualNotes = actualNotes.replace('[COBRADO]', '').trim();
+            }
+            return {
+                ...c,
+                partner_name: c.partner?.name,
+                client_name: c.client?.name,
+                notes: actualNotes,
+                client_is_paid
+            };
+        });
+
+        res.json({
+            success: true,
+            year: parseInt(year),
+            commissions: mappedData
+        });
+
+    } catch (err) {
+        console.error('Error fetching annual commissions:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
  * GET /partners/commissions/:year/:month
  * Get partner commissions for a period
  */
@@ -257,10 +336,10 @@ router.get('/commissions/:year/:month', async (req, res) => {
         let query = supabase
             .from('monthly_partner_commissions')
             .select(`
-        *,
-        partner:partners(name, email, payment_method),
-        client:clients(name)
-      `)
+                *,
+                partner:partners(name, email, payment_info),
+                client:clients(name)
+            `)
             .eq('fiscal_year', parseInt(year))
             .eq('fiscal_month', parseInt(month))
             .order('created_at');
@@ -279,9 +358,25 @@ router.get('/commissions/:year/:month', async (req, res) => {
             return res.status(500).json({ error: 'Failed to fetch commissions', details: error.message });
         }
 
-        const total = data.reduce((sum, c) => sum + parseFloat(c.commission_amount || 0), 0);
-        const byPartner = data.reduce((acc, c) => {
-            const partner = c.partner?.name || 'Unknown';
+        const mappedData = data.map(c => {
+            let actualNotes = c.notes || '';
+            let client_is_paid = false;
+            if (actualNotes.includes('[COBRADO]')) {
+                client_is_paid = true;
+                actualNotes = actualNotes.replace('[COBRADO]', '').trim();
+            }
+            return {
+                ...c,
+                partner_name: c.partner?.name,
+                client_name: c.client?.name,
+                notes: actualNotes,
+                client_is_paid
+            };
+        });
+
+        const total = mappedData.reduce((sum, c) => sum + parseFloat(c.commission_amount || 0), 0);
+        const byPartner = mappedData.reduce((acc, c) => {
+            const partner = c.partner_name || 'Unknown';
             if (!acc[partner]) acc[partner] = 0;
             acc[partner] += parseFloat(c.commission_amount || 0);
             return acc;
@@ -292,11 +387,78 @@ router.get('/commissions/:year/:month', async (req, res) => {
             period: { year: parseInt(year), month: parseInt(month) },
             total_commissions: total,
             by_partner: byPartner,
-            commissions: data
+            commissions: mappedData
         });
 
     } catch (err) {
         console.error('Error fetching commissions:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * POST /partners/commissions
+ * Create a manual commission entry
+ */
+router.post('/commissions', async (req, res) => {
+    try {
+        const schema = Joi.object({
+            partner_id: Joi.string().uuid().required(),
+            client_id: Joi.string().uuid().required(),
+            fiscal_year: Joi.number().integer().required(),
+            fiscal_month: Joi.number().integer().required(),
+            client_billing_amount: Joi.number().min(0).required(),
+            commission_rate: Joi.number().min(0).max(100).required(),
+            commission_amount: Joi.number().min(0).required(),
+            is_paid: Joi.boolean().default(false),
+            client_is_paid: Joi.boolean().default(false),
+            paid_date: Joi.date().iso().allow(null),
+            notes: Joi.string().allow('')
+        });
+
+        const { error, value } = schema.validate(req.body);
+        if (error) {
+            return res.status(400).json({ error: error.details[0].message });
+        }
+
+        const client_is_paid = value.client_is_paid;
+        delete value.client_is_paid;
+
+        // Ensure notes reflects client_is_paid
+        value.notes = value.notes || '';
+        value.notes = value.notes.replace('[COBRADO]', '').trim();
+        if (client_is_paid) {
+            value.notes = `[COBRADO] ${value.notes}`.trim();
+        }
+
+        const { data: resultData, error: insertError } = await supabase
+            .from('monthly_partner_commissions')
+            .insert(value)
+            .select()
+            .single();
+
+        if (insertError) throw insertError;
+
+        // Clean output
+        if (resultData) {
+            let actualNotes = resultData.notes || '';
+            let out_client_is_paid = false;
+            if (actualNotes.includes('[COBRADO]')) {
+                out_client_is_paid = true;
+                actualNotes = actualNotes.replace('[COBRADO]', '').trim();
+            }
+            resultData.client_is_paid = out_client_is_paid;
+            resultData.notes = actualNotes;
+        }
+
+        res.json({
+            success: true,
+            message: 'Commission created successfully',
+            commission: resultData
+        });
+
+    } catch (err) {
+        console.error('Error creating commission:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -310,10 +472,14 @@ router.patch('/commissions/:id', async (req, res) => {
         const { id } = req.params;
 
         const schema = Joi.object({
-            commission_percentage: Joi.number().min(0).max(100),
+            fiscal_month: Joi.number().integer().min(1).max(12),
+            client_id: Joi.string().uuid(),
+            client_billing_amount: Joi.number().min(0),
+            commission_rate: Joi.number().min(0).max(100),
             commission_amount: Joi.number().min(0),
-            payment_status: Joi.string().valid('pending', 'paid', 'cancelled'),
-            payment_date: Joi.date().iso().allow(null),
+            is_paid: Joi.boolean(),
+            client_is_paid: Joi.boolean(),
+            paid_date: Joi.date().iso().allow(null),
             notes: Joi.string().allow('')
         }).min(1);
 
@@ -321,6 +487,30 @@ router.patch('/commissions/:id', async (req, res) => {
         if (error) {
             return res.status(400).json({ error: error.details[0].message });
         }
+
+        const { data: existing } = await supabase
+            .from('monthly_partner_commissions')
+            .select('notes')
+            .eq('id', id)
+            .single();
+
+        if (value.client_is_paid !== undefined) {
+            let currentNotes = existing?.notes || '';
+            const wasPaid = currentNotes.includes('[COBRADO]');
+            currentNotes = currentNotes.replace('[COBRADO]', '').trim();
+
+            if (value.notes !== undefined) {
+                currentNotes = value.notes.replace('[COBRADO]', '').trim();
+            }
+
+            if (value.client_is_paid) {
+                value.notes = `[COBRADO] ${currentNotes}`.trim();
+            } else {
+                value.notes = currentNotes;
+            }
+        }
+
+        delete value.client_is_paid;
 
         const { data, error: updateError } = await supabase
             .from('monthly_partner_commissions')
@@ -333,6 +523,17 @@ router.patch('/commissions/:id', async (req, res) => {
             return res.status(500).json({ error: 'Failed to update commission', details: updateError.message });
         }
 
+        if (data) {
+            let actualNotes = data.notes || '';
+            let out_client_is_paid = false;
+            if (actualNotes.includes('[COBRADO]')) {
+                out_client_is_paid = true;
+                actualNotes = actualNotes.replace('[COBRADO]', '').trim();
+            }
+            data.client_is_paid = out_client_is_paid;
+            data.notes = actualNotes;
+        }
+
         res.json({
             success: true,
             message: 'Commission updated successfully',
@@ -342,6 +543,26 @@ router.patch('/commissions/:id', async (req, res) => {
     } catch (err) {
         console.error('Error updating commission:', err);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * DELETE /partners/commissions/:id
+ * Delete commission manually
+ */
+router.delete('/commissions/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { error } = await supabase
+            .from('monthly_partner_commissions')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Commission deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting commission:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
@@ -366,8 +587,8 @@ router.post('/commissions/:id/pay', async (req, res) => {
         const { data, error: updateError } = await supabase
             .from('monthly_partner_commissions')
             .update({
-                payment_status: 'paid',
-                payment_date: value.payment_date,
+                is_paid: true,
+                paid_date: value.payment_date,
                 notes: value.payment_reference ? `Paid - Ref: ${value.payment_reference}` : 'Paid'
             })
             .eq('id', id)

@@ -115,7 +115,7 @@ export default function Login() {
                         <h1 className="text-xl font-bold text-white tracking-tight leading-none">
                             Finance
                             <span className="text-cyan-400" style={{ textShadow: '0 0 20px rgba(0,212,255,0.6)' }}>
-                                {' '}Immoral
+                                {' '}Immoral Growth
                             </span>
                         </h1>
                         <p className="text-xs text-slate-500 mt-2 tracking-wide">
@@ -197,7 +197,7 @@ export default function Login() {
 
                     {/* Footer */}
                     <p className="text-center text-[10px] text-slate-400 mt-6 tracking-wider uppercase">
-                        Immoral Marketing Group · {new Date().getFullYear()}
+                        IMMORAL GROWTH GROUP · {new Date().getFullYear()}
                     </p>
                 </div>
             </div>

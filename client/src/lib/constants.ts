@@ -84,7 +84,7 @@ export const NAV_ITEMS: NavItem[] = [
         ]
     },
     { label: 'Clients & Fees', path: '/clients', icon: 'Users', requiredPermission: 'clients' },
-    { label: 'Settings', path: '/settings', icon: 'Settings', requiredPermission: 'settings' },
+    { label: 'Settings', path: '/settings', icon: 'Settings', requiredPermission: 'settings', superadminOnly: true },
     { label: 'Gestión de Usuarios', path: '/users', icon: 'Shield', requiredPermission: 'user_management', superadminOnly: true },
 ];
 

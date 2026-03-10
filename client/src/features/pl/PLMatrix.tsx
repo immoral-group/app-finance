@@ -286,6 +286,52 @@ export const CommentModal = ({ isOpen, onClose, onSave, onStatusChange, initialV
     );
 };
 
+const CellInput = ({
+    initialValue,
+    onSave,
+}: {
+    initialValue: number;
+    onSave: (val: number) => void;
+}) => {
+    const [localValue, setLocalValue] = useState(initialValue ? String(initialValue) : '');
+    const isFocused = useRef(false);
+
+    useEffect(() => {
+        if (!isFocused.current) {
+            setLocalValue(initialValue ? String(initialValue) : '');
+        }
+    }, [initialValue]);
+
+    return (
+        <input
+            type="text"
+            inputMode="decimal"
+            value={localValue}
+            onFocus={(e) => {
+                isFocused.current = true;
+                e.target.select();
+            }}
+            onChange={(e) => {
+                setLocalValue(e.target.value);
+                e.target.dataset.dirty = '1';
+            }}
+            onBlur={(e) => {
+                isFocused.current = false;
+                if (e.target.dataset.dirty !== '1') return;
+                const raw = e.target.value.trim();
+                const numVal = Number(raw.replace(/\./g, '').replace(',', '.')) || 0;
+                onSave(numVal);
+                e.target.dataset.dirty = '';
+            }}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            }}
+            className="w-full h-full px-1 py-1 text-right text-xs bg-transparent border-0 focus:outline-none focus:bg-yellow-50"
+            style={{ minWidth: '50px', MozAppearance: 'textfield' } as React.CSSProperties}
+        />
+    );
+};
+
 export default function PLMatrix() {
     const [year, setYear] = useState(new Date().getFullYear());
     const [activeTab, setActiveTab] = useState<TabType>('Real');
@@ -540,7 +586,10 @@ export default function PLMatrix() {
     const saveMutation = useMutation({
         mutationFn: adminApi.savePLMatrixCell,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['pl-matrix'] });
+            // We consciously DO NOT invalidate 'pl-matrix' here.
+            // Invalidating immediately causes a refetch that may return stale data
+            // for fast-typing users, visually wiping out their input.
+            // The local cellValues state is already updated optimistically in handleCellChange.
         },
         onError: () => {
             toast.error('Error al guardar');
@@ -604,12 +653,13 @@ export default function PLMatrix() {
     const handleSaveComment = (val: string, assignedTo: string[]) => {
         if (!editingComment) return;
         const { section, dept, item, monthIdx, saveType } = editingComment;
+        const normalizedSection = section === 'revenue' ? 'revenue' : 'expense';
         setEditingComment(null);
         // Save to dedicated pl_cell_notes table
         noteSaveMutation.mutate({
             year,
             view_type: saveType,
-            section,
+            section: normalizedSection,
             dept,
             item,
             month: monthIdx + 1,
@@ -791,7 +841,6 @@ export default function PLMatrix() {
         const normalizedNoteSection = section === 'revenue' ? 'revenue' : 'expense';
         const note = getCellNote(typeParam as 'real' | 'budget', normalizedNoteSection, dept, item, monthIdx);
         const hasNote = !!note?.comment || (note?.assigned_to && note.assigned_to.length > 0);
-        const cellKey = getCellKey(section, dept, item, monthIdx);
         const saveSection = section === 'revenue' ? 'revenue' : 'expense';
         const sectionKeyForSave = section === 'revenue' ? undefined : section;
         const currentVal = cell.value;
@@ -804,23 +853,9 @@ export default function PLMatrix() {
                 onMouseEnter={(e) => handleMouseEnter(e, section, dept, item, monthIdx)}
                 onMouseLeave={handleMouseLeave}
             >
-                <input
-                    key={cellKey + '-' + currentVal}
-                    type="text"
-                    inputMode="decimal"
-                    defaultValue={currentVal || ''}
-                    onFocus={(e) => {
-                        e.target.select();
-                        e.target.dataset.dirty = '';
-                    }}
-                    onInput={(e) => {
-                        (e.target as HTMLInputElement).dataset.dirty = '1';
-                    }}
-                    onBlur={(e) => {
-                        // ONLY save if user actually typed/edited something
-                        if (e.target.dataset.dirty !== '1') return;
-                        const raw = e.target.value.trim();
-                        const numVal = Number(raw.replace(/\./g, '').replace(',', '.')) || 0;
+                <CellInput
+                    initialValue={currentVal}
+                    onSave={(numVal) => {
                         handleCellChange(section, dept, item, monthIdx, String(numVal));
                         saveMutation.mutate({
                             year,
@@ -833,11 +868,6 @@ export default function PLMatrix() {
                             type: typeParam as 'budget' | 'real',
                         });
                     }}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                    }}
-                    className="w-full h-full px-1 py-1 text-right text-xs bg-transparent border-0 focus:outline-none focus:bg-yellow-50"
-                    style={{ minWidth: '50px', MozAppearance: 'textfield' } as React.CSSProperties}
                 />
                 {hasNote && (
                     <div className="absolute top-0 right-0 w-0 h-0 border-t-[6px] border-l-[6px] border-t-red-500 border-l-transparent pointer-events-none" />

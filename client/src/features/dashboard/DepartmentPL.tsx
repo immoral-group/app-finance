@@ -531,6 +531,46 @@ export default function DepartmentPL() {
         return totals.map(t => fmtCurrency(t));
     };
 
+    // --- Group Cost Calculation helper ---
+    const calculateGroupCost = (valuesMap: Record<string, number>): number[] => {
+        // 1) Total General Revenue
+        const totalGeneralRevenue = Array(12).fill(0);
+        mergedRevenueStructure.forEach(group => {
+            group.services.forEach(service => {
+                for (let i = 0; i < 12; i++) {
+                    totalGeneralRevenue[i] += getCompValue(valuesMap, 'revenue', group.dept, service, i);
+                }
+            });
+        });
+
+        // 2) Dept Revenue
+        const deptRevTotals = calcCompSectionTotal(valuesMap, 'revenue', deptRevenue);
+
+        // 3) Group Pct
+        const groupPct = deptRevTotals.map((v, i) =>
+            totalGeneralRevenue[i] > 0 ? (v / totalGeneralRevenue[i]) : 0
+        );
+
+        // 4) ALL Immoral Expenses
+        const immoralExpensesMonthly = Array(12).fill(0);
+        ALL_EXPENSE_KEYS.forEach(catKey => {
+            const items = mergedExpenseKeyMap[catKey] || [];
+            items.filter(g => g.dept === 'Immoral').forEach(g => {
+                g.items.forEach(item => {
+                    for (let i = 0; i < 12; i++) {
+                        immoralExpensesMonthly[i] += getCompValue(valuesMap, catKey, 'Immoral', item, i);
+                    }
+                });
+            });
+        });
+
+        // 5) Group Cost
+        const isImmoral = deptNames.includes('Immoral');
+        return groupPct.map((pct, i) =>
+            isImmoral ? 0 : fmtCurrency(immoralExpensesMonthly[i] * pct)
+        );
+    };
+
     // --- Filter structures for this department ---
     const deptRevenue = mergedRevenueStructure.filter(g => deptNames.includes(g.dept));
     const deptPersonal = filterByDept(mergedExpenseKeyMap['personal'] || [], deptNames);
@@ -681,6 +721,16 @@ export default function DepartmentPL() {
             rTotals.forEach((v, i) => realExpTotals[i] += v);
             bTotals.forEach((v, i) => budgetExpTotals[i] += v);
         });
+
+        // --- GROUP COST & RESULTADO ---
+        const realGroupCost = calculateGroupCost(compRealValues);
+        const budgetGroupCost = calculateGroupCost(compBudgetValues);
+        const diffGroupCost = realGroupCost.map((v, i) => fmtCurrency(v - budgetGroupCost[i]));
+
+        // Add Group Cost to total expenses
+        realGroupCost.forEach((v, i) => realExpTotals[i] += v);
+        budgetGroupCost.forEach((v, i) => budgetExpTotals[i] += v);
+
         const diffExpTotals = realExpTotals.map((v, i) => fmtCurrency(v - budgetExpTotals[i]));
 
         const realEbitda = realRevTotals.map((v, i) => fmtCurrency(v - realExpTotals[i]));
@@ -732,11 +782,18 @@ export default function DepartmentPL() {
                     <tbody>
                         {renderCompRow('INGRESOS', realRevTotals, budgetRevTotals, diffRevTotals, true, 'bg-purple-50')}
                         <tr><td colSpan={15} className="py-1 bg-white border-0"></td></tr>
-                        {renderCompRow('GASTOS', realExpTotals.map(v => fmtCurrency(v)), budgetExpTotals.map(v => fmtCurrency(v)), diffExpTotals, true, 'bg-orange-50')}
+
+                        {!deptNames.includes('Immoral') && (
+                            <>
+                                {renderCompRow('GROUP (Immoral %)', realGroupCost, budgetGroupCost, diffGroupCost, false, 'bg-red-50')}
+                                <tr><td colSpan={15} className="py-1 bg-white border-0"></td></tr>
+                            </>
+                        )}
+
+                        {renderCompRow('GASTOS TOTALES', realExpTotals.map(v => fmtCurrency(v)), budgetExpTotals.map(v => fmtCurrency(v)), diffExpTotals, true, 'bg-orange-50')}
                         <tr><td colSpan={15} className="py-1 bg-white border-0"></td></tr>
+
                         {renderCompRow('EBITDA', realEbitda, budgetEbitda, diffEbitda, true, 'bg-blue-50')}
-                        <tr><td colSpan={15} className="py-1 bg-white border-0"></td></tr>
-                        {renderCompRow('RESULTADO', realEbitda, budgetEbitda, diffEbitda, true, 'bg-green-50')}
                     </tbody>
                 </table>
             </div>
@@ -1316,11 +1373,18 @@ export default function DepartmentPL() {
     const ingresosTotals = calculateSectionTotal('revenue', deptRevenue);
     const ingresosAnual = ingresosTotals.reduce((a, b) => a + b, 0);
 
+    // Group Cost for the active tab (either Real or Presupuesto)
+    const activeTabGroupCost = calculateGroupCost(activeTab === 'Presupuesto' ? compBudgetValues : compRealValues);
+    const activeTabGroupCostAnual = activeTabGroupCost.reduce((a, b) => a + b, 0);
+
     const gastosTotals = Array(12).fill(0);
     expCats.forEach(cat => {
         const totals = calculateSectionTotal(cat.key, cat.items);
         totals.forEach((v, i) => gastosTotals[i] += v);
     });
+    // Add Group Cost to the total expenses!
+    activeTabGroupCost.forEach((v, i) => gastosTotals[i] += v);
+
     const gastosAnual = gastosTotals.reduce((a, b) => a + b, 0);
 
     const ebitdaTotals = ingresosTotals.map((v, i) => v - gastosTotals[i]);
@@ -1469,6 +1533,9 @@ export default function DepartmentPL() {
     }
 
     // --- REAL / PRESUPUESTO TAB ---
+
+    // Group cost computations are handled inside `gastosTotals` and `ebitdaTotals` directly above.
+
     return (
         <div className="space-y-4 -mx-6 -mt-6">
             {renderHeader(`P&L ${deptLabel.toUpperCase()} — ${activeTab === 'Real' ? 'REAL' : 'PRESUPUESTO'} ${year}`)}
@@ -1535,7 +1602,25 @@ export default function DepartmentPL() {
                         {renderExpenseCategory('Adspent', deptAdspent, 'adspent')}
                         {renderExpenseCategory('Gastos Operativos', deptGastosOp, 'gastosOp')}
 
-                        {/* EBITDA */}
+                        {/* GROUP COST (Integration into Gastos) */}
+                        {!deptNames.includes('Immoral') && (
+                            <tr className="bg-red-50 hover:bg-red-100 transition-colors">
+                                <td className="border border-red-200 px-2 py-1.5 text-xs font-semibold text-red-800"></td>
+                                <td className="border border-red-200 px-2 py-1.5 text-xs font-semibold text-red-800">
+                                    Group (Immoral %)
+                                </td>
+                                {activeTabGroupCost.map((val, i) => (
+                                    <td key={i} className="border border-red-200 px-1 py-1.5 text-right font-medium text-red-800 tabular-nums">
+                                        {fmtDisplay(val)}
+                                    </td>
+                                ))}
+                                <td className="border border-red-200 px-1 py-1.5 text-right font-bold text-red-900 tabular-nums">
+                                    {fmtDisplay(activeTabGroupCostAnual)}
+                                </td>
+                            </tr>
+                        )}
+
+                        {/* EBITDA == RESULTADO FINAL */}
                         <tr className="bg-blue-100">
                             <td colSpan={2} className="border border-blue-300 px-2 py-2 font-bold text-blue-900 text-sm">
                                 EBITDA
@@ -1546,21 +1631,6 @@ export default function DepartmentPL() {
                                 </td>
                             ))}
                             <td className="border border-blue-300 px-1 py-2 text-right font-bold text-blue-900 text-sm tabular-nums">
-                                {fmtDisplay(ebitdaAnual)}
-                            </td>
-                        </tr>
-
-                        {/* RESULTADO */}
-                        <tr className="bg-green-100">
-                            <td colSpan={2} className="border border-green-400 px-2 py-2 font-bold text-green-900 text-sm">
-                                RESULTADO
-                            </td>
-                            {ebitdaTotals.map((val, i) => (
-                                <td key={i} className={`border border-green-400 px-1 py-2 text-right font-bold tabular-nums ${val >= 0 ? 'text-green-800' : 'text-red-600'}`}>
-                                    {fmtDisplay(val)}
-                                </td>
-                            ))}
-                            <td className={`border border-green-400 px-1 py-2 text-right font-bold text-sm tabular-nums ${ebitdaAnual >= 0 ? 'text-green-900' : 'text-red-600'}`}>
                                 {fmtDisplay(ebitdaAnual)}
                             </td>
                         </tr>

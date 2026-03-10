@@ -18,7 +18,7 @@ const Icons: Record<string, any> = {
 
 export function Sidebar() {
     const location = useLocation();
-    const { hasPermission, isSuperAdmin, isDeptHead, profile, signOut } = useAuth();
+    const { hasPermission, isSuperAdmin, isDeptHead, isPartner, profile, signOut } = useAuth();
     const { isDark } = useTheme();
     const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({
         '/departamentos': true
@@ -29,6 +29,10 @@ export function Sidebar() {
     };
 
     const visibleItems = NAV_ITEMS.filter(item => {
+        // Partner users: ONLY see commissions
+        if (isPartner()) {
+            return item.requiredPermission === 'commissions';
+        }
         if (item.superadminOnly && !isSuperAdmin()) return false;
         if (item.requiredPermission && !hasPermission(item.requiredPermission)) return false;
         return true;
@@ -63,7 +67,7 @@ export function Sidebar() {
                         Finance
                     </p>
                     <p className="text-[10px] text-sidebar-foreground/50 tracking-widest uppercase leading-none mt-0.5">
-                        Immoral
+                        Immoral Growth
                     </p>
                 </div>
             </div>
@@ -86,7 +90,7 @@ export function Sidebar() {
                                 'text-[9px] uppercase tracking-wider font-semibold',
                                 isDark ? 'text-primary/70' : 'text-primary/60'
                             )}>
-                                {profile.role === 'superadmin' ? 'Admin' : profile.role === 'dept_head' ? 'Jefe Depto' : 'Usuario'}
+                                {profile.role === 'superadmin' ? 'Admin' : profile.role === 'dept_head' ? 'Jefe Depto' : profile.role === 'partner' ? 'Partner' : 'Usuario'}
                             </span>
                         </div>
                     </div>

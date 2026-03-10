@@ -484,7 +484,7 @@ export function AIChatWidget({ userRole, deptCode, year, currentUser }: ChatHubP
                                 <p className="text-[10px] text-blue-200 mt-0.5">
                                     {panel === 'ai' ? 'GPT-4o + Gemini · Datos reales' :
                                         panel === 'user_chat' ? (selectedUser?.role || 'Usuario') :
-                                            'Immoral Marketing Group'}
+                                            'IMMORAL GROWTH GROUP'}
                                 </p>
                             </div>
                         </div>

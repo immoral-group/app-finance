@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 
 export function Header() {
-    const { profile, signOut } = useAuth();
+    const { profile, signOut, isSuperAdmin } = useAuth();
     const { toggleTheme, isDark } = useTheme();
     const [menuOpen, setMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -98,14 +98,16 @@ export function Header() {
                             </button>
 
                             {/* Configuración */}
-                            <Link
-                                to="/settings"
-                                onClick={() => setMenuOpen(false)}
-                                className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-foreground hover:bg-accent/60 transition-colors"
-                            >
-                                <Settings className="w-4 h-4 text-muted-foreground" />
-                                <span>Configuración</span>
-                            </Link>
+                            {isSuperAdmin() && (
+                                <Link
+                                    to="/settings"
+                                    onClick={() => setMenuOpen(false)}
+                                    className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-foreground hover:bg-accent/60 transition-colors"
+                                >
+                                    <Settings className="w-4 h-4 text-muted-foreground" />
+                                    <span>Configuración</span>
+                                </Link>
+                            )}
 
                             <div className="h-px bg-border my-1" />
 

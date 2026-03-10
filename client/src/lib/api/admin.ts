@@ -269,7 +269,7 @@ export const adminApi = {
                 id: string;
                 display_name: string;
                 email: string;
-                role: 'superadmin' | 'dept_head' | 'user';
+                role: 'superadmin' | 'dept_head' | 'user' | 'partner';
                 department_code: string | null;
                 is_active: boolean;
             };
@@ -293,6 +293,7 @@ export const adminApi = {
         display_name: string;
         role: string;
         department_code?: string;
+        partner_id?: string;
         permissions?: { module: string; can_view: boolean; can_edit: boolean }[];
     }) => {
         return fetchApi('/users', {
@@ -305,7 +306,10 @@ export const adminApi = {
         display_name?: string;
         role?: string;
         department_code?: string;
+        partner_id?: string;
         is_active?: boolean;
+        email?: string;
+        password?: string;
         permissions?: { module: string; can_view: boolean; can_edit: boolean }[];
     }) => {
         return fetchApi(`/users/${id}`, {

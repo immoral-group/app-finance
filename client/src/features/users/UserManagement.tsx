@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
+import { commissionsApi } from '@/lib/api/commissions';
 import { ALL_MODULES } from '@/lib/constants';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
@@ -28,8 +29,9 @@ interface UserFormData {
     email: string;
     password: string;
     display_name: string;
-    role: 'superadmin' | 'dept_head' | 'user';
+    role: 'superadmin' | 'dept_head' | 'user' | 'partner';
     department_code: string;
+    partner_id: string;
     permissions: Record<string, { can_view: boolean; can_edit: boolean }>;
 }
 
@@ -39,6 +41,7 @@ const DEFAULT_FORM: UserFormData = {
     display_name: '',
     role: 'user',
     department_code: '',
+    partner_id: '',
     permissions: {},
 };
 
@@ -54,6 +57,11 @@ export default function UserManagement() {
         queryKey: ['users'],
         queryFn: () => adminApi.getUsers(),
         enabled: isSuperAdmin(),
+    });
+
+    const { data: partnersData } = useQuery({
+        queryKey: ['partners-list'],
+        queryFn: () => commissionsApi.getPartners(),
     });
 
     const createMutation = useMutation({
@@ -98,10 +106,11 @@ export default function UserManagement() {
         });
         setForm({
             email: user.email || '',
-            password: '',
+            password: user.raw_password || '',
             display_name: user.display_name || '',
             role: user.role || 'user',
             department_code: user.department_code || '',
+            partner_id: user.partner_id || '',
             permissions: permMap,
         });
         setEditingUser(user.id);
@@ -118,14 +127,18 @@ export default function UserManagement() {
             }));
 
         if (editingUser) {
+            const updatePayload: any = {
+                display_name: form.display_name,
+                role: form.role,
+                department_code: form.role === 'dept_head' ? form.department_code : null,
+                partner_id: form.role === 'partner' ? form.partner_id : null,
+                permissions: permArray,
+            };
+            if (form.email) updatePayload.email = form.email;
+            if (form.password) updatePayload.password = form.password;
             updateMutation.mutate({
                 id: editingUser,
-                data: {
-                    display_name: form.display_name,
-                    role: form.role,
-                    department_code: form.role === 'dept_head' ? form.department_code : null,
-                    permissions: permArray,
-                },
+                data: updatePayload,
             });
         } else {
             if (!form.email || !form.password || !form.display_name) return;
@@ -135,6 +148,7 @@ export default function UserManagement() {
                 display_name: form.display_name,
                 role: form.role,
                 department_code: form.role === 'dept_head' ? form.department_code : undefined,
+                partner_id: form.role === 'partner' ? form.partner_id : undefined,
                 permissions: permArray,
             });
         }
@@ -223,8 +237,8 @@ export default function UserManagement() {
                             </thead>
                             <tbody>
                                 {users.map((user: any) => {
-                                    const roleLabel = user.role === 'superadmin' ? 'Superadmin' : user.role === 'dept_head' ? 'Jefe Depto' : 'Usuario';
-                                    const roleColor = user.role === 'superadmin' ? 'bg-purple-100 text-purple-700' : user.role === 'dept_head' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700';
+                                    const roleLabel = user.role === 'superadmin' ? 'Superadmin' : user.role === 'dept_head' ? 'Jefe Depto' : user.role === 'partner' ? 'Partner' : 'Usuario';
+                                    const roleColor = user.role === 'superadmin' ? 'bg-purple-100 text-purple-700' : user.role === 'dept_head' ? 'bg-blue-100 text-blue-700' : user.role === 'partner' ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-700';
                                     const permCount = (user.permissions || []).filter((p: any) => p.can_view).length;
                                     const deptLabel = DEPT_OPTIONS.find(d => d.code === user.department_code)?.label || '—';
 
@@ -255,13 +269,13 @@ export default function UserManagement() {
                                                     <Button variant="ghost" size="sm" onClick={() => openEditModal(user)} className="h-8 w-8 p-0">
                                                         <Edit2 size={14} />
                                                     </Button>
-                                                    {user.is_active && (
+                                                    {user.is_active && user.role !== 'superadmin' && (
                                                         <Button
                                                             variant="ghost"
                                                             size="sm"
                                                             className="h-8 w-8 p-0 text-red-500 hover:text-red-700"
                                                             onClick={() => {
-                                                                if (confirm('¿Desactivar este usuario?')) {
+                                                                if (confirm('¿Eliminar este usuario PERMANENTEMENTE? Esta acción no se puede deshacer.')) {
                                                                     deleteMutation.mutate(user.id);
                                                                 }
                                                             }}
@@ -317,31 +331,35 @@ export default function UserManagement() {
                                         value={form.email}
                                         onChange={e => setForm(prev => ({ ...prev, email: e.target.value }))}
                                         placeholder="email@ejemplo.com"
-                                        disabled={!!editingUser}
+                                        disabled={false}
                                     />
                                 </div>
                             </div>
 
-                            {!editingUser && (
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium">Contraseña</label>
-                                    <div className="relative">
-                                        <Input
-                                            type={showPassword ? 'text' : 'password'}
-                                            value={form.password}
-                                            onChange={e => setForm(prev => ({ ...prev, password: e.target.value }))}
-                                            placeholder="Mínimo 6 caracteres"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowPassword(!showPassword)}
-                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                                        >
-                                            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                                        </button>
-                                    </div>
+                            {/* Password — show always (on edit: optional new password) */}
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">
+                                    {editingUser ? 'Contraseña' : 'Contraseña'}
+                                </label>
+                                {editingUser && form.password && (
+                                    <p className="text-xs text-muted-foreground">Contraseña actual visible. Cambia el valor para actualizar.</p>
+                                )}
+                                <div className="relative">
+                                    <Input
+                                        type={showPassword ? 'text' : 'password'}
+                                        value={form.password}
+                                        onChange={e => setForm(prev => ({ ...prev, password: e.target.value }))}
+                                        placeholder="Mínimo 6 caracteres"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                    >
+                                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
                                 </div>
-                            )}
+                            </div>
 
                             {/* Role */}
                             <div className="grid grid-cols-2 gap-4">
@@ -354,6 +372,7 @@ export default function UserManagement() {
                                     >
                                         <option value="user">Usuario</option>
                                         <option value="dept_head">Jefe de Departamento</option>
+                                        <option value="partner">Partner</option>
                                         <option value="superadmin">Superadmin</option>
                                     </select>
                                 </div>
@@ -368,6 +387,21 @@ export default function UserManagement() {
                                             <option value="">Seleccionar...</option>
                                             {DEPT_OPTIONS.map(d => (
                                                 <option key={d.code} value={d.code}>{d.label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                                {form.role === 'partner' && (
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium">Asociar a Partner</label>
+                                        <select
+                                            value={form.partner_id}
+                                            onChange={e => setForm(prev => ({ ...prev, partner_id: e.target.value }))}
+                                            className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm bg-white"
+                                        >
+                                            <option value="">Seleccionar partner...</option>
+                                            {(partnersData?.partners || []).map((p: any) => (
+                                                <option key={p.id} value={p.id}>{p.name}</option>
                                             ))}
                                         </select>
                                     </div>

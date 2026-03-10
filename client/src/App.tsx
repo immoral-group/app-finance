@@ -10,7 +10,7 @@ import BillingMatrix from '@/features/billing/BillingMatrix';
 import MediaTracker from '@/features/media-investment/MediaTracker';
 import ExpensesList from '@/features/expenses/Expenses';
 import Payroll from '@/features/payroll/Payroll';
-import Commissions from '@/features/commissions/Commissions';
+import CommissionsIndex from '@/features/commissions/CommissionsIndex';
 import DepartmentPL from '@/features/dashboard/DepartmentPL';
 import PLMatrix from '@/features/pl/PLMatrix';
 import FeeConfiguration from '@/features/fees/FeeConfiguration';
@@ -41,7 +41,7 @@ function App() {
                   <Route path="media-investment" element={<MediaTracker />} />
                   <Route path="expenses" element={<ExpensesList />} />
                   <Route path="payroll" element={<Payroll />} />
-                  <Route path="commissions" element={<Commissions />} />
+                  <Route path="commissions" element={<CommissionsIndex />} />
                   <Route path="departamentos/:deptCode" element={<DepartmentPL />} />
                   <Route path="pl-matrix" element={<PLMatrix />} />
                   <Route path="fees" element={<FeeConfiguration />} />

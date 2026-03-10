@@ -13,8 +13,9 @@ export interface UserProfile {
     id: string;
     display_name: string;
     email: string;
-    role: 'superadmin' | 'dept_head' | 'user';
+    role: 'superadmin' | 'dept_head' | 'user' | 'partner';
     department_code: string | null;
+    partner_id?: string | null;
     is_active: boolean;
 }
 
@@ -29,6 +30,7 @@ interface AuthContextType {
     canEdit: (module: string) => boolean;
     isSuperAdmin: () => boolean;
     isDeptHead: () => boolean;
+    isPartner: () => boolean;
     refreshProfile: () => Promise<void>;
 }
 
@@ -43,6 +45,7 @@ const AuthContext = createContext<AuthContextType>({
     canEdit: () => false,
     isSuperAdmin: () => false,
     isDeptHead: () => false,
+    isPartner: () => false,
     refreshProfile: async () => { },
 });
 
@@ -112,8 +115,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     // When profile is null, treat as superadmin for nav visibility
-    const isSuperAdmin = () => !profile || profile.role === 'superadmin';
+    const isSuperAdmin = () => profile?.role === 'superadmin';
     const isDeptHead = () => profile?.role === 'dept_head';
+    const isPartner = () => profile?.role === 'partner';
 
     const refreshProfile = async () => {
         await fetchProfile();
@@ -131,6 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             canEdit,
             isSuperAdmin,
             isDeptHead,
+            isPartner,
             refreshProfile,
         }}>
             {!loading && children}

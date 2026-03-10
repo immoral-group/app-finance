@@ -161,7 +161,7 @@ router.get('/', async (req, res) => {
 // ============================================================
 router.post('/', async (req, res) => {
     try {
-        const { email, password, display_name, role, department_code, permissions } = req.body;
+        const { email, password, display_name, role, department_code, partner_id, permissions } = req.body;
 
         if (!email || !password || !display_name) {
             return res.status(400).json({ error: 'email, password, and display_name are required' });
@@ -194,6 +194,8 @@ router.post('/', async (req, res) => {
                 email,
                 role: role || 'user',
                 department_code: department_code || null,
+                partner_id: partner_id || null,
+                raw_password: password || null,
             })
             .select()
             .single();
@@ -246,6 +248,17 @@ router.post('/', async (req, res) => {
                 .upsert(deptPerms, { onConflict: 'user_id,module' });
         }
 
+        // If partner, grant commissions view-only
+        if (role === 'partner') {
+            const partnerPerms = [
+                { user_id: userId, module: 'commissions', can_view: true, can_edit: false },
+            ];
+
+            await supabase
+                .from('user_permissions')
+                .upsert(partnerPerms, { onConflict: 'user_id,module' });
+        }
+
         res.status(201).json({ user: profile });
     } catch (error) {
         console.error('Error creating user:', error);
@@ -259,23 +272,40 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { display_name, role, department_code, permissions, is_active } = req.body;
+        const { display_name, role, department_code, partner_id, permissions, is_active, email, password } = req.body;
+
+        // Update Auth user (email / password) via Admin API if provided
+        if (email || password) {
+            const authUpdate = {};
+            if (email) authUpdate.email = email;
+            if (password) authUpdate.password = password;
+            const { error: authError } = await supabase.auth.admin.updateUserById(id, authUpdate);
+            if (authError) {
+                console.error('Error updating auth user:', authError);
+                return res.status(400).json({ error: authError.message });
+            }
+        }
 
         // Update profile
         const updateData = {};
         if (display_name !== undefined) updateData.display_name = display_name;
         if (role !== undefined) updateData.role = role;
         if (department_code !== undefined) updateData.department_code = department_code;
+        if (partner_id !== undefined) updateData.partner_id = partner_id;
         if (is_active !== undefined) updateData.is_active = is_active;
+        if (email !== undefined) updateData.email = email;
+        if (password) updateData.raw_password = password;
 
-        const { data: profile, error: profileError } = await supabase
-            .from('user_profiles')
-            .update(updateData)
-            .eq('id', id)
-            .select()
-            .single();
+        if (Object.keys(updateData).length > 0) {
+            const { data: profile, error: profileError } = await supabase
+                .from('user_profiles')
+                .update(updateData)
+                .eq('id', id)
+                .select()
+                .single();
 
-        if (profileError) throw profileError;
+            if (profileError) throw profileError;
+        }
 
         // Update permissions if provided
         if (permissions && Array.isArray(permissions)) {
@@ -302,7 +332,13 @@ router.put('/:id', async (req, res) => {
             }
         }
 
-        // Re-fetch with permissions
+        // Re-fetch profile + permissions
+        const { data: updatedProfile } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', id)
+            .single();
+
         const { data: updatedPerms } = await supabase
             .from('user_permissions')
             .select('*')
@@ -310,7 +346,7 @@ router.put('/:id', async (req, res) => {
 
         res.json({
             user: {
-                ...profile,
+                ...updatedProfile,
                 permissions: updatedPerms || [],
             },
         });
@@ -321,23 +357,34 @@ router.put('/:id', async (req, res) => {
 });
 
 // ============================================================
-// DELETE /users/:id — Deactivate user (superadmin only)
+// DELETE /users/:id — Fully delete user (superadmin only)
 // ============================================================
 router.delete('/:id', async (req, res) => {
     try {
         const { id } = req.params;
 
-        // Soft-delete: set is_active to false
-        const { error } = await supabase
+        // 1. Delete permissions
+        await supabase
+            .from('user_permissions')
+            .delete()
+            .eq('user_id', id);
+
+        // 2. Delete profile
+        await supabase
             .from('user_profiles')
-            .update({ is_active: false })
+            .delete()
             .eq('id', id);
 
-        if (error) throw error;
+        // 3. Delete auth user via Admin API
+        const { error: authError } = await supabase.auth.admin.deleteUser(id);
+        if (authError) {
+            console.error('Error deleting auth user:', authError);
+            // Profile already deleted, so still return success
+        }
 
         res.json({ success: true });
     } catch (error) {
-        console.error('Error deactivating user:', error);
+        console.error('Error deleting user:', error);
         res.status(500).json({ error: error.message });
     }
 });

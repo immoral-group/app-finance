@@ -223,7 +223,6 @@ const ALL_EXPENSE_KEYS = Object.keys(EXPENSE_KEY_MAP);
 
 const MAIN_DEPTS = ['Immedia', 'Imcontent', 'Immoralia'];
 const VERTICAL_DEPTS = ['Imloyal', 'Imseo', 'Immoral', 'Imsales', 'Imfilms', 'Imfashion'];
-const HUB_DEPTS = ['Imcontent', 'Immoralia', 'Imsales'];
 
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const QUARTERS = [
@@ -234,7 +233,7 @@ const QUARTERS = [
 ];
 
 export default function Dashboard() {
-    const { isDeptHead, profile } = useAuth();
+    const { isDeptHead, isSuperAdmin, profile } = useAuth();
 
     // Redirect dept_head to their own department dashboard
     if (isDeptHead() && profile?.department_code) {
@@ -247,7 +246,8 @@ export default function Dashboard() {
         departments: true,
     });
     const [isConfiguring, setIsConfiguring] = useState(false);
-    const [deptFilter, setDeptFilter] = useState<'all' | 'main' | 'verticals' | 'hub'>('main');
+    const [deptFilter, setDeptFilter] = useState<'all' | 'main' | 'verticals'>('main');
+    const [visibleVerticals, setVisibleVerticals] = useState<Set<string>>(new Set(['Imfilms', 'Imfashion']));
     const [dashboardTab, setDashboardTab] = useState<DashboardTab>('general');
     const [showGroupForCards, setShowGroupForCards] = useState<Set<string>>(new Set());
 
@@ -562,16 +562,18 @@ export default function Dashboard() {
                     <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
                     <p className="text-muted-foreground mt-1">Overview for Fiscal Year {year}</p>
                 </div>
-                <div className="flex items-center gap-3">
-                    <Button
-                        variant={isConfiguring ? "secondary" : "outline"}
-                        onClick={() => setIsConfiguring(!isConfiguring)}
-                        className="gap-2"
-                    >
-                        <Settings2 size={16} />
-                        {isConfiguring ? 'Done' : 'Customize'}
-                    </Button>
-                </div>
+                {isSuperAdmin() && (
+                    <div className="flex items-center gap-3">
+                        <Button
+                            variant={isConfiguring ? "secondary" : "outline"}
+                            onClick={() => setIsConfiguring(!isConfiguring)}
+                            className="gap-2"
+                        >
+                            <Settings2 size={16} />
+                            {isConfiguring ? 'Done' : 'Customize'}
+                        </Button>
+                    </div>
+                )}
             </div>
 
             {/* Sub-module tabs: General / Detalle */}
@@ -723,44 +725,58 @@ export default function Dashboard() {
                     {
                         visibleWidgets.departments && (
                             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-700">
-                                <div className="flex justify-end gap-2 flex-wrap">
-                                    <Button
-                                        variant={deptFilter === 'main' ? 'default' : 'outline'}
-                                        size="sm"
-                                        onClick={() => setDeptFilter('main')}
-                                    >
-                                        Departamentos
-                                    </Button>
-                                    <Button
-                                        variant={deptFilter === 'hub' ? 'default' : 'outline'}
-                                        size="sm"
-                                        onClick={() => setDeptFilter('hub')}
-                                    >
-                                        Hub
-                                    </Button>
-                                    <Button
-                                        variant={deptFilter === 'verticals' ? 'default' : 'outline'}
-                                        size="sm"
-                                        onClick={() => setDeptFilter('verticals')}
-                                    >
-                                        Verticales
-                                    </Button>
-                                    <Button
-                                        variant={deptFilter === 'all' ? 'default' : 'outline'}
-                                        size="sm"
-                                        onClick={() => setDeptFilter('all')}
-                                    >
-                                        Todos
-                                    </Button>
+                                <div className="flex flex-col items-end gap-3 flex-wrap">
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant={deptFilter === 'main' ? 'default' : 'outline'}
+                                            size="sm"
+                                            onClick={() => setDeptFilter('main')}
+                                        >
+                                            Departamentos
+                                        </Button>
+                                        <Button
+                                            variant={deptFilter === 'verticals' ? 'default' : 'outline'}
+                                            size="sm"
+                                            onClick={() => setDeptFilter('verticals')}
+                                        >
+                                            Verticales
+                                        </Button>
+                                        <Button
+                                            variant={deptFilter === 'all' ? 'default' : 'outline'}
+                                            size="sm"
+                                            onClick={() => setDeptFilter('all')}
+                                        >
+                                            Todos
+                                        </Button>
+                                    </div>
+                                    {deptFilter === 'verticals' && (
+                                        <div className="flex flex-wrap gap-2 justify-end w-full animate-in fade-in slide-in-from-top-1 duration-300">
+                                            {VERTICAL_DEPTS.map(v => (
+                                                <label key={v} className={`flex items-center gap-1.5 text-xs cursor-pointer px-3 py-1.5 rounded-full transition-colors border ${visibleVerticals.has(v) ? 'bg-primary/10 border-primary/30 text-primary font-medium' : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'}`}>
+                                                    <input
+                                                        type="checkbox"
+                                                        className="sr-only"
+                                                        checked={visibleVerticals.has(v)}
+                                                        onChange={(e) => {
+                                                            const newSet = new Set(visibleVerticals);
+                                                            if (e.target.checked) newSet.add(v);
+                                                            else newSet.delete(v);
+                                                            setVisibleVerticals(newSet);
+                                                        }}
+                                                    />
+                                                    {v}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     {deptPerformance
                                         .filter(dept => {
-                                            if (deptFilter === 'all') return true;
+                                            if (deptFilter === 'all') return MAIN_DEPTS.includes(dept.name) || (VERTICAL_DEPTS.includes(dept.name) && visibleVerticals.has(dept.name));
                                             if (deptFilter === 'main') return MAIN_DEPTS.includes(dept.name);
-                                            if (deptFilter === 'verticals') return VERTICAL_DEPTS.includes(dept.name);
-                                            if (deptFilter === 'hub') return HUB_DEPTS.includes(dept.name);
-                                            return true;
+                                            if (deptFilter === 'verticals') return visibleVerticals.has(dept.name);
+                                            return false;
                                         })
                                         .sort((a, b) => b.income - a.income)
                                         .map(dept => {
