@@ -70,7 +70,7 @@ export function PartnerDetail({ partner, onBack }: PartnerDetailProps) {
             setEditingId(null);
             setNewCommission(prev => ({ ...prev, client_billing_amount: 0, notes: '', is_paid: false }));
         },
-        onError: (error: any) => {
+        onError: (_error: any) => {
         }
     });
 
