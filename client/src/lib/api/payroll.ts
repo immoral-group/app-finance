@@ -13,6 +13,7 @@ export interface Employee {
     is_active: boolean;
     email?: string;
     hire_date?: string;
+    currency?: 'EUR' | 'USD';
     department?: { id: string; name: string; code: string };
 }
 
@@ -37,6 +38,7 @@ export interface UpdateEmployeeDTO {
     primary_department_id?: string;
     is_active?: boolean;
     employee_code?: string;
+    currency?: 'EUR' | 'USD';
 }
 
 export interface PayrollRecord {

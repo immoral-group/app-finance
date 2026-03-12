@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
     LayoutDashboard, Receipt, BarChart3, CreditCard, Users,
     PieChart, FileText, Settings, LogOut, Wallet, Handshake,
-    LineChart, Building2, ChevronDown, ChevronRight, Shield, X
+    LineChart, Building2, ChevronDown, ChevronRight, Shield, X, Activity
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -15,7 +15,7 @@ import { getModuleHighlights, dismissModuleHighlight, ChangelogEntry } from '@/l
 const Icons: Record<string, any> = {
     LayoutDashboard, Receipt, BarChart3, CreditCard, Users,
     PieChart, FileText, Settings, Wallet, Handshake,
-    LineChart, Building2, Shield
+    LineChart, Building2, Shield, Activity
 };
 
 // ── Highlight Tooltip (rendered via portal to body) ──────
@@ -192,7 +192,7 @@ function HighlightDot({
 // Sidebar
 // ══════════════════════════════════════════════════════════
 
-export function Sidebar() {
+export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () => void }) {
     const location = useLocation();
     const { hasPermission, isSuperAdmin, isDeptHead, isPartner, profile, signOut } = useAuth();
     const { isDark } = useTheme();
@@ -224,23 +224,24 @@ export function Sidebar() {
     });
 
     return (
-        <div className="h-screen w-60 bg-sidebar border-r border-sidebar-border flex flex-col fixed left-0 top-0">
+        <>
+            {isOpen && (
+                <div 
+                    className="fixed inset-0 z-40 bg-black/50 md:hidden animate-in fade-in"
+                    onClick={onClose}
+                />
+            )}
+            <div className={cn(
+                "h-screen w-60 bg-sidebar border-r border-sidebar-border flex flex-col fixed left-0 top-0 z-50 transition-transform duration-300 ease-in-out md:translate-x-0",
+                isOpen ? "translate-x-0" : "-translate-x-full"
+            )}>
 
             {/* Logo */}
             <div className="h-14 px-5 flex items-center gap-3 border-b border-sidebar-border flex-shrink-0">
                 <div className={cn(
-                    'h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 relative overflow-hidden',
-                    isDark
-                        ? 'bg-primary/20 ring-1 ring-primary/60'
-                        : 'bg-primary'
+                    'h-9 w-9 flex items-center justify-center flex-shrink-0 relative overflow-hidden',
                 )}>
-                    {isDark && (
-                        <div className="absolute inset-0 bg-gradient-to-br from-primary/40 to-transparent" />
-                    )}
-                    <span className={cn(
-                        'text-xs font-black tracking-tighter relative z-10',
-                        isDark ? 'text-primary neon-text' : 'text-white'
-                    )}>FI</span>
+                    <img src="/src/assets/logo.png" alt="Logo" className="h-full w-full object-contain" />
                 </div>
 
                 <div>
@@ -408,6 +409,7 @@ export function Sidebar() {
                     to { opacity: 1; transform: translateX(0); }
                 }
             `}</style>
-        </div>
+            </div>
+        </>
     );
 }

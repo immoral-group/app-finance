@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Sun, Moon, Settings, LogOut, ChevronDown } from 'lucide-react';
+import { Search, Sun, Moon, Settings, LogOut, ChevronDown, Menu } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { WhatsNew } from '@/components/shared/WhatsNew';
 
-export function Header() {
+export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
     const { profile, signOut, isSuperAdmin } = useAuth();
     const { toggleTheme, isDark } = useTheme();
     const [menuOpen, setMenuOpen] = useState(false);
@@ -35,17 +35,27 @@ export function Header() {
     }, []);
 
     return (
-        <header className="h-14 px-5 border-b border-border bg-card flex items-center justify-between sticky top-0 z-30 w-full backdrop-blur-sm">
+        <header className="h-14 px-4 md:px-5 border-b border-border bg-card flex items-center justify-between sticky top-0 z-30 w-full backdrop-blur-sm">
 
-            {/* Buscador */}
-            <div className="w-72">
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                    <input
-                        type="text"
-                        placeholder="Buscar…"
-                        className="w-full h-8 pl-8 pr-3 rounded-lg border border-input bg-muted/50 text-sm outline-none focus:ring-1 focus:ring-ring transition-all placeholder:text-muted-foreground/60"
-                    />
+            {/* Hamburger + Buscador */}
+            <div className="flex items-center gap-2 md:gap-0">
+                {onMenuToggle && (
+                    <button 
+                        onClick={onMenuToggle}
+                        className="md:hidden p-1.5 -ml-1.5 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    >
+                        <Menu size={20} />
+                    </button>
+                )}
+                <div className="w-40 sm:w-56 md:w-72">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                        <input
+                            type="text"
+                            placeholder="Buscar…"
+                            className="w-full h-8 pl-8 pr-3 rounded-lg border border-input bg-muted/50 text-sm outline-none focus:ring-1 focus:ring-ring transition-all placeholder:text-muted-foreground/60 w-full"
+                        />
+                    </div>
                 </div>
             </div>
 

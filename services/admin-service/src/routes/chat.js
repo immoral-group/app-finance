@@ -1,473 +1,734 @@
 import express from 'express';
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import supabase from '../config/supabase.js';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+const __chatDir = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: resolve(__chatDir, '../../.env') });
 
 const router = express.Router();
+const PORT = process.env.PORT || 3010;
+const BASE = `http://localhost:${PORT}`;
 
-// ============================================================
-// CHAT FINANCIERO CON IA — Dual Provider: GPT-4o → Gemini
-//
-// FUENTES DE DATOS (igual que Dashboard y P&L):
-//   Ingresos    → billing_details (por depto) / monthly_billing (total)
-//   Gastos op.  → actual_expenses
-//   Nómina      → monthly_payroll.total_company_cost
-//   EBITDA      → ingresos - gastos - nómina
-//   Empleados   → employees + salary_history
-//
-// REGLA FUNDAMENTAL: La IA NUNCA inventa datos.
-// Solo redacta respuestas con datos que le provea el backend.
-// ============================================================
+let openai = null;
+let gemini = null;
 
-const SYSTEM_PROMPT = `Eres DANIA, el asistente financiero de Immoral Marketing Group.
+// ════════════════════════════════════════════════════════════
+// INTERPRETER PROMPT
+// ════════════════════════════════════════════════════════════
+const INTERPRETER_PROMPT = `Eres el clasificador de DANIA, copiloto financiero de Immoral Marketing Group.
 
-REGLAS ABSOLUTAS:
-1. Solo hablas de datos que te sean proporcionados explícitamente en este mensaje.
-2. NUNCA inventes cifras, porcentajes, nombres o datos financieros.
-3. Si no hay datos disponibles → di exactamente: "No tengo datos disponibles para esta consulta."
-4. Si los datos son parciales o incompletos → adviértelo claramente.
-5. NUNCA asumas tendencias ni hagas estimaciones no presentes en los datos.
+Analiza la pregunta del usuario y devuelve SOLO un JSON válido (sin markdown).
 
-Formato:
-- Español profesional, claro y directo.
-- Números con separador de miles (ej: 125.000 €) y signo € al final.
-- Porcentajes con 1 decimal.
-- Máximo 4 párrafos. Usa negritas para cifras clave.`;
+═══ FUENTES DE DATOS ═══
 
-const CLASSIFIER_PROMPT = `Clasifica la intención del mensaje de un chatbot financiero empresarial.
-Responde ÚNICAMENTE con JSON válido sin markdown ni texto adicional:
+"dashboard" → KPIs anuales y acumulados: facturación total, gastos totales, margen neto. Datos por departamento con sumatorio de gastos (personal, software, comisiones, etc.). USA ESTO para cualquier pregunta sobre gastos de un departamento, ingresos, márgenes, desgloses generales.
+"expenses" → Gastos DETALLADOS por nombre individual. Usa esto para ver gastos individuales de un mes o trimestre específico (ej: "gastos de enero", "en qué se gastó en Q1").
+"pl_real" → P&L datos REALES: ingresos y gastos mes a mes, EBITDA, márgenes operativos. También contiene los sueldos/costes de cada persona como líneas individuales.
+"pl_budget" → P&L PRESUPUESTO: lo planificado para el año, mes a mes.
+"pl_compare" → COMPARATIVA Real vs Presupuesto.
+"billing" → Facturación por CLIENTE y SERVICIOS detallados (SEO, branding, dev, etc.).
+"clients" → Datos maestros de CLIENTES: nombre, configuración de fee, verticales.
+"payments" → PAGOS realizados o pendientes: detalle, beneficiario, moneda.
+"payroll" → SUELDOS INDIVIDUALES: cuánto cobra/cuesta una persona específica. Se busca en P&L como línea de gasto de personal.
+"users" → USUARIOS del software (no empleados de la empresa).
+"clarify" → Pregunta REALMENTE ambigua donde no puedes determinar ni la fuente ni el contexto.
+
+═══ DEPARTAMENTOS ═══
+Immedia, Imcontent, Immoralia, Immoral (grupo general / la empresa), Imloyal, Imseo, Imsales, Imfilms
+
+═══ FORMATO JSON ═══
 {
-  "type": "query" | "general",
-  "entity": "kpis" | "pl_revenue" | "pl_expenses" | "dept_summary" | "payroll" | "billing" | "employees" | "salary_history" | "comparison" | "unknown",
-  "dept": "<nombre o código de departamento si se menciona, o null>"
+  "source": "dashboard|expenses|pl_real|pl_budget|pl_compare|billing|clients|payments|payroll|users|clarify",
+  "filters": {
+    "year": <número>,
+    "months": [<array de números 1-12, vacío si es todo el año>],
+    "department": "<nombre o null>",
+    "category": "<personal|software|comisiones|marketing|formacion|adspent|gastosOp o null>",
+    "client": "<nombre o null>",
+    "person": "<nombre de persona o null>"
+  },
+  "question_type": "total|breakdown|detail|comparison|list",
+  "clarify_message": "<solo si source=clarify>"
 }
-- kpis / pl_summary: EBITDA, margen, rentabilidad general
-- pl_revenue / billing: ingresos, facturación, ventas
-- pl_expenses: gastos, costos, egresos
-- dept_summary: departamento específico (ingresos + gastos)
-- payroll: nómina anual total
-- employees: trabajadores, personal, plantilla, quién trabaja en X
-- salary_history: cambios de sueldo, últimas modificaciones salariales, incrementos
-- comparison: real vs presupuesto
-- general: saludos, preguntas no financieras`;
 
-/**
- * POST /chat
- */
+═══ REGLAS CRÍTICAS ═══
+1. Si NO se menciona año → year = {{CURRENT_YEAR}}.
+2. Trimestres: Q1 = [1,2,3], Q2 = [4,5,6], Q3 = [7,8,9], Q4 = [10,11,12]. Un mes: febrero = [2]. Anual = [].
+3. "personal", "trabajadores", "empleados", "nómina", "sueldos" → category = "personal".
+4. "Cuánto cobra X?", "sueldo de X", "cuánto gana X" → source = "payroll", person = "X".
+5. Pregunta de gastos de un departamento ("gastos de immedia", "gastos imcontent", "que gastos hay en X") → source = "dashboard", department = X, question_type = "breakdown". NUNCA pidas clarificación para esto.
+6. Pregunta general ("gastos totales", "facturación total") → source = "dashboard".
+7. Pregunta de gastos de un mes específico → source = "expenses".
+8. Comparativas Real vs Presupuesto → source = "pl_compare".
+9. Servicios facturados a un cliente → source = "billing".
+10. SOLO usa source="clarify" si la pregunta es TAN vaga que no puedes asignar NINGUNA fuente. Preguntas como "gastos de X" o "facturación de Y" SIEMPRE tienen una fuente clara.
+11. Saludo → source = "dashboard", question_type = "total".`;
+
+// ════════════════════════════════════════════════════════════
+// ANALYZER PROMPT
+// ════════════════════════════════════════════════════════════
+const ANALYZER_PROMPT = `Eres DANIA, el copiloto financiero inteligente de Immoral Marketing Group.
+
+REGLAS:
+1. Usa SOLO los datos del RESULTADO. NUNCA inventes cifras.
+2. Si no hay datos, di: "No hay datos registrados para esa consulta en ese período."
+3. FORMATO NÚMEROS: separador de miles con punto, sin decimales. Ej: 1.234 €.
+4. Muestra exactamente lo que se pidió. Estructura bien la lista con bullet points.
+5. GROUP (Immoral): Si en el resultado ves "gastos_grupo_immoral", presenta una línea aparte: "Además, este departamento asume un X% de los gastos generales de Immoral (Group), equivalentes a Y €."
+6. Al final, agrega un breve párrafo (*) con análisis ejecutivo: sugerencias, alertas de desajustes, tendencias.
+7. Responde de manera profesional y amigable en español.
+8. NO pidas clarificación cuando ya tienes datos. Muestra los datos.`;
+
+// ════════════════════════════════════════════════════════════
+// POST /chat
+// ════════════════════════════════════════════════════════════
 router.post('/', async (req, res) => {
-    const { message, userRole, deptCode, year = new Date().getFullYear() } = req.body;
+    const { message, userRole, deptCode, year: reqYear, history } = req.body;
+    const year = reqYear || new Date().getFullYear();
 
-    if (!message?.trim()) return res.status(400).json({ error: 'Mensaje vacío' });
-
-    const hasOpenAI = !!process.env.OPENAI_API_KEY;
-    const hasGemini = !!process.env.GEMINI_API_KEY;
-
-    if (!hasOpenAI && !hasGemini) {
-        return res.status(500).json({ error: 'Sin proveedor de IA configurado. Añade OPENAI_API_KEY o GEMINI_API_KEY al .env.' });
+    if (!message) return res.status(400).json({ error: 'Se requiere un mensaje.' });
+    if (!process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ error: 'Sin proveedor de IA. Añade OPENAI_API_KEY o GEMINI_API_KEY al .env.' });
     }
 
     try {
-        // ── FASE 1: Clasificar intención ──────────────────────────────────────
-        const intent = await classifyIntent(message, hasOpenAI, hasGemini);
+        // ── Greeting shortcut ──
+        if (/^(hola|hey|buenas|buenos|hi|hello|qué tal)/i.test(message.trim())) {
+            return res.json({
+                reply: '¡Hola! 👋 Soy DANIA, tu asistente financiero. Pregúntame sobre:\n\n📊 **KPIs** — Facturación, gastos, márgenes por departamento\n💰 **Gastos** — Personal, software, comisiones, marketing, etc.\n📋 **P&L** — Presupuesto vs Real, EBITDA\n💳 **Pagos** — Estado, beneficiarios, monedas\n👥 **Clientes** — Fees, facturación por cliente\n🧑‍💼 **Empleados** — Sueldos, nóminas\n\n¿En qué puedo ayudarte?',
+                intent: 'general', entity: 'general'
+            });
+        }
 
-        // ── FASE 2: Obtener datos reales de la BD ────────────────────────────
-        const isDeptHead = userRole === 'dept_head';
-        const { data: financialData, description: dataDesc } = await fetchData(intent, year, isDeptHead, deptCode);
+        // ── Step 1: Interpret ──
+        const intent = await interpretQuery(message, history, year);
+        if (!intent) {
+            return res.json({
+                reply: '⚠️ No pude procesar tu pregunta. Intenta de nuevo en unos segundos.',
+                intent: 'error', entity: 'error'
+            });
+        }
 
-        // ── FASE 3: Generar respuesta ────────────────────────────────────────
-        const reply = await generateResponse(message, financialData, dataDesc, hasOpenAI, hasGemini);
+        // ── Clarification ──
+        if (intent.source === 'clarify') {
+            return res.json({
+                reply: intent.clarify_message || '¿Puedes especificar más? ¿De qué año, mes o departamento hablas?',
+                intent: 'clarify', entity: 'clarify'
+            });
+        }
 
-        res.json({ reply, intent: intent.type, entity: intent.entity });
+        // Force current year if missing/invalid
+        if (!intent.filters) intent.filters = {};
+        if (!intent.filters.year || intent.filters.year < 2020 || intent.filters.year > 2030) {
+            intent.filters.year = year;
+        }
+
+        // ── Step 2: Fetch Data ──
+        const appData = await fetchAppData(intent);
+
+        // ── Step 3: Analyze ──
+        const reply = await analyzeResult(message, intent, appData);
+        res.json({ reply: reply || '⚠️ No pude generar una respuesta. Intenta reformular tu pregunta.', intent: intent.source, entity: intent.source });
 
     } catch (err) {
-        console.error('Chat error:', err.message || err);
-        res.status(500).json({ error: 'Error procesando tu pregunta. Inténtalo de nuevo.' });
+        console.error('DANIA Error:', err);
+        res.json({ reply: '⚠️ Error procesando tu consulta. Intenta reformular tu pregunta.', intent: 'error', entity: 'error' });
     }
 });
 
-// ── Clasificador ──────────────────────────────────────────────────────────────
-
-async function classifyIntent(message, hasOpenAI, hasGemini) {
-    const prompt = `${CLASSIFIER_PROMPT}\n\nMensaje: "${message}"`;
-    let raw = null;
-
-    if (hasOpenAI) {
-        try {
-            const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-            const r = await openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: [{ role: 'user', content: prompt }],
-                max_tokens: 120, temperature: 0
-            });
-            raw = r.choices[0].message.content;
-        } catch (err) {
-            if (!hasGemini || !(err.status === 403 || err.message?.includes('supported'))) {
-                console.warn('OpenAI classifier error:', err.message);
-            }
-        }
+// ════════════════════════════════════════════════════════════
+// INTERPRETER
+// ════════════════════════════════════════════════════════════
+async function interpretQuery(message, history, currentYear) {
+    let ctx = '';
+    if (history?.length > 0) {
+        ctx = '\n\nCONVERSACIÓN PREVIA:\n' + history.slice(-3).map(m => `${m.role === 'user' ? 'Usuario' : 'DANIA'}: ${m.content}`).join('\n');
     }
+    const prompt = INTERPRETER_PROMPT.replace('{{CURRENT_YEAR}}', String(currentYear))
+        + ctx + `\n\nAño actual: ${currentYear}.\nMensaje: "${message}"`;
 
-    if (!raw && hasGemini) {
-        try {
-            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-            const r = await model.generateContent(prompt);
-            raw = r.response.text();
-        } catch (err) {
-            console.warn('Gemini classifier error:', err.message);
-        }
-    }
+    const raw = await callLLM(prompt, 400, 0);
+    if (!raw) return null;
 
-    if (!raw) return { type: 'general', entity: 'unknown', dept: null };
     try {
-        return JSON.parse(raw.replace(/```json|```/g, '').trim());
+        return JSON.parse(raw.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
     } catch {
-        return { type: 'general', entity: 'unknown', dept: null };
+        return { source: 'dashboard', filters: { year: currentYear }, question_type: 'total' };
     }
 }
 
-// ── Generador de respuesta ────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════
+// DATA FETCHER — routes to correct internal endpoint
+// ════════════════════════════════════════════════════════════
+async function fetchAppData(intent) {
+    const { source, filters: f } = intent;
+    const year = f?.year || new Date().getFullYear();
 
-async function generateResponse(message, financialData, dataDesc, hasOpenAI, hasGemini) {
-    let dataContext;
-    if (!financialData) {
-        dataContext = 'No se pudieron obtener datos de la base de datos para esta pregunta.';
-    } else if (financialData.restricted) {
-        dataContext = 'El usuario no tiene permisos para acceder a estos datos.';
-    } else {
-        dataContext = `Datos recuperados de la base de datos (${dataDesc}):\n${JSON.stringify(financialData, null, 2)}`;
-    }
-
-    const prompt = `${SYSTEM_PROMPT}\n\nDATOS REALES DE LA BASE DE DATOS:\n${dataContext}\n\nPREGUNTA DEL USUARIO: "${message}"\n\nResponde ÚNICAMENTE con los datos de arriba.`;
-
-    let reply = null;
-
-    if (hasOpenAI) {
-        try {
-            const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-            const r = await openai.chat.completions.create({
-                model: 'gpt-4o',
-                messages: [{ role: 'user', content: prompt }],
-                max_tokens: 700, temperature: 0.1
-            });
-            reply = r.choices[0].message.content;
-            console.log('Chat: respuesta generada con GPT-4o');
-        } catch (err) {
-            if (err.status === 403 || err.message?.includes('supported')) {
-                console.log('Chat: GPT-4o no disponible en esta región, usando Gemini como fallback');
-            } else {
-                console.warn('OpenAI response error:', err.message);
-            }
-        }
-    }
-
-    if (!reply && hasGemini) {
-        try {
-            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-            const r = await model.generateContent(prompt);
-            reply = r.response.text();
-            console.log('Chat: respuesta generada con Gemini');
-        } catch (err) {
-            console.error('Gemini response error:', err.message);
-        }
-    }
-
-    return reply || 'No pude generar una respuesta en este momento. Inténtalo de nuevo.';
-}
-
-// ── Enrutador de datos ────────────────────────────────────────────────────────
-
-async function fetchData(intent, year, isDeptHead, deptCode) {
-    if (intent.type !== 'query') return { data: null, description: '' };
-
-    const deptFilter = isDeptHead ? deptCode : (intent.dept || null);
-    const { entity } = intent;
+    // Resolve months directly from new prompt structure
+    const months = f?.months?.length > 0 ? f.months : null;
 
     try {
-        if (entity === 'kpis' || entity === 'comparison') {
-            return { data: await getKPIs(year), description: `KPIs financieros ${year}` };
-        }
-        if (entity === 'pl_revenue' || entity === 'billing') {
-            return { data: await getRevenue(year, deptFilter), description: `Ingresos ${year}${deptFilter ? ' · ' + deptFilter : ''}` };
-        }
-        if (entity === 'pl_expenses') {
-            return { data: await getExpenses(year, deptFilter), description: `Gastos ${year}${deptFilter ? ' · ' + deptFilter : ''}` };
-        }
-        if (entity === 'dept_summary') {
-            return { data: await getDeptSummary(year, deptFilter), description: `Resumen de departamento${deptFilter ? ': ' + deptFilter : 's'} ${year}` };
-        }
-        if (entity === 'payroll') {
-            if (isDeptHead) return { data: { restricted: true }, description: '' };
-            return { data: await getPayroll(year), description: `Nómina ${year}` };
-        }
-        if (entity === 'employees') {
-            return { data: await getEmployees(deptFilter), description: `Empleados${deptFilter ? ' del departamento ' + deptFilter : ''}` };
-        }
-        if (entity === 'salary_history') {
-            return { data: await getSalaryHistory(deptFilter), description: 'Historial de cambios salariales' };
+        switch (source) {
+            case 'dashboard': return await fetchDashboard(year, f);
+            case 'expenses':  return await fetchExpenses(year, months, f);
+            case 'pl_real':   return await fetchPL(year, 'real', f);
+            case 'pl_budget': return await fetchPL(year, 'budget', f);
+            case 'pl_compare':return await fetchPL(year, 'compare', f);
+            case 'billing':   return await fetchBilling(year, months, f);
+            case 'clients':   return await fetchClients(f);
+            case 'payments':  return await fetchPayments(year, months, f);
+            case 'payroll':   return await fetchPayroll(year, months, f);
+            case 'users':     return await fetchUsers();
+            default:          return await fetchDashboard(year, f);
         }
     } catch (err) {
-        console.error('DB fetch error:', err.message);
+        console.error(`DANIA fetch error [${source}]:`, err.message);
+        return { error: err.message };
+    }
+}
+
+// ────────────────────────────────────────
+// DASHBOARD — KPIs anuales + por departamento
+// ────────────────────────────────────────
+async function fetchDashboard(year, f) {
+    const data = await (await fetch(`${BASE}/dashboard/kpis/${year}`)).json();
+    const depts = data.departmentPerformance || [];
+
+    // ── Un departamento específico ──
+    if (f.department) {
+        const dl = f.department.toLowerCase();
+        const d = depts.find(x => x.name.toLowerCase().includes(dl) || x.code?.toLowerCase().includes(dl));
+        if (!d) return { year, departamento: f.department, error: 'Departamento no encontrado' };
+
+        // Si además pide una categoría de gasto
+        if (f.category) {
+            const ck = f.category.toLowerCase();
+            const mappedKey = mapCategoryKey(ck);
+            return { year, departamento: d.name, categoria: f.category, gasto: Math.round(d.breakdown?.[mappedKey] || 0), currency: 'EUR' };
+        }
+
+        // Get Group (Immoral) % allocation from the same dashboard data
+        const groupDept = depts.find(x => x.code === 'IMMORAL' || x.name.toLowerCase() === 'immoral');
+        let gastos_group_info = null;
+        if (groupDept && d.code !== 'IMMORAL') {
+            // Group expenses exist; show the proportion relative to the department
+            gastos_group_info = {
+                gastos_totales_group: Math.round(groupDept.expenses),
+                desglose_group: groupDept.breakdown
+            };
+        }
+
+        const result = { 
+            year, 
+            departamento: d.name, 
+            ingresos_directos: Math.round(d.income), 
+            gastos_directos: Math.round(d.expenses), 
+            margen: Math.round(d.margin), 
+            margen_pct: d.marginPct?.toFixed(1) + '%', 
+            desglose_gastos_directos: d.breakdown, 
+            currency: 'EUR' 
+        };
+        if (gastos_group_info) result.gastos_grupo_immoral = gastos_group_info;
+        return result;
     }
 
-    return { data: null, description: '' };
-}
+    // ── Categoría global (todos los deptos) ──
+    if (f.category) {
+        const ck = f.category.toLowerCase();
+        const mappedKey = mapCategoryKey(ck);
+        const result = {};
+        let total = 0;
+        depts.forEach(d => {
+            const val = d.breakdown?.[mappedKey] || 0;
+            if (val > 0) { result[d.name] = Math.round(val); total += val; }
+        });
+        return { year, categoria: f.category, total: Math.round(total), por_departamento: result, currency: 'EUR' };
+    }
 
-// ── Helpers de consulta Supabase ─────────────────────────────────────────────
-// FUENTES: mismas que dashboard.js y pl.js para consistencia de datos
-
-async function getKPIs(year) {
-    // Ingresos: billing_details JOIN monthly_billing (misma fuente que dashboard)
-    const { data: bdData, error: bdErr } = await supabase
-        .from('billing_details')
-        .select('amount, monthly_billing!inner(fiscal_year)')
-        .eq('monthly_billing.fiscal_year', year);
-    if (bdErr) throw bdErr;
-
-    // Gastos operativos: actual_expenses
-    const { data: expData, error: expErr } = await supabase
-        .from('actual_expenses')
-        .select('amount')
-        .eq('fiscal_year', year);
-    if (expErr) throw expErr;
-
-    // Nómina: monthly_payroll.total_company_cost (columna correcta)
-    const { data: payData } = await supabase
-        .from('monthly_payroll')
-        .select('total_company_cost')
-        .eq('fiscal_year', year);
-
-    const totalRevenue = (bdData || []).reduce((s, r) => s + Number(r.amount || 0), 0);
-    const totalExpenses = (expData || []).reduce((s, r) => s + Number(r.amount || 0), 0);
-    const totalPayroll = (payData || []).reduce((s, r) => s + Number(r.total_company_cost || 0), 0);
-    const totalCosts = totalExpenses + totalPayroll;
-    const ebitda = totalRevenue - totalCosts;
-
-    // Presupuesto ingresos: budget_lines
-    const { data: budgetData } = await supabase
-        .from('budget_lines')
-        .select('jan,feb,mar,apr,may,jun,jul,aug,sep,oct,nov,dec')
-        .eq('fiscal_year', year)
-        .eq('line_type', 'revenue');
-    const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-    const budgetTotal = (budgetData || []).reduce((s, r) => s + MONTHS.reduce((m, col) => m + Number(r[col] || 0), 0), 0);
-
+    // ── KPIs generales ──
     return {
-        año: year,
-        ingresos_reales: Math.round(totalRevenue),
-        gastos_operativos: Math.round(totalExpenses),
-        gastos_personal_nomina: Math.round(totalPayroll),
-        total_costos: Math.round(totalCosts),
-        ebitda: Math.round(ebitda),
-        margen_ebitda_pct: totalRevenue > 0 ? +((ebitda / totalRevenue) * 100).toFixed(1) : 0,
-        presupuesto_ingresos: Math.round(budgetTotal),
-        desviacion_real_vs_budget: Math.round(totalRevenue - budgetTotal),
-        nota: totalRevenue === 0 ? 'Sin datos de facturación para este año' : null
+        year,
+        facturacion_total: Math.round(data.kpis.totalBilling),
+        gastos_totales: Math.round(data.kpis.totalExpenses),
+        margen_neto: Math.round(data.kpis.netMargin),
+        margen_pct: data.kpis.marginPercentage?.toFixed(1) + '%',
+        departamentos: depts.map(d => ({ nombre: d.name, ingresos: Math.round(d.income), gastos: Math.round(d.expenses), margen: Math.round(d.margin) })),
+        currency: 'EUR'
     };
 }
 
-async function getRevenue(year, deptFilter) {
-    // billing_details agrupado por departamento (misma fuente que dashboard)
-    const { data, error } = await supabase
-        .from('billing_details')
-        .select('amount, departments!inner(name, code), monthly_billing!inner(fiscal_year, fiscal_month)')
-        .eq('monthly_billing.fiscal_year', year);
+// Helper: map category synonyms to dashboard breakdown keys
+function mapCategoryKey(cat) {
+    const map = {
+        'personal': 'personal', 'trabajadores': 'personal', 'empleados': 'personal', 'nomina': 'personal', 'sueldos': 'personal', 'salarios': 'personal',
+        'software': 'software', 'herramientas': 'software', 'suscripciones': 'software',
+        'comisiones': 'commissions', 'commissions': 'commissions', 'comision': 'commissions',
+        'marketing': 'marketing',
+        'formacion': 'formacion', 'formación': 'formacion', 'cursos': 'formacion', 'capacitacion': 'formacion',
+        'adspent': 'adspent', 'ad_spend': 'adspent', 'inversion_publicitaria': 'adspent', 'gasto_publicitario': 'adspent',
+        'gastos_operativos': 'other', 'operativos': 'other', 'otros': 'other', 'alquiler': 'other', 'suministros': 'other'
+    };
+    return map[cat] || cat;
+}
 
-    if (error) throw error;
-    if (!data?.length) return { nota: 'Sin datos de facturación para este año', año: year };
+// ────────────────────────────────────────
+// EXPENSES — Gastos detallados por mes
+// ────────────────────────────────────────
+async function fetchExpenses(year, months, f) {
+    const targetMonths = months || [1,2,3,4,5,6,7,8,9,10,11,12];
+    let all = [];
 
-    const filtered = deptFilter
-        ? data.filter(r => r.departments?.code === deptFilter || r.departments?.name?.toLowerCase().includes(deptFilter.toLowerCase()))
-        : data;
+    for (const m of targetMonths) {
+        try {
+            const d = await (await fetch(`${BASE}/expenses/${year}/${m}`)).json();
+            if (d.expenses) all = all.concat(d.expenses);
+        } catch { /* no data */ }
+    }
 
-    const total = filtered.reduce((s, r) => s + Number(r.amount || 0), 0);
-    const byDept = {};
-    filtered.forEach(r => {
-        const dept = r.departments?.name || 'Sin departamento';
-        byDept[dept] = (byDept[dept] || 0) + Number(r.amount || 0);
+    // FILTER FIRST
+    if (f.department) {
+        const dl = f.department.toLowerCase();
+        all = all.filter(e => e.department?.name?.toLowerCase().includes(dl));
+    }
+    if (f.category) {
+        const cl = f.category.toLowerCase();
+        const mappedKey = mapCategoryKey(cl);
+        // Filter by P&L group: map each expense's category to its P&L group
+        all = all.filter(e => {
+            const catName = e.category?.name?.toLowerCase() || '';
+            const catGroup = getExpenseCategoryGroup(e);
+            return catGroup === mappedKey || catName.includes(cl);
+        });
+    }
+
+    // Aggregate from FILTERED data — grouped by P&L group
+    const total = all.reduce((s, e) => s + Number(e.amount || 0), 0);
+    const byGroup = {}; // P&L group → { total, items: { name → amount } }
+    all.forEach(e => {
+        const catName = e.category?.name || 'Sin categoría';
+        const group = getExpenseCategoryGroup(e);
+        if (!byGroup[group]) byGroup[group] = { total: 0, items: {} };
+        byGroup[group].total += Number(e.amount || 0);
+        byGroup[group].items[catName] = (byGroup[group].items[catName] || 0) + Number(e.amount || 0);
+    });
+
+    // Format: round and sort items within each group
+    const groupLabels = { personal: 'Personal', software: 'Software', commissions: 'Comisiones', marketing: 'Marketing', formacion: 'Formación', adspent: 'Adspent', other: 'Gastos Operativos' };
+    const desglose = {};
+    Object.entries(byGroup).sort(([,a],[,b]) => b.total - a.total).forEach(([g, data]) => {
+        const label = groupLabels[g] || g;
+        desglose[label] = {
+            total: Math.round(data.total),
+            detalle: Object.fromEntries(Object.entries(data.items).sort(([,a],[,b]) => b - a).map(([k,v]) => [k, Math.round(v)]))
+        };
     });
 
     return {
-        año: year,
-        filtro: deptFilter || 'todos los departamentos',
-        total_ingresos: Math.round(total),
-        por_departamento: Object.fromEntries(
-            Object.entries(byDept).sort(([, a], [, b]) => b - a).map(([d, v]) => [d, Math.round(v)])
-        )
+        year, meses: targetMonths,
+        departamento: f.department || 'todos',
+        total: Math.round(total),
+        desglose_por_grupo: desglose,
+        num_gastos: all.length,
+        currency: 'EUR'
     };
 }
 
-async function getExpenses(year, deptFilter) {
-    const { data: expData, error } = await supabase
-        .from('actual_expenses')
-        .select('amount, fiscal_month, departments(name, code), expense_categories(name)')
-        .eq('fiscal_year', year);
-    if (error) throw error;
+// Map expense to P&L groups. First checks dynamic description, then uses hardcoded matches.
+function getExpenseCategoryGroup(exp) {
+    if (exp && exp.description) {
+        // Only use description as section_key if it's a valid known section key
+        const VALID_SECTION_KEYS = new Set(['personal', 'comisiones', 'marketing', 'formacion', 'software', 'gastosOp', 'adspent']);
+        if (VALID_SECTION_KEYS.has(exp.description)) {
+            if (exp.description === 'gastosOp') return 'other';
+            if (exp.description === 'comisiones') return 'commissions';
+            return exp.description;
+        }
+    }
 
-    const { data: payData } = await supabase
-        .from('monthly_payroll')
-        .select('total_company_cost, employee:employees(department:departments(name, code))')
-        .eq('fiscal_year', year);
-
-    const filtered = deptFilter
-        ? (expData || []).filter(r => r.departments?.code === deptFilter || r.departments?.name?.toLowerCase().includes(deptFilter.toLowerCase()))
-        : (expData || []);
-
-    const totalOp = filtered.reduce((s, r) => s + Number(r.amount || 0), 0);
-    const byDept = {};
-    filtered.forEach(r => {
-        const dept = r.departments?.name || 'Sin depto';
-        byDept[dept] = (byDept[dept] || 0) + Number(r.amount || 0);
-    });
-    const byCat = {};
-    filtered.forEach(r => {
-        const cat = r.expense_categories?.name || 'Otros';
-        byCat[cat] = (byCat[cat] || 0) + Number(r.amount || 0);
-    });
-
-    const totalPayroll = (payData || []).reduce((s, r) => s + Number(r.total_company_cost || 0), 0);
-
-    return {
-        año: year,
-        filtro: deptFilter || 'todos',
-        gastos_operativos: Math.round(totalOp),
-        gastos_personal_nomina: Math.round(totalPayroll),
-        total: Math.round(totalOp + totalPayroll),
-        por_departamento: Object.fromEntries(Object.entries(byDept).sort(([, a], [, b]) => b - a).map(([d, v]) => [d, Math.round(v)])),
-        por_categoria: Object.fromEntries(Object.entries(byCat).sort(([, a], [, b]) => b - a).map(([c, v]) => [c, Math.round(v)]))
-    };
+    // Fallback: Exact match from dashboard.js
+    const catName = (exp && exp.category && exp.category.name) ? exp.category.name : ((typeof exp === 'string') ? exp : '');
+    const n = catName || '';
+    
+    // Personal
+    if (['Alba', 'Andrés', 'Leidy', 'Flor', 'Bruno', 'Grego', 'Silvia', 'Angie', 'David', 'Manel', 'Daniel', 'Mery', 'Yure', 'Marco', 'Jorge Orts', 'Externos', 'Externos puntuales', 'Gastos de Personal'].includes(n)) return 'personal';
+    // Marketing
+    if (n === 'Marketing') return 'marketing';
+    // Formación
+    if (n === 'Formación' || n === 'Formacion') return 'formacion';
+    // Software
+    if (n === 'Software') return 'software';
+    // Adspent
+    if (['Adspent', 'Adspent Nutfruit', 'Influencers'].includes(n)) return 'adspent';
+    // Commissions
+    if (['The connector', 'Marc', 'Christian', 'Gemelos', 'Jorge', 'Olga', 'Comisiones', 'Otras comisiones'].includes(n)) return 'commissions';
+    // Gastos operativos
+    return 'other';
 }
 
-async function getDeptSummary(year, deptName) {
-    const { data: depts } = await supabase.from('departments').select('id, name, code, display_order').order('display_order');
-    if (!depts?.length) return { nota: 'Sin departamentos' };
+// ────────────────────────────────────────
+// P&L MATRIX — Real / Presupuesto / Comparativa
+// ────────────────────────────────────────
+async function fetchPL(year, type, f) {
+    const monthsArray = f.months && f.months.length > 0 ? f.months : [1,2,3,4,5,6,7,8,9,10,11,12];
+    const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
-    const targets = deptName
-        ? depts.filter(d => d.name?.toLowerCase().includes(deptName.toLowerCase()) || d.code?.toLowerCase().includes(deptName.toLowerCase()))
-        : depts;
+    if (type === 'compare') {
+        const [real, budget] = await Promise.all([
+            (await fetch(`${BASE}/pl/matrix/${year}?type=real`)).json(),
+            (await fetch(`${BASE}/pl/matrix/${year}?type=budget`)).json()
+        ]);
+        
+        const sumSection = (data, code) => {
+            const sec = data.sections?.find(s => s.code === code);
+            if (!sec) return 0;
+            let rows = sec.rows?.filter(r => r.type === 'item') || [];
+            if (f.department) {
+                const dl = f.department.toLowerCase();
+                rows = rows.filter(r => r.dept?.toLowerCase().includes(dl));
+            }
+            let total = 0;
+            rows.forEach(r => {
+                monthsArray.forEach(m => total += (r.values[m-1] || 0));
+            });
+            return total;
+        };
 
-    if (!targets.length) return { nota: `Departamento "${deptName}" no encontrado` };
-
-    const summaries = await Promise.all(targets.slice(0, 6).map(async (dept) => {
-        // Ingresos del departamento: billing_details
-        const { data: incData } = await supabase
-            .from('billing_details')
-            .select('amount, monthly_billing!inner(fiscal_year)')
-            .eq('department_id', dept.id)
-            .eq('monthly_billing.fiscal_year', year);
-
-        // Gastos del departamento: actual_expenses
-        const { data: expData } = await supabase
-            .from('actual_expenses')
-            .select('amount')
-            .eq('fiscal_year', year)
-            .eq('department_id', dept.id);
-
-        // Empleados del departamento
-        const { data: empData } = await supabase
-            .from('employees')
-            .select('id, first_name, last_name, position, current_salary, is_active')
-            .eq('primary_department_id', dept.id)
-            .eq('is_active', true);
-
-        const ingresos = (incData || []).reduce((s, r) => s + Number(r.amount || 0), 0);
-        const gastos = (expData || []).reduce((s, r) => s + Number(r.amount || 0), 0);
-        const nominaTotal = (empData || []).reduce((s, e) => s + Number(e.current_salary || 0), 0);
+        const revReal = sumSection(real, 'REVENUE');
+        const revBud = sumSection(budget, 'REVENUE');
+        const expReal = sumSection(real, 'EXPENSES');
+        const expBud = sumSection(budget, 'EXPENSES');
 
         return {
-            departamento: dept.name,
-            codigo: dept.code,
-            ingresos_reales: Math.round(ingresos),
-            gastos_operativos: Math.round(gastos),
-            nomina_base_anual: Math.round(nominaTotal * 12),
-            resultado: Math.round(ingresos - gastos - (nominaTotal * 12)),
-            empleados_activos: (empData || []).length
+            year,
+            meses: monthsArray,
+            departamento: f.department || 'todos',
+            comparativa: {
+                ingresos: { real: Math.round(revReal), presupuesto: Math.round(revBud), diferencia: Math.round(revReal - revBud) },
+                gastos: { real: Math.round(expReal), presupuesto: Math.round(expBud), diferencia: Math.round(expReal - expBud) }
+            },
+            currency: 'EUR'
         };
-    }));
+    }
 
-    return { año: year, departamentos: summaries };
+    const data = await (await fetch(`${BASE}/pl/matrix/${year}?type=${type}`)).json();
+    const result = { year, meses: monthsArray, tipo: type === 'budget' ? 'Presupuesto' : 'Real' };
+    
+    for (const section of (data.sections || [])) {
+        let rows = (section.rows || []).filter(r => r.type === 'item');
+
+        if (f.department) {
+            const dl = f.department.toLowerCase();
+            rows = rows.filter(r => r.dept?.toLowerCase().includes(dl));
+        }
+
+        const sumRow = (row) => monthsArray.reduce((s, m) => s + (row.values[m-1] || 0), 0);
+
+        if (section.code === 'REVENUE') {
+            const items = rows.map(r => ({ nombre: r.name, depto: r.dept, total: Math.round(sumRow(r)) })).filter(r => r.total > 0);
+            result.ingresos = { total: items.reduce((s,r) => s + r.total, 0), lineas: items };
+        } else if (section.code === 'EXPENSES') {
+            const items = rows.map(r => ({ nombre: r.name, depto: r.dept, total: Math.round(sumRow(r)) })).filter(r => r.total > 0);
+            result.gastos = { total: items.reduce((s,r) => s + r.total, 0), lineas: items };
+        } else if (section.code === 'EBITDA' && section.values) {
+            result.ebitda = { 
+                total: Math.round(monthsArray.reduce((s, m) => s + (section.values[m-1] || 0), 0)), 
+                desglose_mensual: monthsArray.map(m => ({ mes: MESES[m-1], valor: Math.round(section.values[m-1] || 0) }))
+            };
+        }
+    }
+
+    result.currency = 'EUR';
+    return result;
 }
 
-async function getPayroll(year) {
-    const { data, error } = await supabase
-        .from('monthly_payroll')
-        .select('total_company_cost, gross_salary, fiscal_month, employee:employees(first_name, last_name, position, department:departments(name))')
-        .eq('fiscal_year', year)
-        .order('fiscal_month');
+// ────────────────────────────────────────
+// PAYROLL — Sueldos y Empleados (from P&L Matrix)
+// ────────────────────────────────────────
+async function fetchPayroll(year, months, f) {
+    // Salary data lives in P&L Matrix as individual expense line items under 'personal'
+    const monthsArray = months && months.length > 0 ? months : [1,2,3,4,5,6,7,8,9,10,11,12];
+    const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
-    if (error) throw error;
-    if (!data?.length) return { nota: 'Sin nómina registrada para este año', año: year };
+    try {
+        const data = await (await fetch(`${BASE}/pl/matrix/${year}?type=real`)).json();
+        const expSection = data.sections?.find(s => s.code === 'EXPENSES');
+        if (!expSection) return { error: 'No se encontraron datos de gastos en P&L.' };
 
-    const total = data.reduce((s, r) => s + Number(r.total_company_cost || 0), 0);
-    const byMonth = {};
-    data.forEach(r => {
-        const m = `mes_${r.fiscal_month}`;
-        byMonth[m] = (byMonth[m] || 0) + Number(r.total_company_cost || 0);
+        let rows = expSection.rows?.filter(r => r.type === 'item') || [];
+
+        // Filter to 'personal' category rows only (salaries)
+        rows = rows.filter(r => {
+            const desc = (r.description || '').toLowerCase();
+            const skey = (r.section_key || '').toLowerCase();
+            return desc === 'personal' || skey === 'personal' || desc === 'sueldos' || getExpenseCategoryGroup(r) === 'personal';
+        });
+
+        // Filter by department if requested
+        if (f.department) {
+            const dl = f.department.toLowerCase();
+            rows = rows.filter(r => r.dept?.toLowerCase().includes(dl));
+        }
+
+        // Filter by person name if requested
+        const personFilter = f.person?.toLowerCase();
+        if (personFilter) {
+            rows = rows.filter(r => r.name?.toLowerCase().includes(personFilter));
+        }
+
+        if (rows.length === 0) {
+            return { error: personFilter 
+                ? `No se encontró a "${f.person}" en los gastos de personal del P&L ${year}.`
+                : 'No se encontraron registros de personal para esos criterios.' 
+            };
+        }
+
+        const sumRow = (row) => monthsArray.reduce((s, m) => s + (row.values?.[m-1] || 0), 0);
+        const workers = rows.map(r => ({
+            nombre: r.name,
+            departamento: r.dept,
+            coste_total_periodo: Math.round(sumRow(r)),
+            desglose_mensual: monthsArray.map(m => ({ mes: MESES[m-1], valor: Math.round(r.values?.[m-1] || 0) })).filter(x => x.valor > 0)
+        })).filter(w => w.coste_total_periodo > 0);
+
+        return {
+            year,
+            meses: monthsArray,
+            personas_encontradas: workers.length,
+            total_personal: Math.round(workers.reduce((s, w) => s + w.coste_total_periodo, 0)),
+            detalle: workers,
+            currency: 'EUR',
+            nota: 'Datos extraídos de los gastos de personal registrados en P&L Matrix Real.'
+        };
+    } catch (err) {
+        return { error: 'Error al consultar datos de personal: ' + err.message };
+    }
+}
+
+// ────────────────────────────────────────
+// BILLING — Facturación por cliente
+// ────────────────────────────────────────
+async function fetchBilling(year, months, f) {
+    const targetMonths = months || [1,2,3,4,5,6,7,8,9,10,11,12];
+    const clientTotals = {};
+
+    for (const m of targetMonths) {
+        try {
+            const data = await (await fetch(`${BASE}/billing/matrix?year=${year}&month=${m}`)).json();
+            
+            // Build service name dictionary from columns
+            const serviceNames = {};
+            if (data.columns) {
+                data.columns.forEach(col => {
+                    if (col.id) serviceNames[col.id] = col.name || col.code;
+                });
+            }
+
+            if (data.rows) {
+                data.rows.forEach(row => {
+                    const name = row.client_name || 'Sin cliente';
+                    if (!clientTotals[name]) clientTotals[name] = { name, vertical: row.vertical, total: 0, fee: 0, months: 0, servicios: new Set() };
+                    // Sum all service columns values
+                    const services = row.services || row.values || {};
+                    let rowTotal = 0;
+                    if (typeof services === 'object') {
+                        Object.entries(services).forEach(([k, v]) => { 
+                            if (typeof v === 'number' && v > 0) {
+                                rowTotal += v; 
+                                const sname = serviceNames[k] || k;
+                                clientTotals[name].servicios.add(sname);
+                            }
+                        });
+                    }
+                    if (row.total !== undefined) rowTotal = Number(row.total);
+                    if (row.grand_total !== undefined) rowTotal = Number(row.grand_total);
+                    
+                    if (rowTotal > 0) {
+                        clientTotals[name].total += rowTotal;
+                        clientTotals[name].months++;
+                    }
+                });
+            }
+        } catch { /* no data */ }
+    }
+
+    let clients = Object.values(clientTotals).sort((a,b) => b.total - a.total);
+
+    // Filter by client name
+    if (f.client) {
+        const cl = f.client.toLowerCase();
+        clients = clients.filter(c => c.name.toLowerCase().includes(cl));
+    }
+
+    return {
+        year, meses: targetMonths,
+        total_facturado: Math.round(clients.reduce((s,c) => s + c.total, 0)),
+        clientes: clients.map(c => ({ 
+            nombre: c.name, 
+            vertical: c.vertical, 
+            facturado: Math.round(c.total), 
+            meses_activos: c.months,
+            servicios_facturados: Array.from(c.servicios)
+        })),
+        currency: 'EUR'
+    };
+}
+
+// ────────────────────────────────────────
+// CLIENTS — Datos de clientes + fee config
+// ────────────────────────────────────────
+async function fetchClients(f) {
+    const data = await (await fetch(`${BASE}/clients`)).json();
+    let clients = data.clients || [];
+
+    if (f.client) {
+        const cl = f.client.toLowerCase();
+        clients = clients.filter(c => c.name?.toLowerCase().includes(cl) || c.legal_name?.toLowerCase().includes(cl));
+    }
+
+    return {
+        total_clientes: clients.length,
+        clientes: clients.map(c => ({
+            nombre: c.name,
+            nombre_legal: c.legal_name,
+            email: c.email,
+            vertical: c.vertical?.name || c.vertical,
+            activo: c.is_active !== false,
+            fee: c.fee_config ? {
+                tipo: c.fee_config.fee_type,
+                porcentaje_fijo: c.fee_config.fixed_pct,
+                tipo_calculo: c.fee_config.calculation_type,
+                rangos_variables: c.fee_config.variable_ranges
+            } : null
+        }))
+    };
+}
+
+// ────────────────────────────────────────
+// PAYMENTS — Pagos por mes
+// ────────────────────────────────────────
+async function fetchPayments(year, months, f) {
+    const targetMonths = months || [1,2,3,4,5,6,7,8,9,10,11,12];
+    let all = [];
+
+    for (const m of targetMonths) {
+        try {
+            const d = await (await fetch(`${BASE}/payments/list/${year}/${m}`)).json();
+            if (d.payments) all = all.concat(d.payments);
+        } catch { /* no data */ }
+    }
+
+    // Separate by currency
+    const byCurrency = {};
+    all.forEach(p => {
+        const cur = p.currency || 'EUR';
+        if (!byCurrency[cur]) byCurrency[cur] = { total: 0, pagados: 0, pendientes: 0, count: 0 };
+        const amt = Number(p.total_amount || p.amount || 0);
+        byCurrency[cur].total += amt;
+        byCurrency[cur].count++;
+        if (p.payment_status === 'pagado' || p.status === 'paid') byCurrency[cur].pagados += amt;
+        else byCurrency[cur].pendientes += amt;
     });
 
+    Object.keys(byCurrency).forEach(c => {
+        byCurrency[c].total = Math.round(byCurrency[c].total);
+        byCurrency[c].pagados = Math.round(byCurrency[c].pagados);
+        byCurrency[c].pendientes = Math.round(byCurrency[c].pendientes);
+    });
+
+    // Top beneficiaries
+    const byBen = {};
+    all.forEach(p => {
+        const n = p.beneficiary_name || 'Sin beneficiario';
+        byBen[n] = (byBen[n] || 0) + Number(p.total_amount || p.amount || 0);
+    });
+    const topBen = Object.entries(byBen).sort(([,a],[,b]) => b - a).slice(0, 10).map(([n,t]) => ({ nombre: n, total: Math.round(t) }));
+
+    return { year, meses: targetMonths, por_moneda: byCurrency, top_beneficiarios: topBen, total_pagos: all.length };
+}
+
+// ────────────────────────────────────────
+// USERS
+// ────────────────────────────────────────
+async function fetchUsers() {
+    const data = await (await fetch(`${BASE}/users`)).json();
+    const users = data.users || [];
     return {
-        año: year,
-        total_coste_empresa: Math.round(total),
-        registros: data.length,
-        por_mes: Object.fromEntries(Object.entries(byMonth).sort().map(([m, v]) => [m, Math.round(v)]))
+        total_usuarios: users.length,
+        activos: users.filter(u => u.is_active !== false).length,
+        usuarios: users.map(u => ({ nombre: u.display_name, email: u.email, rol: u.role, departamento: u.department_code, activo: u.is_active }))
     };
 }
 
-async function getEmployees(deptFilter) {
-    let query = supabase
-        .from('employees')
-        .select('first_name, last_name, position, current_salary, hire_date, is_active, department:departments(name, code)')
-        .order('last_name');
+// ════════════════════════════════════════════════════════════
+// ANALYZER
+// ════════════════════════════════════════════════════════════
+async function analyzeResult(question, intent, appData) {
+    const dataStr = JSON.stringify(appData);
+    const trimmed = dataStr.length > 8000 ? dataStr.substring(0, 8000) + '...(truncado)' : dataStr;
 
-    const { data: allEmp, error } = await query;
-    if (error) throw error;
-    if (!allEmp?.length) return { nota: 'Sin empleados registrados' };
+    const prompt = `${ANALYZER_PROMPT}
 
-    const filtered = deptFilter
-        ? allEmp.filter(e => e.department?.code === deptFilter || e.department?.name?.toLowerCase().includes(deptFilter.toLowerCase()))
-        : allEmp;
+PREGUNTA: "${question}"
+INTENCIÓN: ${JSON.stringify({ source: intent.source, filters: intent.filters, question_type: intent.question_type })}
+RESULTADO (datos reales de la app):
+${trimmed}
 
-    return {
-        total: filtered.length,
-        activos: filtered.filter(e => e.is_active).length,
-        empleados: filtered.map(e => ({
-            nombre: `${e.first_name} ${e.last_name}`,
-            cargo: e.position,
-            departamento: e.department?.name || 'Sin depto',
-            salario_actual: e.current_salary,
-            fecha_ingreso: e.hire_date,
-            activo: e.is_active
-        }))
-    };
+Responde de forma clara y concisa en español. SOLO usa los datos del RESULTADO.`;
+
+    return await callLLM(prompt, 1000, 0.3);
 }
 
-async function getSalaryHistory(deptFilter) {
-    const { data, error } = await supabase
-        .from('salary_history')
-        .select('old_salary, new_salary, effective_from, change_reason, employee:employees(first_name, last_name, position, department:departments(name, code))')
-        .order('effective_from', { ascending: false })
-        .limit(30);
+// ════════════════════════════════════════════════════════════
+// LLM — OpenAI primary, Gemini fallback
+// ════════════════════════════════════════════════════════════
+async function callLLM(prompt, maxTokens = 500, temperature = 0) {
+    // ── OpenAI ──
+    if (process.env.OPENAI_API_KEY) {
+        for (let i = 1; i <= 3; i++) {
+            try {
+                if (!openai) openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+                const r = await openai.chat.completions.create({
+                    model: 'gpt-4o-mini',
+                    messages: [{ role: 'user', content: prompt }],
+                    max_tokens: maxTokens, temperature
+                });
+                const t = r.choices[0]?.message?.content?.trim();
+                if (t) return t;
+            } catch (e) {
+                console.error(`DANIA OpenAI ${i}/3:`, e.message);
+                if (i < 3 && e.message.includes('429')) { await new Promise(r => setTimeout(r, 2000 * i)); continue; }
+                break;
+            }
+        }
+    }
 
-    if (error) throw error;
-    if (!data?.length) return { nota: 'Sin historial de cambios salariales registrado' };
+    // ── Gemini fallback ──
+    if (process.env.GEMINI_API_KEY) {
+        for (let i = 1; i <= 3; i++) {
+            try {
+                if (!gemini) gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+                const model = gemini.getGenerativeModel({ model: 'gemini-2.0-flash' });
+                const result = await model.generateContent(prompt);
+                const t = result.response?.text()?.trim();
+                if (t) return t;
+            } catch (e) {
+                console.error(`DANIA Gemini ${i}/3:`, e.message);
+                if (i < 3 && (e.message.includes('429') || e.message.includes('retry') || e.message.includes('Resource'))) {
+                    let delay = 3000 * i;
+                    const m = e.message.match(/retry in (\d+\.?\d*)/i);
+                    if (m) delay = Math.ceil(parseFloat(m[1]) * 1000) + 1000;
+                    await new Promise(r => setTimeout(r, delay));
+                    continue;
+                }
+                break;
+            }
+        }
+    }
 
-    const filtered = deptFilter
-        ? data.filter(r => r.employee?.department?.code === deptFilter || r.employee?.department?.name?.toLowerCase().includes(deptFilter.toLowerCase()))
-        : data;
-
-    return {
-        ultimos_cambios: filtered.slice(0, 20).map(r => ({
-            empleado: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Desconocido',
-            cargo: r.employee?.position,
-            departamento: r.employee?.department?.name,
-            salario_anterior: r.old_salary,
-            salario_nuevo: r.new_salary,
-            variacion: r.old_salary && r.new_salary ? Math.round(((r.new_salary - r.old_salary) / r.old_salary) * 100 * 10) / 10 : null,
-            fecha_efectiva: r.effective_from,
-            motivo: r.change_reason
-        }))
-    };
+    return null;
 }
 
 export default router;

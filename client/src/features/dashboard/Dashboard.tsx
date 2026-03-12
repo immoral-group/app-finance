@@ -221,8 +221,9 @@ const EXPENSE_KEY_MAP: Record<string, { dept: string; items: string[] }[]> = {
 // ALL expense categories for iterating
 const ALL_EXPENSE_KEYS = Object.keys(EXPENSE_KEY_MAP);
 
-const MAIN_DEPTS = ['Immedia', 'Imcontent', 'Immoralia'];
-const VERTICAL_DEPTS = ['Imloyal', 'Imseo', 'Immoral', 'Imsales', 'Imfilms', 'Imfashion'];
+const HUB_CORE = ['Immedia', 'Imcontent', 'Immoralia'];
+const HUB_OPTIONAL = ['Imloyal', 'Imseo', 'Immoral', 'Imsales'];
+const VERTICAL_ONLY = ['Imfilms', 'Imfashion'];
 
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const QUARTERS = [
@@ -233,12 +234,17 @@ const QUARTERS = [
 ];
 
 export default function Dashboard() {
-    const { isDeptHead, isSuperAdmin, profile } = useAuth();
+    const { isDeptHead, isSuperAdmin, isPartner, profile } = useAuth();
 
     // Redirect dept_head to their own department dashboard
     if (isDeptHead() && profile?.department_code) {
         const slug = DEPT_ROUTE_MAP[profile.department_code] || profile.department_code.toLowerCase();
         return <Navigate to={`/departamentos/${slug}`} replace />;
+    }
+
+    // Redirect partner to their commissions view
+    if (isPartner()) {
+        return <Navigate to="/commissions" replace />;
     }
     const [year] = useState(new Date().getFullYear());
     const [visibleWidgets, setVisibleWidgets] = useState<Record<WidgetType, boolean>>({
@@ -247,7 +253,7 @@ export default function Dashboard() {
     });
     const [isConfiguring, setIsConfiguring] = useState(false);
     const [deptFilter, setDeptFilter] = useState<'all' | 'main' | 'verticals'>('main');
-    const [visibleVerticals, setVisibleVerticals] = useState<Set<string>>(new Set(['Imfilms', 'Imfashion']));
+    const [visibleVerticals, setVisibleVerticals] = useState<Set<string>>(new Set());
     const [dashboardTab, setDashboardTab] = useState<DashboardTab>('general');
     const [showGroupForCards, setShowGroupForCards] = useState<Set<string>>(new Set());
 
@@ -732,7 +738,7 @@ export default function Dashboard() {
                                             size="sm"
                                             onClick={() => setDeptFilter('main')}
                                         >
-                                            Departamentos
+                                            Hubs
                                         </Button>
                                         <Button
                                             variant={deptFilter === 'verticals' ? 'default' : 'outline'}
@@ -749,9 +755,9 @@ export default function Dashboard() {
                                             Todos
                                         </Button>
                                     </div>
-                                    {deptFilter === 'verticals' && (
+                                    {deptFilter === 'main' && (
                                         <div className="flex flex-wrap gap-2 justify-end w-full animate-in fade-in slide-in-from-top-1 duration-300">
-                                            {VERTICAL_DEPTS.map(v => (
+                                            {HUB_OPTIONAL.map(v => (
                                                 <label key={v} className={`flex items-center gap-1.5 text-xs cursor-pointer px-3 py-1.5 rounded-full transition-colors border ${visibleVerticals.has(v) ? 'bg-primary/10 border-primary/30 text-primary font-medium' : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'}`}>
                                                     <input
                                                         type="checkbox"
@@ -761,7 +767,12 @@ export default function Dashboard() {
                                                             const newSet = new Set(visibleVerticals);
                                                             if (e.target.checked) newSet.add(v);
                                                             else newSet.delete(v);
-                                                            setVisibleVerticals(newSet);
+                                                            setVisibleVerticals(next => {
+                                                                const s = new Set(next);
+                                                                if (e.target.checked) s.add(v);
+                                                                else s.delete(v);
+                                                                return s;
+                                                            });
                                                         }}
                                                     />
                                                     {v}
@@ -773,15 +784,19 @@ export default function Dashboard() {
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     {deptPerformance
                                         .filter(dept => {
-                                            if (deptFilter === 'all') return MAIN_DEPTS.includes(dept.name) || (VERTICAL_DEPTS.includes(dept.name) && visibleVerticals.has(dept.name));
-                                            if (deptFilter === 'main') return MAIN_DEPTS.includes(dept.name);
-                                            if (deptFilter === 'verticals') return visibleVerticals.has(dept.name);
+                                            if (deptFilter === 'all') return true;
+                                            if (deptFilter === 'main') {
+                                                return HUB_CORE.includes(dept.name) || (HUB_OPTIONAL.includes(dept.name) && visibleVerticals.has(dept.name));
+                                            }
+                                            if (deptFilter === 'verticals') {
+                                                return VERTICAL_ONLY.includes(dept.name);
+                                            }
                                             return false;
                                         })
                                         .sort((a, b) => b.income - a.income)
                                         .map(dept => {
                                             // Compute dynamic margin based on Group % toggle
-                                            const isVertical = VERTICAL_DEPTS.includes(dept.name);
+                                            const isVertical = VERTICAL_ONLY.includes(dept.name) || HUB_OPTIONAL.includes(dept.name);
                                             const isImmoral = dept.key === 'Immoral';
                                             const isGroupVisible = isImmoral ? false : (!isVertical || showGroupForCards.has(dept.key));
                                             // Dynamic resultado & margin: include Group cost only when visible

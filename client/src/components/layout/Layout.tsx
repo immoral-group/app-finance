@@ -1,4 +1,5 @@
-import { Outlet } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { AIChatWidget } from '@/components/shared/AIChatWidget';
@@ -6,20 +7,27 @@ import { useAuth } from '@/context/AuthContext';
 
 export function Layout() {
     const { profile, user } = useAuth();
+    const [isMobileOpen, setIsMobileOpen] = useState(false);
+    const location = useLocation();
+
+    // Cierra el menú al cambiar de ruta
+    useEffect(() => {
+        setIsMobileOpen(false);
+    }, [location.pathname]);
 
     return (
         <div className="min-h-screen bg-muted/40 font-sans">
-            <Sidebar />
-            <div className="pl-64 flex flex-col min-h-screen">
-                <Header />
-                <main className="flex-1 p-6 overflow-x-auto">
-                    <div className="mx-auto max-w-7xl animate-in fade-in zoom-in duration-300">
+            <Sidebar isOpen={isMobileOpen} onClose={() => setIsMobileOpen(false)} />
+            <div className="md:pl-64 flex flex-col min-h-screen w-full transition-all">
+                <Header onMenuToggle={() => setIsMobileOpen(!isMobileOpen)} />
+                <main className="flex-1 p-4 md:p-6 overflow-x-hidden md:overflow-x-auto w-full max-w-[100vw]">
+                    <div className="mx-auto w-full max-w-7xl animate-in fade-in zoom-in duration-300">
                         <Outlet />
                     </div>
                 </main>
             </div>
             {/* ChatHub flotante — disponible en toda la app */}
-            {profile && (
+            {profile && profile.role !== 'partner' && (
                 <AIChatWidget
                     userRole={profile.role}
                     deptCode={profile.department_code}

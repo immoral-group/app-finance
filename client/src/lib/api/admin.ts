@@ -255,6 +255,7 @@ export const adminApi = {
         userRole: string;
         deptCode?: string | null;
         year?: number;
+        history?: Array<{ role: string; content: string }>;
     }) => {
         return fetchApi<{ reply: string; intent: string; entity: string }>('/chat', {
             method: 'POST',

@@ -158,8 +158,21 @@ router.get('/kpis/:year', async (req, res) => {
 
         // 3. Process EXPENSES (Actual Expenses + Payroll)
         // Detailed Mapping based on P&L Structure (Names from DB)
-        const getExpenseCategoryGroup = (name) => {
-            const n = name || '';
+        const getExpenseCategoryGroup = (exp) => {
+            if (exp && exp.description) {
+                // Only use description as section_key if it's a valid known section key
+                const VALID_SECTION_KEYS = new Set(['personal', 'comisiones', 'marketing', 'formacion', 'software', 'gastosOp', 'adspent']);
+                if (VALID_SECTION_KEYS.has(exp.description)) {
+                    if (exp.description === 'gastosOp') return 'other';
+                    if (exp.description === 'comisiones') return 'commissions';
+                    return exp.description;
+                }
+            }
+
+            // Fallback: Exact match
+            const catName = (exp && exp.category && exp.category.name) ? exp.category.name : ((typeof exp === 'string') ? exp : '');
+            const n = catName || '';
+            
             // Personal
             if (['Alba', 'Andrés', 'Leidy', 'Flor', 'Bruno', 'Grego', 'Silvia', 'Angie', 'David', 'Manel', 'Daniel', 'Mery', 'Yure', 'Marco', 'Jorge Orts', 'Externos', 'Externos puntuales', 'Gastos de Personal'].includes(n)) return 'personal';
             // Marketing
@@ -180,6 +193,7 @@ router.get('/kpis/:year', async (req, res) => {
             .from('actual_expenses')
             .select(`
                 amount,
+                description,
                 department_id,
                 departments (code),
                 category:expense_categories (name)
@@ -196,7 +210,7 @@ router.get('/kpis/:year', async (req, res) => {
                 deptStats[bucket].expenses += amount;
 
                 // Breakdown using detailed map
-                const group = getExpenseCategoryGroup(catName);
+                const group = getExpenseCategoryGroup(item);
                 if (deptStats[bucket].breakdown && deptStats[bucket].breakdown[group] !== undefined) {
                     deptStats[bucket].breakdown[group] += amount;
                 } else {

@@ -6,6 +6,8 @@ import { dirname, resolve } from 'path';
 const __dotenvDir = dirname(fileURLToPath(import.meta.url));
 // Carga el .env raíz del monorepo (src/ → admin-service/ → services/ → app-finance/)
 dotenv.config({ path: resolve(__dotenvDir, '../../../.env') });
+// Fallback: load local admin-service .env (for API keys added locally)
+dotenv.config({ path: resolve(__dotenvDir, '../.env') });
 import billingRoutes from './routes/billing.js';
 import expenseRoutes from './routes/expenses.js';
 import periodsRoutes from './routes/periods.js';

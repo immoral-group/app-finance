@@ -19,8 +19,10 @@ import { fetchApi } from '@/lib/api/client';
 import { Input } from '@/components/ui/Input';
 import { toast } from 'sonner';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/context/AuthContext';
 
 export function PartnerDetail({ partner, onBack }: PartnerDetailProps) {
+    const { isPartner } = useAuth();
     const queryClient = useQueryClient();
     const [year, setYear] = useState(new Date().getFullYear());
     const [isAdding, setIsAdding] = useState(false);
@@ -183,9 +185,11 @@ export function PartnerDetail({ partner, onBack }: PartnerDetailProps) {
             <Card className="p-4">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-medium">Operaciones Registradas</h3>
-                    <Button onClick={() => { setIsAdding(true); setEditingId(null); }} size="sm">
-                        <Plus className="mr-2 h-4 w-4" /> Registrar Comisión
-                    </Button>
+                    {!isPartner() && (
+                        <Button onClick={() => { setIsAdding(true); setEditingId(null); }} size="sm">
+                            <Plus className="mr-2 h-4 w-4" /> Registrar Comisión
+                        </Button>
+                    )}
                 </div>
 
                 {isAdding && (
@@ -293,34 +297,50 @@ export function PartnerDetail({ partner, onBack }: PartnerDetailProps) {
                                         <td className="p-4 text-muted-foreground text-xs">{c.notes || '-'}</td>
                                         <td className="p-4 text-right">{formatCurrency(c.client_billing_amount)}</td>
                                         <td className="p-4 text-center">
-                                            <select
-                                                className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer outline-none text-center appearance-none ${c.client_is_paid ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}
-                                                value={c.client_is_paid ? 'paid' : 'pending'}
-                                                onChange={(e) => updateMutation.mutate({ id: c.id, data: { client_is_paid: e.target.value === 'paid' } })}
-                                            >
-                                                <option value="pending" className="text-black bg-white">PENDIENTE</option>
-                                                <option value="paid" className="text-black bg-white">COBRADO</option>
-                                            </select>
+                                            {isPartner() ? (
+                                                <span className={`px-2 py-1 rounded-full text-[10px] font-bold text-center inline-block ${c.client_is_paid ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                    {c.client_is_paid ? 'COBRADO' : 'PENDIENTE'}
+                                                </span>
+                                            ) : (
+                                                <select
+                                                    className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer outline-none text-center appearance-none ${c.client_is_paid ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}
+                                                    value={c.client_is_paid ? 'paid' : 'pending'}
+                                                    onChange={(e) => updateMutation.mutate({ id: c.id, data: { client_is_paid: e.target.value === 'paid' } })}
+                                                >
+                                                    <option value="pending" className="text-black bg-white">PENDIENTE</option>
+                                                    <option value="paid" className="text-black bg-white">COBRADO</option>
+                                                </select>
+                                            )}
                                         </td>
                                         <td className="p-4 text-right">{c.commission_rate}%</td>
                                         <td className="p-4 text-right font-bold text-orange-600">{formatCurrency(c.commission_amount)}</td>
                                         <td className="p-4 text-center">
-                                            <select
-                                                className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer outline-none text-center appearance-none ${c.is_paid ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}
-                                                value={c.is_paid ? 'paid' : 'pending'}
-                                                onChange={(e) => updateMutation.mutate({ id: c.id, data: { is_paid: e.target.value === 'paid' } })}
-                                            >
-                                                <option value="pending" className="text-black bg-white">PENDIENTE</option>
-                                                <option value="paid" className="text-black bg-white">PAGADO</option>
-                                            </select>
+                                            {isPartner() ? (
+                                                <span className={`px-2 py-1 rounded-full text-[10px] font-bold text-center inline-block ${c.is_paid ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                    {c.is_paid ? 'PAGADO' : 'PENDIENTE'}
+                                                </span>
+                                            ) : (
+                                                <select
+                                                    className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer outline-none text-center appearance-none ${c.is_paid ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}
+                                                    value={c.is_paid ? 'paid' : 'pending'}
+                                                    onChange={(e) => updateMutation.mutate({ id: c.id, data: { is_paid: e.target.value === 'paid' } })}
+                                                >
+                                                    <option value="pending" className="text-black bg-white">PENDIENTE</option>
+                                                    <option value="paid" className="text-black bg-white">PAGADO</option>
+                                                </select>
+                                            )}
                                         </td>
                                         <td className="p-4 text-right flex justify-end gap-1">
-                                            <Button variant="ghost" size="sm" className="hover:bg-muted" onClick={() => handleEdit(c)}>
-                                                <Edit2 className="h-4 w-4" />
-                                            </Button>
-                                            <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => { if (confirm('¿Eliminar esta comisión?')) deleteMutation.mutate(c.id); }} disabled={deleteMutation.isPending}>
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
+                                            {!isPartner() && (
+                                                <>
+                                                    <Button variant="ghost" size="sm" className="hover:bg-muted" onClick={() => handleEdit(c)}>
+                                                        <Edit2 className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => { if (confirm('¿Eliminar esta comisión?')) deleteMutation.mutate(c.id); }} disabled={deleteMutation.isPending}>
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </>
+                                            )}
                                         </td>
                                     </tr>
                                 ))

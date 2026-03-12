@@ -389,4 +389,128 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
+// ============================================================
+// POST /users/activity/log — Log a user activity event
+// ============================================================
+router.post('/activity/log', async (req, res) => {
+    try {
+        const { user_id, action, page_path } = req.body;
+
+        if (!user_id) {
+            return res.status(400).json({ error: 'user_id is required' });
+        }
+
+        const ip_address = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null;
+        const user_agent = req.headers['user-agent'] || null;
+
+        const { data, error } = await supabase
+            .from('user_activity_logs')
+            .insert({
+                user_id,
+                action: action || 'login',
+                ip_address,
+                user_agent,
+                page_path: page_path || null,
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.status(201).json({ log: data });
+    } catch (error) {
+        console.error('Error logging activity:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================
+// GET /users/activity/:userId — Get activity logs for a user
+// ============================================================
+router.get('/activity/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { range } = req.query; // 'week', 'month', 'year'
+
+        let fromDate = new Date();
+        if (range === 'year') {
+            fromDate.setFullYear(fromDate.getFullYear() - 1);
+        } else if (range === 'month') {
+            fromDate.setMonth(fromDate.getMonth() - 1);
+        } else {
+            // Default: last 7 days
+            fromDate.setDate(fromDate.getDate() - 7);
+        }
+
+        const { data: logs, error } = await supabase
+            .from('user_activity_logs')
+            .select('*')
+            .eq('user_id', userId)
+            .gte('created_at', fromDate.toISOString())
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        res.json({ logs: logs || [] });
+    } catch (error) {
+        console.error('Error fetching user activity:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================
+// GET /users/activity — Get aggregated activity for all users
+// ============================================================
+router.get('/activity', async (req, res) => {
+    try {
+        const { range } = req.query;
+
+        let fromDate = new Date();
+        if (range === 'year') {
+            fromDate.setFullYear(fromDate.getFullYear() - 1);
+        } else if (range === 'month') {
+            fromDate.setMonth(fromDate.getMonth() - 1);
+        } else {
+            fromDate.setDate(fromDate.getDate() - 7);
+        }
+
+        // Get all logs in range
+        const { data: logs, error } = await supabase
+            .from('user_activity_logs')
+            .select('*')
+            .gte('created_at', fromDate.toISOString())
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Get all user profiles for mapping
+        const { data: profiles } = await supabase
+            .from('user_profiles')
+            .select('id, display_name, email, role, is_active, created_at')
+            .order('created_at', { ascending: false });
+
+        // Aggregate: count per user
+        const userCounts = {};
+        (logs || []).forEach(log => {
+            if (!userCounts[log.user_id]) userCounts[log.user_id] = 0;
+            userCounts[log.user_id]++;
+        });
+
+        // Merge profiles with counts
+        const usersActivity = (profiles || []).map(p => ({
+            ...p,
+            access_count: userCounts[p.id] || 0,
+        }));
+
+        res.json({
+            users: usersActivity,
+            total_logs: (logs || []).length,
+            logs: logs || [],
+        });
+    } catch (error) {
+        console.error('Error fetching all activity:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 export default router;

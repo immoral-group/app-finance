@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { adminApi } from '@/lib/api/admin';
+import { activityApi } from '@/lib/api/activity';
 
 export interface UserPermission {
     module: string;
@@ -83,7 +84,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
             if (session) {
-                fetchProfile().finally(() => setLoading(false));
+                fetchProfile().then(() => {
+                    // Log login activity
+                    if (_event === 'SIGNED_IN' && session.user?.id) {
+                        activityApi.logActivity(session.user.id, 'login').catch(() => { });
+                    }
+                }).finally(() => setLoading(false));
             } else {
                 setProfile(null);
                 setPermissions([]);

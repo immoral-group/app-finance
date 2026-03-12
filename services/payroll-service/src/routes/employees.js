@@ -129,7 +129,6 @@ router.post('/', async (req, res) => {
             value.employee_code = `EMP-${initials}${timestamp}`;
         }
 
-        // Try to insert with currency first, fall back without it if column doesn't exist
         const insertData = { ...value };
 
         const { data: employee, error: createError } = await supabase
@@ -139,27 +138,6 @@ router.post('/', async (req, res) => {
             .single();
 
         if (createError) {
-            // If currency column doesn't exist, retry without it
-            if (createError.message && createError.message.includes('currency')) {
-                const { currency: _currency, ...dataWithoutCurrency } = insertData;
-                const { data: emp2, error: err2 } = await supabase
-                    .from('employees')
-                    .insert(dataWithoutCurrency)
-                    .select()
-                    .single();
-                if (err2) {
-                    return res.status(500).json({ error: 'Failed to create employee', details: err2.message });
-                }
-                // Create initial salary history
-                await supabase.from('salary_history').insert({
-                    employee_id: emp2.id,
-                    old_salary: null,
-                    new_salary: value.current_salary,
-                    effective_from: value.hire_date,
-                    change_reason: 'Initial salary'
-                });
-                return res.json({ success: true, message: 'Employee created successfully', employee: emp2 });
-            }
             return res.status(500).json({ error: 'Failed to create employee', details: createError.message });
         }
 
@@ -249,7 +227,8 @@ router.patch('/:id', async (req, res) => {
             position: Joi.string(),
             primary_department_id: Joi.string().uuid(),
             is_active: Joi.boolean(),
-            employee_code: Joi.string()
+            employee_code: Joi.string(),
+            currency: Joi.string().valid('USD', 'EUR')
         }).min(1);
 
         const { error, value } = schema.validate(req.body);

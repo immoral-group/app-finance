@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { Loader2, TrendingUp, ArrowUpRight } from 'lucide-react';
+import { Loader2, ArrowUpRight } from 'lucide-react';
 
 export default function Login() {
     const navigate = useNavigate();
@@ -105,9 +105,8 @@ export default function Login() {
                         {/* Logo */}
                         <div className="flex justify-center mb-5">
                             <div className="relative">
-                                <div className="absolute inset-0 bg-cyan-400/20 rounded-xl blur-md" />
-                                <div className="relative w-12 h-12 bg-[#0c1525] border border-cyan-500/40 rounded-xl flex items-center justify-center">
-                                    <TrendingUp className="w-6 h-6 text-cyan-400" strokeWidth={1.5} />
+                                <div className="relative w-16 h-16 flex items-center justify-center">
+                                    <img src="/src/assets/logo.png" alt="Logo" className="w-full h-full object-contain" />
                                 </div>
                             </div>
                         </div>

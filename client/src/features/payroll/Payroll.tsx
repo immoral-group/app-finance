@@ -44,7 +44,7 @@ export default function Payroll() {
 
     // Formulario editar empleado
     const [editForm, setEditForm] = useState({
-        first_name: '', last_name: '', email: '', position: '', primary_department_id: '', employee_code: ''
+        first_name: '', last_name: '', email: '', position: '', primary_department_id: '', employee_code: '', currency: 'EUR' as 'EUR' | 'USD'
     });
 
     // Formulario modificación de sueldo (CEO)
@@ -158,6 +158,7 @@ export default function Payroll() {
             position: emp.position,
             primary_department_id: emp.primary_department_id || '',
             employee_code: emp.employee_code,
+            currency: emp.currency || 'EUR',
         });
         setModal('edit');
     };
@@ -249,6 +250,7 @@ export default function Payroll() {
                             <th className="h-10 px-4 text-left font-medium text-muted-foreground">Trabajador</th>
                             <th className="h-10 px-4 text-left font-medium text-muted-foreground">Cargo</th>
                             <th className="h-10 px-4 text-left font-medium text-muted-foreground">Departamento</th>
+                            <th className="h-10 px-4 text-center font-medium text-muted-foreground">Divisa</th>
                             <th className="h-10 px-4 text-right font-medium text-muted-foreground">Salario Actual</th>
                             <th className="h-10 px-4 text-center font-medium text-muted-foreground">Estado</th>
                             <th className="h-10 px-4 text-center font-medium text-muted-foreground">Historial</th>
@@ -257,9 +259,9 @@ export default function Payroll() {
                     </thead>
                     <tbody>
                         {loadingEmployees ? (
-                            <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">Cargando empleados...</td></tr>
+                            <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">Cargando empleados...</td></tr>
                         ) : filteredEmployees.length === 0 ? (
-                            <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">
+                            <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">
                                 {employees.length === 0 ? 'No hay empleados registrados. Haz clic en "Nuevo Empleado".' : 'No se encontraron empleados con esos filtros.'}
                             </td></tr>
                         ) : (
@@ -271,7 +273,12 @@ export default function Payroll() {
                                     </td>
                                     <td className="p-4 text-muted-foreground">{emp.position}</td>
                                     <td className="p-4 text-muted-foreground">{(emp as any).department?.name || '—'}</td>
-                                    <td className="p-4 text-right font-semibold">{formatCurrency(emp.current_salary)}</td>
+                                    <td className="p-4 text-center">
+                                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${emp.currency === 'USD' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                            {emp.currency || 'EUR'}
+                                        </span>
+                                    </td>
+                                    <td className="p-4 text-right font-semibold">{formatCurrency(emp.current_salary, emp.currency || 'EUR')}</td>
                                     <td className="p-4 text-center">
                                         <button
                                             onClick={() => toggleStatusMutation.mutate(emp)}
@@ -454,6 +461,17 @@ export default function Payroll() {
                                         </select>
                                     </div>
                                 </div>
+                                <div className="space-y-1">
+                                    <label className="text-sm font-medium">Moneda de Pago</label>
+                                    <select
+                                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                                        value={editForm.currency || 'EUR'}
+                                        onChange={e => setEditForm({ ...editForm, currency: e.target.value as 'EUR' | 'USD' })}
+                                    >
+                                        <option value="EUR">Euros (EUR)</option>
+                                        <option value="USD">Dólares (USD)</option>
+                                    </select>
+                                </div>
                                 <div className="flex gap-3 pt-2">
                                     <Button variant="outline" className="flex-1" onClick={closeModal}>Cancelar</Button>
                                     <Button className="flex-1" onClick={() => editMutation.mutate()} disabled={editMutation.isPending}>
@@ -492,7 +510,7 @@ export default function Payroll() {
                                         <option value="">Seleccionar trabajador...</option>
                                         {employees.filter(e => e.is_active).map(e => (
                                             <option key={e.id} value={e.id}>
-                                                {e.full_name} — {e.position} ({formatCurrency(e.current_salary)})
+                                                {e.full_name} — {e.position} ({formatCurrency(e.current_salary, e.currency || 'EUR')})
                                             </option>
                                         ))}
                                     </select>
@@ -504,7 +522,7 @@ export default function Payroll() {
                                     return emp ? (
                                         <div className="p-3 bg-muted/30 rounded-lg flex items-center justify-between">
                                             <span className="text-sm text-muted-foreground">Salario actual</span>
-                                            <span className="font-bold text-lg">{formatCurrency(emp.current_salary)}</span>
+                                            <span className="font-bold text-lg">{formatCurrency(emp.current_salary, emp.currency || 'EUR')}</span>
                                         </div>
                                     ) : null;
                                 })()}
@@ -526,9 +544,9 @@ export default function Payroll() {
                                         const isIncrease = adj >= 0;
                                         return (
                                             <p className={`text-sm font-medium mt-1 ${isIncrease ? 'text-green-600' : 'text-red-600'}`}>
-                                                {isIncrease ? '↑' : '↓'} Nuevo salario: {formatCurrency(newSal)}
+                                                {isIncrease ? '↑' : '↓'} Nuevo salario: {formatCurrency(newSal, emp?.currency || 'EUR')}
                                                 <span className="text-muted-foreground font-normal ml-2">
-                                                    ({isIncrease ? '+' : ''}{formatCurrency(adj)})
+                                                    ({isIncrease ? '+' : ''}{formatCurrency(adj, emp?.currency || 'EUR')})
                                                 </span>
                                             </p>
                                         );
@@ -596,7 +614,7 @@ export default function Payroll() {
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
                                         <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Salario Actual</p>
-                                        <p className="text-2xl font-bold text-primary">{formatCurrency(selectedEmployee.current_salary)}</p>
+                                        <p className="text-2xl font-bold text-primary">{formatCurrency(selectedEmployee.current_salary, selectedEmployee.currency || 'EUR')}</p>
                                     </div>
                                     {(() => {
                                         const history: any[] = (employeeDetail?.employee as any)?.salary_history || [];
@@ -614,7 +632,7 @@ export default function Payroll() {
                                             <div className={`p-4 rounded-lg border ${diff >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                                                 <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Última Modificación</p>
                                                 <p className={`text-lg font-bold ${diff >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                                                    {diff >= 0 ? '+' : ''}{formatCurrency(diff)} ({diff >= 0 ? '+' : ''}{pct}%)
+                                                    {diff >= 0 ? '+' : ''}{formatCurrency(diff, selectedEmployee.currency || 'EUR')} ({diff >= 0 ? '+' : ''}{pct}%)
                                                 </p>
                                                 <p className="text-xs text-muted-foreground mt-1">
                                                     {format(new Date(last.effective_from), 'dd MMM yyyy')} — {last.change_reason || 'Sin motivo'}
@@ -650,15 +668,15 @@ export default function Payroll() {
                                                     const pct = diff && h.old_salary ? ((diff / h.old_salary) * 100).toFixed(1) : null;
                                                     return (
                                                         <tr key={i} className={`border-b last:border-0 hover:bg-muted/20 ${i === 0 ? 'bg-muted/10' : ''}`}>
-                                                            <td className="px-4 py-3 text-muted-foreground">{h.old_salary ? formatCurrency(h.old_salary) : <span className="italic text-xs">Inicial</span>}</td>
+                                                            <td className="px-4 py-3 text-muted-foreground">{h.old_salary ? formatCurrency(h.old_salary, selectedEmployee.currency || 'EUR') : <span className="italic text-xs">Inicial</span>}</td>
                                                             <td className="px-4 py-3">
                                                                 {diff !== null ? (
                                                                     <span className={`font-semibold text-xs px-2 py-0.5 rounded-full ${diff >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                                        {diff >= 0 ? '↑' : '↓'} {diff >= 0 ? '+' : ''}{formatCurrency(diff)} ({diff >= 0 ? '+' : ''}{pct}%)
+                                                                        {diff >= 0 ? '↑' : '↓'} {diff >= 0 ? '+' : ''}{formatCurrency(diff, selectedEmployee.currency || 'EUR')} ({diff >= 0 ? '+' : ''}{pct}%)
                                                                     </span>
                                                                 ) : <span className="text-xs text-muted-foreground">Salario inicial</span>}
                                                             </td>
-                                                            <td className="px-4 py-3 font-semibold text-green-700">{formatCurrency(h.new_salary)}</td>
+                                                            <td className="px-4 py-3 font-semibold text-green-700">{formatCurrency(h.new_salary, selectedEmployee.currency || 'EUR')}</td>
                                                             <td className="px-4 py-3 text-sm">{format(new Date(h.effective_from), 'dd MMM yyyy')}</td>
                                                             <td className="px-4 py-3 text-xs text-muted-foreground">{h.change_reason || '—'}</td>
                                                         </tr>
@@ -702,7 +720,7 @@ export default function Payroll() {
                                 <div className="text-sm text-muted-foreground space-y-1">
                                     <p><span className="font-medium">Código:</span> {selectedEmployee.employee_code}</p>
                                     <p><span className="font-medium">Cargo:</span> {selectedEmployee.position}</p>
-                                    <p><span className="font-medium">Salario:</span> {formatCurrency(selectedEmployee.current_salary)}</p>
+                                    <p><span className="font-medium">Salario:</span> {formatCurrency(selectedEmployee.current_salary, selectedEmployee.currency || 'EUR')}</p>
                                 </div>
                                 <div className="flex gap-3 pt-2">
                                     <Button variant="outline" className="flex-1" onClick={closeModal}>Cancelar</Button>

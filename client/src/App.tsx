@@ -14,7 +14,7 @@ import CommissionsIndex from '@/features/commissions/CommissionsIndex';
 import DepartmentPL from '@/features/dashboard/DepartmentPL';
 import PLMatrix from '@/features/pl/PLMatrix';
 import FeeConfiguration from '@/features/fees/FeeConfiguration';
-import PaymentSchedule from '@/features/payments/PaymentSchedule';
+import Payments from '@/features/payments/Payments';
 import Dashboard from '@/features/dashboard/Dashboard';
 import { ClientsPage } from '@/features/clients/ClientsPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
@@ -45,7 +45,7 @@ function App() {
                   <Route path="departamentos/:deptCode" element={<DepartmentPL />} />
                   <Route path="pl-matrix" element={<PLMatrix />} />
                   <Route path="fees" element={<FeeConfiguration />} />
-                  <Route path="payments" element={<PaymentSchedule />} />
+                  <Route path="payments" element={<Payments />} />
                   <Route path="clients" element={<ClientsPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="users" element={<UserManagement />} />

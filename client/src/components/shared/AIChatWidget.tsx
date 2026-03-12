@@ -340,11 +340,16 @@ export function AIChatWidget({ userRole, deptCode, year, currentUser }: ChatHubP
         const t = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
         const userMsg: AIChatMessage = { id: Date.now().toString(), role: 'user', content: trimmed, time: t };
         const loadingMsg: AIChatMessage = { id: 'loading', role: 'assistant', content: '', loading: true };
+
+        // Build history from last messages for conversational memory
+        const prevMessages = aiMessages.filter(m => !m.loading && m.id !== 'welcome');
+        const history = prevMessages.slice(-6).map(m => ({ role: m.role, content: m.content }));
+
         setAiMessages(prev => [...prev, userMsg, loadingMsg]);
         setAiInput('');
         setAiLoading(true);
         try {
-            const res = await adminApi.sendChatMessage({ message: trimmed, userRole, deptCode, year: currentYear });
+            const res = await adminApi.sendChatMessage({ message: trimmed, userRole, deptCode, year: currentYear, history });
             const t2 = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
             setAiMessages(prev => {
                 const updated = prev.filter(m => m.id !== 'loading').concat({
@@ -363,7 +368,7 @@ export function AIChatWidget({ userRole, deptCode, year, currentUser }: ChatHubP
                 return updated;
             });
         } finally { setAiLoading(false); }
-    }, [aiLoading, userRole, deptCode, currentYear]);
+    }, [aiLoading, aiMessages, userRole, deptCode, currentYear]);
 
     const clearAIHistory = () => { localStorage.removeItem(AI_HISTORY_KEY); setAiMessages([WELCOME]); };
 
@@ -405,8 +410,8 @@ export function AIChatWidget({ userRole, deptCode, year, currentUser }: ChatHubP
 
     // AI suggestions
     const suggestions = userRole === 'dept_head'
-        ? ['¿Cuáles son mis gastos este año?', '¿Cómo va el presupuesto?', '¿Cuántos empleados hay?']
-        : ['¿Cuál es el EBITDA del año?', '¿Qué departamento factura más?', '¿Cuándo fue el último cambio de sueldo?'];
+        ? ['¿Cuáles son mis gastos este año?', '¿Presupuesto vs Real?', '¿Cuántos empleados hay?']
+        : ['¿Cuál es el EBITDA del año?', '¿Top 5 pagos más grandes?', '¿Qué departamento factura más?', '¿Gastos por categoría?'];
 
     const filteredUsers = users.filter(u =>
         userName(u).toLowerCase().includes(userSearch.toLowerCase())

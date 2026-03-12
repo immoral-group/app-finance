@@ -1004,10 +1004,52 @@ router.post('/custom-rows', async (req, res) => {
 
 /**
  * DELETE /pl/custom-rows/:id
- * Remove a custom row
+ * Remove a custom row AND its associated actual_expenses records
  */
 router.delete('/custom-rows/:id', async (req, res) => {
     try {
+        // 1. Fetch the custom row to get its details before deleting
+        const { data: row, error: fetchErr } = await supabase
+            .from('pl_custom_rows')
+            .select('*')
+            .eq('id', req.params.id)
+            .single();
+
+        if (fetchErr) throw fetchErr;
+
+        // 2. If it's an expense row, also delete associated actual_expenses
+        if (row && row.block_type === 'expense') {
+            // Find the expense_category by name (case-insensitive)
+            const { data: categories } = await supabase
+                .from('expense_categories')
+                .select('id')
+                .ilike('name', row.item_name);
+
+            if (categories && categories.length > 0) {
+                // Find the department (case-insensitive)
+                const { data: departments } = await supabase
+                    .from('departments')
+                    .select('id')
+                    .ilike('name', row.dept);
+
+                if (departments && departments.length > 0) {
+                    const catIds = categories.map(c => c.id);
+                    const deptIds = departments.map(d => d.id);
+
+                    // Delete actual_expenses for this category + department
+                    const { error: delExpErr } = await supabase
+                        .from('actual_expenses')
+                        .delete()
+                        .in('expense_category_id', catIds)
+                        .in('department_id', deptIds);
+
+                    if (delExpErr) console.error('Error deleting associated expenses:', delExpErr);
+                    else console.log(`Cascade-deleted actual_expenses for ${row.item_name} in ${row.dept}`);
+                }
+            }
+        }
+
+        // 3. Delete the custom row itself
         const { error } = await supabase
             .from('pl_custom_rows')
             .delete()
