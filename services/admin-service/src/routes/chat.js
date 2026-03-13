@@ -16,8 +16,10 @@ function getBaseUrl(req) {
     if (req && req.headers && req.headers.host) {
         const host = req.headers.host;
         if (!host.includes('localhost')) {
-            const proto = req.headers['x-forwarded-proto'] || 'https';
-            return `${proto}://${host}/api/admin`;
+            // Always use the production domain for API calls on Vercel
+            // Preview deployment URLs return 401 for internal API calls
+            const prodHost = process.env.PRODUCTION_URL || 'finance.immoral.es';
+            return `https://${prodHost}/api/admin`;
         }
     }
     return `http://localhost:${PORT}`;
