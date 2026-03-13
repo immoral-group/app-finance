@@ -22,6 +22,24 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.9-payments',
+        date: '2026-03-13',
+        title: 'Módulo de Pagos',
+        description: 'Nuevo módulo para registrar pagos a proveedores y socios, con soporte multidivisa y conciliación automática.',
+        type: 'new_module',
+        moduleKey: 'pagos',
+        icon: 'CreditCard',
+    },
+    {
+        id: 'v1.8-activity-log',
+        date: '2026-03-13',
+        title: 'Monitor de Actividad',
+        description: 'Registro auditable de todas las operaciones de la plataforma en tiempo real. Ahora puedes ver quién hizo qué y cuándo.',
+        type: 'new_module',
+        superadminOnly: true,
+        icon: 'Activity',
+    },
+    {
         id: 'v1.7-ai-copilot',
         date: '2026-03-13',
         title: 'Copiloto Financiero IA (DANIA)',
