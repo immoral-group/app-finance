@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { Loader2, ArrowUpRight } from 'lucide-react';
+import logoPath from '@/assets/logo.png';
 
 export default function Login() {
     const navigate = useNavigate();
@@ -106,7 +107,7 @@ export default function Login() {
                         <div className="flex justify-center mb-5">
                             <div className="relative">
                                 <div className="relative w-16 h-16 flex items-center justify-center">
-                                    <img src="/src/assets/logo.png" alt="Logo" className="w-full h-full object-contain" />
+                                    <img src={logoPath} alt="Logo" className="w-full h-full object-contain" />
                                 </div>
                             </div>
                         </div>

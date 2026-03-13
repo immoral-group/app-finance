@@ -22,6 +22,22 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.7-ai-copilot',
+        date: '2026-03-13',
+        title: 'Copiloto Financiero IA (DANIA)',
+        description: 'Hemos integrado a DANIA, tu asistente financiero. Puedes preguntarle sobre facturación, nóminas, gastos por departamento y hacer consultas avanzadas del P&L directamente desde el chat flotante.',
+        type: 'new_module',
+        icon: 'Bot',
+    },
+    {
+        id: 'v1.6-mobile-view',
+        date: '2026-03-13',
+        title: 'Interfaz Móvil Optimizada',
+        description: 'La aplicación ahora es 100% responsiva. El menú lateral se oculta inteligentemente en teléfonos móviles y se puede abrir con el nuevo botón en la esquina superior izquierda.',
+        type: 'improvement',
+        icon: 'Smartphone',
+    },
+    {
         id: 'v1.5-partner-restrictions',
         date: '2026-03-10',
         title: 'Espacios de Partner Restringidos',

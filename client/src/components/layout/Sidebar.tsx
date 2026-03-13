@@ -11,6 +11,7 @@ import { NAV_ITEMS } from '@/lib/constants';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { getModuleHighlights, dismissModuleHighlight, ChangelogEntry } from '@/lib/changelog';
+import logoPath from '@/assets/logo.png';
 
 const Icons: Record<string, any> = {
     LayoutDashboard, Receipt, BarChart3, CreditCard, Users,
@@ -241,7 +242,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                 <div className={cn(
                     'h-9 w-9 flex items-center justify-center flex-shrink-0 relative overflow-hidden',
                 )}>
-                    <img src="/src/assets/logo.png" alt="Logo" className="h-full w-full object-contain" />
+                    <img src={logoPath} alt="Logo" className="h-full w-full object-contain" />
                 </div>
 
                 <div>
