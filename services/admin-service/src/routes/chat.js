@@ -148,7 +148,7 @@ router.post('/', async (req, res) => {
         
         // Temporary debug info for Vercel troubleshooting
         const debugInfo = (req.headers?.host && !req.headers.host.includes('localhost'))
-            ? `\n\n---\n🔧 DEBUG: BASE=${BASE} | intent=${intent.source} | dataKeys=${Object.keys(appData||{}).join(',')}`
+            ? `\n\n---\n🔧 DEBUG: BASE=${BASE} | intent=${intent.source} | dataKeys=${Object.keys(appData||{}).join(',')} | error=${appData?.error || 'none'}`
             : '';
         res.json({ reply: (reply || '⚠️ No pude generar una respuesta. Intenta reformular tu pregunta.') + debugInfo, intent: intent.source, entity: intent.source });
 
