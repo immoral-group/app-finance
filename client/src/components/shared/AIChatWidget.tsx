@@ -446,7 +446,7 @@ export function AIChatWidget({ userRole, deptCode, year, currentUser }: ChatHubP
                         /* Expanded: full round button */
                         <button
                             onClick={() => { setIsOpen(true); setPanel('home'); }}
-                            className="mb-6 mr-6 w-14 h-14 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-2xl flex items-center justify-center hover:scale-110 transition-all duration-200 relative"
+                            className="mb-4 mr-4 md:mb-6 md:mr-6 w-14 h-14 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-2xl flex items-center justify-center hover:scale-110 transition-all duration-200 relative"
                             title="Comunicaciones"
                         >
                             <MessageSquare className="w-6 h-6" />
@@ -463,7 +463,9 @@ export function AIChatWidget({ userRole, deptCode, year, currentUser }: ChatHubP
 
             {/* ── Panel principal ── */}
             {isOpen && (
-                <div className="fixed bottom-6 right-6 z-50 w-[400px] bg-white rounded-2xl shadow-2xl border border-gray-100 flex flex-col overflow-hidden" style={{ height: '560px' }}>
+                <div className="fixed inset-0 z-50 bg-white flex flex-col overflow-hidden md:inset-auto md:bottom-6 md:right-6 md:w-[400px] md:rounded-2xl md:shadow-2xl md:border md:border-gray-100" style={{ height: undefined }} >
+                <style>{`@media (min-width: 768px) { .chat-panel-height { height: 560px !important; } }`}</style>
+                <div className="chat-panel-height flex flex-col flex-1 overflow-hidden">
 
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-700 text-white flex-shrink-0">
@@ -771,6 +773,7 @@ export function AIChatWidget({ userRole, deptCode, year, currentUser }: ChatHubP
                             )}
                         </div>
                     )}
+                </div>
                 </div>
             )}
         </>
