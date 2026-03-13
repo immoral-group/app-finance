@@ -10,7 +10,11 @@ dotenv.config({ path: resolve(__chatDir, '../../.env') });
 
 const router = express.Router();
 const PORT = process.env.PORT || 3010;
-const BASE = `http://localhost:${PORT}`;
+
+// On Vercel, use the deployment URL; locally, use localhost
+const BASE = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}/api/admin`
+    : `http://localhost:${PORT}`;
 
 let openai = null;
 let gemini = null;
