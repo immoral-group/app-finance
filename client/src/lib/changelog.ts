@@ -27,7 +27,7 @@ export const CHANGELOG: ChangelogEntry[] = [
         title: 'Módulo de Pagos',
         description: 'Nuevo módulo para registrar pagos a proveedores y socios, con soporte multidivisa y conciliación automática.',
         type: 'new_module',
-        moduleKey: 'pagos',
+        moduleKey: 'payments',
         icon: 'CreditCard',
     },
     {
