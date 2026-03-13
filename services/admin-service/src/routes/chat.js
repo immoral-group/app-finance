@@ -138,11 +138,19 @@ router.post('/', async (req, res) => {
         }
 
         // ── Step 2: Fetch Data ──
+        const BASE = getBaseUrl(req);
+        console.log('[DANIA DEBUG] BASE URL:', BASE, '| Host:', req.headers?.host, '| Proto:', req.headers?.['x-forwarded-proto']);
         const appData = await fetchAppData(intent, req);
+        console.log('[DANIA DEBUG] appData keys:', Object.keys(appData || {}));
 
         // ── Step 3: Analyze ──
         const reply = await analyzeResult(message, intent, appData);
-        res.json({ reply: reply || '⚠️ No pude generar una respuesta. Intenta reformular tu pregunta.', intent: intent.source, entity: intent.source });
+        
+        // Temporary debug info for Vercel troubleshooting
+        const debugInfo = (req.headers?.host && !req.headers.host.includes('localhost'))
+            ? `\n\n---\n🔧 DEBUG: BASE=${BASE} | intent=${intent.source} | dataKeys=${Object.keys(appData||{}).join(',')}`
+            : '';
+        res.json({ reply: (reply || '⚠️ No pude generar una respuesta. Intenta reformular tu pregunta.') + debugInfo, intent: intent.source, entity: intent.source });
 
     } catch (err) {
         console.error('DANIA Error:', err);
