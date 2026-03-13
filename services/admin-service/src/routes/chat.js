@@ -11,10 +11,17 @@ dotenv.config({ path: resolve(__chatDir, '../../.env') });
 const router = express.Router();
 const PORT = process.env.PORT || 3010;
 
-// On Vercel, use the deployment URL; locally, use localhost
-const BASE = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}/api/admin`
-    : `http://localhost:${PORT}`;
+// Derive BASE URL dynamically from the incoming request
+function getBaseUrl(req) {
+    if (req && req.headers && req.headers.host) {
+        const host = req.headers.host;
+        if (!host.includes('localhost')) {
+            const proto = req.headers['x-forwarded-proto'] || 'https';
+            return `${proto}://${host}/api/admin`;
+        }
+    }
+    return `http://localhost:${PORT}`;
+}
 
 let openai = null;
 let gemini = null;
@@ -131,7 +138,7 @@ router.post('/', async (req, res) => {
         }
 
         // ── Step 2: Fetch Data ──
-        const appData = await fetchAppData(intent);
+        const appData = await fetchAppData(intent, req);
 
         // ── Step 3: Analyze ──
         const reply = await analyzeResult(message, intent, appData);
@@ -167,26 +174,27 @@ async function interpretQuery(message, history, currentYear) {
 // ════════════════════════════════════════════════════════════
 // DATA FETCHER — routes to correct internal endpoint
 // ════════════════════════════════════════════════════════════
-async function fetchAppData(intent) {
+async function fetchAppData(intent, req) {
     const { source, filters: f } = intent;
     const year = f?.year || new Date().getFullYear();
+    const BASE = getBaseUrl(req);
 
     // Resolve months directly from new prompt structure
     const months = f?.months?.length > 0 ? f.months : null;
 
     try {
         switch (source) {
-            case 'dashboard': return await fetchDashboard(year, f);
-            case 'expenses':  return await fetchExpenses(year, months, f);
-            case 'pl_real':   return await fetchPL(year, 'real', f);
-            case 'pl_budget': return await fetchPL(year, 'budget', f);
-            case 'pl_compare':return await fetchPL(year, 'compare', f);
-            case 'billing':   return await fetchBilling(year, months, f);
-            case 'clients':   return await fetchClients(f);
-            case 'payments':  return await fetchPayments(year, months, f);
-            case 'payroll':   return await fetchPayroll(year, months, f);
-            case 'users':     return await fetchUsers();
-            default:          return await fetchDashboard(year, f);
+            case 'dashboard': return await fetchDashboard(year, f, BASE);
+            case 'expenses':  return await fetchExpenses(year, months, f, BASE);
+            case 'pl_real':   return await fetchPL(year, 'real', f, BASE);
+            case 'pl_budget': return await fetchPL(year, 'budget', f, BASE);
+            case 'pl_compare':return await fetchPL(year, 'compare', f, BASE);
+            case 'billing':   return await fetchBilling(year, months, f, BASE);
+            case 'clients':   return await fetchClients(f, BASE);
+            case 'payments':  return await fetchPayments(year, months, f, BASE);
+            case 'payroll':   return await fetchPayroll(year, months, f, BASE);
+            case 'users':     return await fetchUsers(BASE);
+            default:          return await fetchDashboard(year, f, BASE);
         }
     } catch (err) {
         console.error(`DANIA fetch error [${source}]:`, err.message);
@@ -197,7 +205,7 @@ async function fetchAppData(intent) {
 // ────────────────────────────────────────
 // DASHBOARD — KPIs anuales + por departamento
 // ────────────────────────────────────────
-async function fetchDashboard(year, f) {
+async function fetchDashboard(year, f, BASE) {
     const data = await (await fetch(`${BASE}/dashboard/kpis/${year}`)).json();
     const depts = data.departmentPerformance || [];
 
@@ -281,7 +289,7 @@ function mapCategoryKey(cat) {
 // ────────────────────────────────────────
 // EXPENSES — Gastos detallados por mes
 // ────────────────────────────────────────
-async function fetchExpenses(year, months, f) {
+async function fetchExpenses(year, months, f, BASE) {
     const targetMonths = months || [1,2,3,4,5,6,7,8,9,10,11,12];
     let all = [];
 
@@ -375,7 +383,7 @@ function getExpenseCategoryGroup(exp) {
 // ────────────────────────────────────────
 // P&L MATRIX — Real / Presupuesto / Comparativa
 // ────────────────────────────────────────
-async function fetchPL(year, type, f) {
+async function fetchPL(year, type, f, BASE) {
     const monthsArray = f.months && f.months.length > 0 ? f.months : [1,2,3,4,5,6,7,8,9,10,11,12];
     const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
@@ -451,7 +459,7 @@ async function fetchPL(year, type, f) {
 // ────────────────────────────────────────
 // PAYROLL — Sueldos y Empleados (from P&L Matrix)
 // ────────────────────────────────────────
-async function fetchPayroll(year, months, f) {
+async function fetchPayroll(year, months, f, BASE) {
     // Salary data lives in P&L Matrix as individual expense line items under 'personal'
     const monthsArray = months && months.length > 0 ? months : [1,2,3,4,5,6,7,8,9,10,11,12];
     const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -514,7 +522,7 @@ async function fetchPayroll(year, months, f) {
 // ────────────────────────────────────────
 // BILLING — Facturación por cliente
 // ────────────────────────────────────────
-async function fetchBilling(year, months, f) {
+async function fetchBilling(year, months, f, BASE) {
     const targetMonths = months || [1,2,3,4,5,6,7,8,9,10,11,12];
     const clientTotals = {};
 
@@ -583,7 +591,7 @@ async function fetchBilling(year, months, f) {
 // ────────────────────────────────────────
 // CLIENTS — Datos de clientes + fee config
 // ────────────────────────────────────────
-async function fetchClients(f) {
+async function fetchClients(f, BASE) {
     const data = await (await fetch(`${BASE}/clients`)).json();
     let clients = data.clients || [];
 
@@ -613,7 +621,7 @@ async function fetchClients(f) {
 // ────────────────────────────────────────
 // PAYMENTS — Pagos por mes
 // ────────────────────────────────────────
-async function fetchPayments(year, months, f) {
+async function fetchPayments(year, months, f, BASE) {
     const targetMonths = months || [1,2,3,4,5,6,7,8,9,10,11,12];
     let all = [];
 
@@ -656,7 +664,7 @@ async function fetchPayments(year, months, f) {
 // ────────────────────────────────────────
 // USERS
 // ────────────────────────────────────────
-async function fetchUsers() {
+async function fetchUsers(BASE) {
     const data = await (await fetch(`${BASE}/users`)).json();
     const users = data.users || [];
     return {
