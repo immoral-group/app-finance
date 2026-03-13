@@ -90,7 +90,7 @@ REGLAS:
 2. Si no hay datos, di: "No hay datos registrados para esa consulta en ese período."
 3. FORMATO NÚMEROS: separador de miles con punto, sin decimales. Ej: 1.234 €.
 4. Muestra exactamente lo que se pidió. Estructura bien la lista con bullet points.
-5. GROUP (Immoral): Si en el resultado ves "gastos_grupo_immoral", presenta una línea aparte: "Además, este departamento asume un X% de los gastos generales de Immoral (Group), equivalentes a Y €."
+5. GROUP (Immoral): Si en el resultado ves "gastos_grupo_immoral", presenta SOLO una línea: "Además, este departamento asume un X% de los gastos generales de Immoral (Group), equivalente a Y €. (Total Group: Z €)". NO muestres el desglose detallado del Group, solo el porcentaje y monto asignado a este departamento.
 6. Al final, agrega un breve párrafo (*) con análisis ejecutivo: sugerencias, alertas de desajustes, tendencias.
 7. Responde de manera profesional y amigable en español.
 8. NO pidas clarificación cuando ya tienes datos. Muestra los datos.`;
@@ -147,12 +147,7 @@ router.post('/', async (req, res) => {
 
         // ── Step 3: Analyze ──
         const reply = await analyzeResult(message, intent, appData);
-        
-        // Temporary debug info for Vercel troubleshooting
-        const debugInfo = (req.headers?.host && !req.headers.host.includes('localhost'))
-            ? `\n\n---\n🔧 DEBUG: BASE=${BASE} | intent=${intent.source} | dataKeys=${Object.keys(appData||{}).join(',')} | error=${appData?.error || 'none'}`
-            : '';
-        res.json({ reply: (reply || '⚠️ No pude generar una respuesta. Intenta reformular tu pregunta.') + debugInfo, intent: intent.source, entity: intent.source });
+        res.json({ reply: reply || '⚠️ No pude generar una respuesta. Intenta reformular tu pregunta.', intent: intent.source, entity: intent.source });
 
     } catch (err) {
         console.error('DANIA Error:', err);
@@ -235,11 +230,17 @@ async function fetchDashboard(year, f, BASE) {
         // Get Group (Immoral) % allocation from the same dashboard data
         const groupDept = depts.find(x => x.code === 'IMMORAL' || x.name.toLowerCase() === 'immoral');
         let gastos_group_info = null;
-        if (groupDept && d.code !== 'IMMORAL') {
-            // Group expenses exist; show the proportion relative to the department
+        if (groupDept && d.code !== 'IMMORAL' && groupDept.expenses > 0) {
+            // Calculate this department's share based on income proportion
+            const totalActiveIncome = depts
+                .filter(x => x.code !== 'IMMORAL' && x.income > 0)
+                .reduce((s, x) => s + x.income, 0);
+            const deptPct = totalActiveIncome > 0 ? (d.income / totalActiveIncome) * 100 : 0;
+            const deptAllocatedAmount = Math.round(groupDept.expenses * (deptPct / 100));
             gastos_group_info = {
-                gastos_totales_group: Math.round(groupDept.expenses),
-                desglose_group: groupDept.breakdown
+                porcentaje_asignado: Math.round(deptPct * 10) / 10 + '%',
+                monto_asignado: deptAllocatedAmount,
+                gastos_totales_group: Math.round(groupDept.expenses)
             };
         }
 
