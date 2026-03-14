@@ -46,7 +46,7 @@ const CommentModal = ({ isOpen, onClose, onSave, onStatusChange, initialValue, i
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
-            <div className="bg-white rounded-lg shadow-xl w-[450px] p-4 animate-in fade-in zoom-in duration-200 flex flex-col gap-4">
+            <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-[450px] p-4 animate-in fade-in zoom-in duration-200 flex flex-col gap-4">
                 <div className="flex justify-between items-center">
                     <h3 className="font-bold text-lg">{title}</h3>
                     <button className="p-1 hover:bg-gray-100 rounded" onClick={onClose}><X className="h-4 w-4" /></button>
@@ -135,7 +135,7 @@ const AddRowModal = ({ isOpen, onClose, onSelectExisting, existingClients }: Add
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
-            <div className="bg-white rounded-lg shadow-xl w-[420px] p-5 animate-in fade-in zoom-in duration-200 flex flex-col gap-4">
+            <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-[420px] p-5 animate-in fade-in zoom-in duration-200 flex flex-col gap-4">
                 <div className="flex justify-between items-center">
                     <h3 className="font-bold text-lg">Agregar Fila</h3>
                     <button className="p-1 hover:bg-gray-100 rounded" onClick={onClose}><X className="h-4 w-4" /></button>

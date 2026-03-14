@@ -204,9 +204,9 @@ export default function UserManagement() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
                         <Shield className="h-6 w-6 text-primary" />
                         Gestión de Usuarios
                     </h1>
@@ -214,22 +214,22 @@ export default function UserManagement() {
                         Administra usuarios, roles, permisos y actividad
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                     <Button
                         variant={activeTab === 'users' ? 'default' : 'outline'}
                         onClick={() => setActiveTab('users')}
-                        className="gap-2"
+                        className="gap-2 text-xs sm:text-sm"
                     >
                         <UsersIcon size={16} />
-                        Directorio de Usuarios
+                        Directorio
                     </Button>
                     <Button
                         variant={activeTab === 'activity' ? 'default' : 'outline'}
                         onClick={() => setActiveTab('activity')}
-                        className="gap-2"
+                        className="gap-2 text-xs sm:text-sm"
                     >
                         <ActivityIcon size={16} />
-                        Monitor de Actividad
+                        Actividad
                     </Button>
                 </div>
             </div>
@@ -258,8 +258,8 @@ export default function UserManagement() {
                         </div>
                     ) : (
                         <Card>
-                            <CardContent className="p-0">
-                                <table className="w-full">
+                            <CardContent className="p-0 overflow-x-auto">
+                                <table className="w-full min-w-[700px]">
                                     <thead>
                                         <tr className="border-b bg-gray-50">
                                             <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Nombre</th>
@@ -351,7 +351,7 @@ export default function UserManagement() {
                                 </CardHeader>
                                 <CardContent className="space-y-6">
                                     {/* Basic Info */}
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium">Nombre</label>
                                             <Input
@@ -398,7 +398,7 @@ export default function UserManagement() {
                                     </div>
 
                                     {/* Role */}
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium">Rol</label>
                                             <select
@@ -447,7 +447,7 @@ export default function UserManagement() {
                                     {/* Permissions */}
                                     {form.role !== 'superadmin' && (
                                         <div className="space-y-3">
-                                            <div className="flex items-center justify-between">
+                                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                                                 <label className="text-sm font-medium">Permisos por Módulo</label>
                                                 <div className="flex gap-2">
                                                     <Button variant="outline" size="sm" className="text-xs h-7" onClick={() => selectAllPermissions(false)}>

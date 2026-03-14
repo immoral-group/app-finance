@@ -136,19 +136,19 @@ export default function BillingMatrix() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Billing Matrix {year}</h1>
-                    <p className="text-muted-foreground mt-1">Spreadsheet view for monthly billing management.</p>
+                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Billing Matrix {year}</h1>
+                    <p className="text-muted-foreground mt-1 text-sm">Spreadsheet view for monthly billing management.</p>
                 </div>
-                <div className="flex items-center gap-4">
-                    <Button variant="outline" className="gap-2" onClick={handleExportCSV} disabled={!matrixData}>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <Button variant="outline" className="gap-2 text-xs md:text-sm" onClick={handleExportCSV} disabled={!matrixData}>
                         <Download size={16} />
                         Export CSV
                     </Button>
-                    <Button className="gap-2" onClick={() => setIsClientModalOpen(true)}>
+                    <Button className="gap-2 text-xs md:text-sm" onClick={() => setIsClientModalOpen(true)}>
                         <UserPlus size={16} />
-                        Add New Client
+                        Add Client
                     </Button>
                 </div>
             </div>

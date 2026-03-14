@@ -275,15 +275,13 @@ function MediaTrackerContent() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Control de Inversión de Medios</h1>
-                    <p className="text-muted-foreground mt-1">Gestión de presupuestos y gasto real por plataforma.</p>
-                </div>
+            <div>
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Control de Inversión de Medios</h1>
+                <p className="text-muted-foreground mt-1 text-sm">Gestión de presupuestos y gasto real por plataforma.</p>
             </div>
 
             {/* Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <Card className="p-6">
                     <p className="text-sm font-medium text-muted-foreground">Inversión Planificada (Total)</p>
                     <h3 className="text-2xl font-bold mt-2">{formatCurrency(totalPlanned)}</h3>
@@ -304,7 +302,7 @@ function MediaTrackerContent() {
             </div>
 
             {/* Filter Bar */}
-            <div className="flex items-center justify-between gap-4 p-4 bg-card border rounded-lg">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 bg-card border rounded-lg">
                 <div className="flex items-center gap-4 flex-1">
                     <PeriodSelector value={date} onChange={setDate} />
                 </div>

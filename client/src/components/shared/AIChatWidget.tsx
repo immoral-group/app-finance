@@ -463,8 +463,8 @@ export function AIChatWidget({ userRole, deptCode, year, currentUser }: ChatHubP
 
             {/* ── Panel principal ── */}
             {isOpen && (
-                <div className="fixed inset-0 z-50 bg-white flex flex-col overflow-hidden md:inset-auto md:bottom-6 md:right-6 md:w-[400px] md:rounded-2xl md:shadow-2xl md:border md:border-gray-100" style={{ height: undefined }} >
-                <style>{`@media (min-width: 768px) { .chat-panel-height { height: 560px !important; } }`}</style>
+                <div className="fixed z-50 bottom-2 right-2 left-2 top-12 bg-white rounded-2xl shadow-2xl border border-gray-100 flex flex-col overflow-hidden md:inset-auto md:bottom-6 md:right-6 md:left-auto md:top-auto md:w-[400px]" style={{ maxHeight: 'calc(100vh - 56px)' }} >
+                <style>{`@media (min-width: 768px) { .chat-panel-height { height: 560px !important; max-height: 560px !important; } }`}</style>
                 <div className="chat-panel-height flex flex-col flex-1 overflow-hidden">
 
                     {/* Header */}

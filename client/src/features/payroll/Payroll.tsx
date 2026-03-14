@@ -189,16 +189,16 @@ export default function Payroll() {
     return (
         <div className="space-y-6 relative">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Gestión de Empleados</h1>
-                    <p className="text-muted-foreground mt-1">Administra tu equipo, salarios e historial de ajustes.</p>
+                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Gestión de Empleados</h1>
+                    <p className="text-muted-foreground mt-1 text-sm">Administra tu equipo, salarios e historial de ajustes.</p>
                 </div>
-                <div className="flex items-center gap-3">
-                    <Button variant="outline" className="gap-2" onClick={() => openUpdateSalary()}>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <Button variant="outline" className="gap-2 text-xs md:text-sm" onClick={() => openUpdateSalary()}>
                         <TrendingUp size={16} /> Modificar Sueldo
                     </Button>
-                    <Button className="gap-2" onClick={() => { setCreateForm(EMPTY_CREATE); setModal('create'); }}>
+                    <Button className="gap-2 text-xs md:text-sm" onClick={() => { setCreateForm(EMPTY_CREATE); setModal('create'); }}>
                         <Plus size={16} /> Nuevo Empleado
                     </Button>
                 </div>
@@ -216,7 +216,7 @@ export default function Payroll() {
                     />
                 </div>
                 <select
-                    className="h-10 px-3 rounded-md border border-input bg-background text-sm min-w-[180px]"
+                    className="h-10 px-3 rounded-md border border-input bg-background text-sm w-full sm:min-w-[180px] sm:w-auto"
                     value={deptFilter}
                     onChange={e => setDeptFilter(e.target.value)}
                 >
@@ -226,7 +226,7 @@ export default function Payroll() {
                     ))}
                 </select>
                 <select
-                    className="h-10 px-3 rounded-md border border-input bg-background text-sm min-w-[150px]"
+                    className="h-10 px-3 rounded-md border border-input bg-background text-sm w-full sm:min-w-[150px] sm:w-auto"
                     value={statusFilter}
                     onChange={e => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
                 >
@@ -242,9 +242,9 @@ export default function Payroll() {
             </div>
 
             {/* Tabla de empleados */}
-            <Card>
+            <Card className="overflow-x-auto">
 
-                <table className="w-full text-sm">
+                <table className="w-full text-sm min-w-[700px]">
                     <thead className="bg-muted/50 border-b">
                         <tr>
                             <th className="h-10 px-4 text-left font-medium text-muted-foreground">Trabajador</th>
@@ -341,7 +341,7 @@ export default function Payroll() {
                                 <Button variant="ghost" size="icon" onClick={closeModal}><X size={20} /></Button>
                             </CardHeader>
                             <CardContent className="p-6 space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1">
                                         <label className="text-sm font-medium">Nombre *</label>
                                         <Input value={createForm.first_name} onChange={e => setCreateForm({ ...createForm, first_name: e.target.value })} placeholder="Ej: Juan" />
@@ -428,7 +428,7 @@ export default function Payroll() {
                                 <Button variant="ghost" size="icon" onClick={closeModal}><X size={20} /></Button>
                             </CardHeader>
                             <CardContent className="p-6 space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1">
                                         <label className="text-sm font-medium">Nombre</label>
                                         <Input value={editForm.first_name} onChange={e => setEditForm({ ...editForm, first_name: e.target.value })} />
@@ -611,7 +611,7 @@ export default function Payroll() {
                             </CardHeader>
                             <CardContent className="p-6 space-y-5">
                                 {/* Salario actual + última modificación */}
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
                                         <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Salario Actual</p>
                                         <p className="text-2xl font-bold text-primary">{formatCurrency(selectedEmployee.current_salary, selectedEmployee.currency || 'EUR')}</p>

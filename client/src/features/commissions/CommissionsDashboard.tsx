@@ -110,7 +110,7 @@ export function CommissionsDashboard() {
             </div>
 
             {/* Top Row KPIs */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <Card className="shadow-sm">
                     <CardContent className="p-5 flex flex-col justify-between h-full">
                         <div className="flex justify-between items-start">
@@ -212,8 +212,8 @@ export function CommissionsDashboard() {
                     ) : filteredCommissions.length === 0 ? (
                         <p className="text-muted-foreground text-sm py-4">No hay comisiones registradas en {renderedPeriodLabel.toLowerCase()}.</p>
                     ) : (
-                        <div className="rounded-md border overflow-hidden">
-                            <table className="w-full text-sm">
+                        <div className="rounded-md border overflow-x-auto overflow-hidden">
+                            <table className="w-full text-sm min-w-[600px]">
                                 <thead className="bg-muted/50 border-b">
                                     <tr>
                                         <th className="h-9 px-4 text-left font-medium text-muted-foreground">Mes/Año</th>

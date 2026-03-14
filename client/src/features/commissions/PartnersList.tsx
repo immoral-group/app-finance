@@ -63,7 +63,7 @@ export function PartnersList({ onSelectPartner }: PartnersListProps) {
 
     return (
         <Card className="p-4">
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
                 <h3 className="text-lg font-medium">Listado de Partners</h3>
                 <Button onClick={() => setIsAdding(true)} size="sm">
                     <Plus className="mr-2 h-4 w-4" /> Agregar Partner
@@ -114,8 +114,8 @@ export function PartnersList({ onSelectPartner }: PartnersListProps) {
                 </div>
             )}
 
-            <div className="rounded-md border">
-                <table className="w-full text-sm">
+            <div className="rounded-md border overflow-x-auto">
+                <table className="w-full text-sm min-w-[550px]">
                     <thead className="bg-muted/50 border-b">
                         <tr>
                             <th className="h-10 px-4 text-left font-medium text-muted-foreground">Nombre del Partner</th>

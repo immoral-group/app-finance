@@ -113,12 +113,12 @@ export const ClientsPage: React.FC = () => {
 
     return (
         <div className="p-6 space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight">Gestión de Clientes</h1>
-                    <p className="text-muted-foreground">Configura los fees, costos de plataforma y datos de facturación.</p>
+                    <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Gestión de Clientes</h1>
+                    <p className="text-muted-foreground text-sm">Configura los fees, costos de plataforma y datos de facturación.</p>
                 </div>
-                <Button onClick={openCreateModal}>
+                <Button onClick={openCreateModal} className="text-xs sm:text-sm">
                     <Plus className="mr-2 h-4 w-4" /> Nuevo Cliente
                 </Button>
             </div>
@@ -138,7 +138,7 @@ export const ClientsPage: React.FC = () => {
                         <div className="flex items-center border rounded-md px-3 bg-white">
                             <Filter className="h-4 w-4 text-muted-foreground mr-2" />
                             <select
-                                className="h-9 text-sm bg-transparent outline-none border-none cursor-pointer min-w-[150px]"
+                                className="h-9 text-sm bg-transparent outline-none border-none cursor-pointer min-w-0 sm:min-w-[150px] w-full sm:w-auto"
                                 value={selectedVertical}
                                 onChange={e => setSelectedVertical(e.target.value)}
                             >
@@ -151,8 +151,8 @@ export const ClientsPage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="rounded-md border">
-                    <table className="w-full text-sm">
+                <div className="rounded-md border overflow-x-auto">
+                    <table className="w-full text-sm min-w-[600px]">
                         <thead className="bg-gray-50 border-b">
                             <tr>
                                 <th className="h-12 px-4 text-left font-medium text-muted-foreground">Cliente</th>

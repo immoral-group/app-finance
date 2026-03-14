@@ -361,12 +361,12 @@ export default function Payments() {
         <div className="space-y-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Payments</h1>
-                    <p className="text-muted-foreground mt-1">Gestión de pagos y beneficiarios</p>
+                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Payments</h1>
+                    <p className="text-muted-foreground mt-1 text-sm">Gestión de pagos y beneficiarios</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <Button variant="outline" size="icon" onClick={handlePrevMonth}><ChevronLeft size={16} /></Button>
-                    <div className="flex items-center px-4 py-2 font-semibold bg-white border rounded-md min-w-[180px] justify-center text-sm">
+                    <div className="flex items-center px-4 py-2 font-semibold bg-white border rounded-md min-w-0 sm:min-w-[180px] justify-center text-sm">
                         {MONTHS[month - 1]} {year}
                     </div>
                     <Button variant="outline" size="icon" onClick={handleNextMonth}><ChevronRight size={16} /></Button>
@@ -471,7 +471,7 @@ export default function Payments() {
                     </div>
 
                     {/* Summary row */}
-                    <div className="flex gap-6 text-sm bg-card border rounded-md px-4 py-2 font-medium">
+                    <div className="flex flex-wrap gap-3 sm:gap-6 text-sm bg-card border rounded-md px-4 py-2 font-medium">
                         <span className="text-muted-foreground">{filteredPayments.length} pagos listados</span>
                         <div className="h-5 w-px bg-border" />
                         <span className="text-green-600 flex items-center gap-2">
@@ -494,7 +494,7 @@ export default function Payments() {
                     {/* Table */}
                     <Card>
                         <div className="rounded-md border overflow-x-auto min-h-[400px]">
-                            <table className="w-full text-sm">
+                            <table className="w-full text-sm min-w-[900px]">
                                 <thead className="bg-muted/50 border-b">
                                     <tr>
                                         <th className="h-10 px-3 text-left font-medium text-muted-foreground">Tipo</th>
@@ -610,7 +610,7 @@ export default function Payments() {
             {/* TAB: BENEFICIARIES */}
             {tab === 'beneficiaries' && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                         <p className="text-muted-foreground">{beneficiaries.length} beneficiarios registrados</p>
                         <Button onClick={() => { setEditingBeneficiary(null); setBeneficiaryForm({ name: '', type: 'transfer', bank_details: '', preferred_payment_method: '', notes: '' }); setShowBeneficiaryForm(true); }} className="gap-2">
                             <Plus size={16} /> Nuevo Beneficiario
@@ -618,8 +618,8 @@ export default function Payments() {
                     </div>
 
                     <Card>
-                        <div className="rounded-md border">
-                            <table className="w-full text-sm">
+                        <div className="rounded-md border overflow-x-auto">
+                            <table className="w-full text-sm min-w-[600px]">
                                 <thead className="bg-muted/50 border-b">
                                     <tr>
                                         <th className="h-10 px-4 text-left font-medium text-muted-foreground">Nombre</th>
@@ -675,7 +675,7 @@ export default function Payments() {
                             <h2 className="text-xl font-bold">{editingPayment ? 'Editar Pago' : 'Nuevo Pago'}</h2>
                             <Button variant="ghost" size="icon" onClick={closePaymentForm}><X size={18} /></Button>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                                 <label className="text-xs font-medium">Tipo de Pago</label>
                                 <select className="w-full h-10 px-3 border rounded-md bg-background text-sm" value={paymentForm.payment_type} onChange={e => setPaymentForm({ ...paymentForm, payment_type: e.target.value, beneficiary_id: '', beneficiary_name: '' })}>
@@ -744,7 +744,7 @@ export default function Payments() {
                                 <label className="text-xs font-medium">Fecha de Vencimiento</label>
                                 <Input type="date" value={paymentForm.due_date} onChange={e => setPaymentForm({ ...paymentForm, due_date: e.target.value })} />
                             </div>
-                            <div className="col-span-2 space-y-1">
+                            <div className="sm:col-span-2 space-y-1">
                                 <label className="text-xs font-medium">Observaciones</label>
                                 <textarea className="w-full px-3 py-2 border rounded-md bg-background text-sm min-h-[60px] resize-y" value={paymentForm.notes} onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })} placeholder="Notas adicionales..." />
                             </div>
