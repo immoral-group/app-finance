@@ -137,7 +137,7 @@ export function WhatsNew() {
             {/* ── Panel ── */}
             {open && (
                 <div
-                    className={`absolute right-0 top-full mt-2 w-[420px] max-h-[80vh] rounded-2xl border shadow-2xl overflow-hidden z-50
+                    className={`absolute right-0 sm:-right-4 md:right-0 top-full mt-2 w-[calc(100vw-32px)] sm:w-[420px] max-h-[80vh] rounded-2xl border shadow-2xl overflow-hidden z-50
                         ${isDark
                             ? 'bg-card/95 border-border backdrop-blur-xl'
                             : 'bg-white/95 border-gray-200/80 backdrop-blur-xl'

@@ -689,7 +689,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                 <table className="w-full text-sm text-left border-collapse">
                     <thead className="sticky top-0 z-40 bg-white shadow-sm">
                         <tr className="border-b bg-muted/20">
-                            <th className="p-2 border-r min-w-[350px] sticky left-0 bg-white z-50 font-bold text-center" rowSpan={2} colSpan={3}>Cliente</th>
+                            <th className="p-2 border-r min-w-[200px] md:min-w-[350px] md:sticky md:left-0 bg-white md:z-50 font-bold text-center" rowSpan={2} colSpan={3}>Cliente</th>
                             <th className="p-2 border-r text-center font-bold text-blue-700 bg-blue-50 group cursor-pointer hover:bg-blue-100" colSpan={4 + immediaSvcs.length}>Immedia</th>
                             <th className="p-2 border-r text-center font-bold text-indigo-700 bg-indigo-50 group cursor-pointer hover:bg-indigo-100" colSpan={imcontentSvcs.length}>Imcontent</th>
                             <th className="p-2 border-r text-center font-bold text-orange-700 bg-orange-50 group cursor-pointer hover:bg-orange-100" colSpan={immoraliaSvcs.length}>Immoralia</th>
@@ -715,7 +715,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                             const rowTotal = calculateRowTotal(row) + (!hasHorasInDB ? Number(row._horas_otros || 0) : 0);
                             return (
                                 <tr key={`${row.client_id}-${rIndex}`} className="border-b hover:bg-slate-50 transition-colors group">
-                                    <td className="p-0 border-r sticky left-0 bg-white group-hover:bg-slate-50 z-30 w-[60px] flex items-center justify-between">
+                                    <td className="p-0 border-r md:sticky md:left-0 bg-white group-hover:bg-slate-50 md:z-30 w-[60px] flex items-center justify-between">
                                         {renderCell(rIndex, 'vencimiento', row.vencimiento, undefined, "h-full w-[35px] border-none rounded-none text-center bg-transparent focus:ring-0 focus:bg-slate-100 px-0 text-xs")}
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
@@ -731,10 +731,10 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                                             </DropdownMenuContent>
                                         </DropdownMenu>
                                     </td>
-                                    <td className="p-0 border-r sticky left-[60px] bg-white group-hover:bg-slate-50 z-30 w-[80px]">
+                                    <td className="p-0 border-r md:sticky md:left-[60px] bg-white group-hover:bg-slate-50 md:z-30 w-[80px]">
                                         {renderCell(rIndex, 'vertical', row.vertical, undefined, "h-full w-full border-none rounded-none text-center bg-transparent focus:ring-0 focus:bg-slate-100 px-1 text-xs font-bold text-blue-600")}
                                     </td>
-                                    <td className="p-2 border-r sticky left-[140px] bg-white group-hover:bg-slate-50 z-30 min-w-[200px] font-medium truncate">{row.client_name}</td>
+                                    <td className="p-2 border-r md:sticky md:left-[140px] bg-white group-hover:bg-slate-50 md:z-30 min-w-[200px] font-medium truncate">{row.client_name}</td>
 
                                     <td className="p-0 border-r">{renderCell(rIndex, 'investment', row.metadata.investment)}</td>
                                     <td className="p-0 border-r min-w-[70px]">{renderCell(rIndex, 'fee_pct', row.metadata.fee_pct, undefined, "h-full w-full border-none rounded-none text-right bg-transparent focus:ring-0 focus:bg-blue-50/50 px-2")}</td>
@@ -786,7 +786,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                                         </td>
                                     )}
 
-                                    <td className="p-2 text-right font-bold bg-slate-100 sticky right-0 min-w-[100px]">
+                                    <td className="p-2 text-right font-bold bg-slate-100 md:sticky md:right-0 min-w-[100px]">
                                         {formatNumber(Math.round(rowTotal))}
                                     </td>
                                 </tr>
@@ -808,7 +808,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                     </tbody>
                     <tfoot className="sticky bottom-0 z-40 bg-slate-900 text-white font-bold shadow-lg">
                         <tr>
-                            <td className="p-3 border-r sticky left-0 bg-slate-900 z-50 text-right" colSpan={3}>TOTALES</td>
+                            <td className="p-3 border-r md:sticky md:left-0 bg-slate-900 md:z-50 text-right text-white" colSpan={3}>TOTALES</td>
                             <td className="p-2 border-r text-right bg-slate-800">{formatNumber(Math.round(totals.investment))}</td>
                             <td className="p-2 border-r bg-slate-800"></td>
                             <td className="p-2 border-r bg-slate-800"></td>
@@ -820,7 +820,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                             {!hasHorasInDB && (
                                 <td className="p-2 border-r text-right text-xs">{totals.horas_otros ? formatNumber(Math.round(totals.horas_otros)) : '-'}</td>
                             )}
-                            <td className="p-2 text-right bg-slate-950 sticky right-0 text-white font-bold">{formatNumber(Math.round(totals.grand_grand))}</td>
+                            <td className="p-2 text-right bg-slate-950 md:sticky md:right-0 text-white font-bold">{formatNumber(Math.round(totals.grand_grand))}</td>
                         </tr>
                     </tfoot>
                 </table>
