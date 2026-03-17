@@ -22,6 +22,7 @@ import usersRoutes from './routes/users.js';
 import chatRoutes from './routes/chat.js';
 import messagesRoutes from './routes/messages.js';
 import notificationsRoutes from './routes/notifications.js';
+import yearManagementRoutes from './routes/year-management.js';
 
 dotenv.config();
 
@@ -46,6 +47,7 @@ app.use('/users', usersRoutes);
 app.use('/chat', chatRoutes);
 app.use('/messages', messagesRoutes);
 app.use('/notifications', notificationsRoutes);
+app.use('/year-management', yearManagementRoutes);
 
 
 // Health Check

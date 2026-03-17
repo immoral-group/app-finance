@@ -410,10 +410,10 @@ export default function PLMatrix() {
         staleTime: 0,
     });
 
-    // Custom rows query
+    // Custom rows query — filtered by year
     const { data: customRowsData } = useQuery({
-        queryKey: ['pl-custom-rows'],
-        queryFn: adminApi.getCustomRows,
+        queryKey: ['pl-custom-rows', year],
+        queryFn: () => adminApi.getCustomRows(year),
         staleTime: 60000,
     });
     const customRows = customRowsData?.rows || [];
@@ -454,7 +454,7 @@ export default function PLMatrix() {
     const handleAddRow = (blockType: 'revenue' | 'expense', sectionKey: string, dept: string) => {
         const name = prompt(`Nombre de la nueva fila en ${dept}:`);
         if (!name || !name.trim()) return;
-        addRowMutation.mutate({ block_type: blockType, section_key: sectionKey, dept, item_name: name.trim() });
+        addRowMutation.mutate({ block_type: blockType, section_key: sectionKey, dept, item_name: name.trim(), fiscal_year: year });
     };
 
     // Helper: find custom row ID for a given (blockType, sectionKey, dept, itemName)

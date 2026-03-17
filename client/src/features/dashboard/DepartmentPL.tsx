@@ -274,10 +274,10 @@ export default function DepartmentPL() {
         staleTime: 0
     });
 
-    // Custom rows query
+    // Custom rows query — filtered by year
     const { data: customRowsData } = useQuery({
-        queryKey: ['pl-custom-rows'],
-        queryFn: adminApi.getCustomRows,
+        queryKey: ['pl-custom-rows', year],
+        queryFn: () => adminApi.getCustomRows(year),
         staleTime: 60000,
     });
     const customRows = customRowsData?.rows || [];

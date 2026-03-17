@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 import eventsRouter from './routes/events.js';
 import { testConnection } from './config/supabase.js';
 
-dotenv.config();
+dotenv.config({ path: '../../.env' });
 
 const app = express();
 const PORT = process.env.PORT || 3001;

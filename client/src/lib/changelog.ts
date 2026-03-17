@@ -22,6 +22,24 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.11-payments-decimals-methods',
+        date: '2026-03-17',
+        title: 'Pagos: Decimales y Nuevos Métodos',
+        description: 'Se habilita el uso de decimales en montos y totales (Base Imponible, Incentivos, etc.). Además, se agregaron PayPal y Payoneer en Métodos de Pago Preferidos para los beneficiarios.',
+        type: 'improvement',
+        moduleKey: 'payments',
+        icon: 'CreditCard',
+    },
+    {
+        id: 'v1.10-pl-year-isolation',
+        date: '2026-03-17',
+        title: 'Aislamiento de Años en P&L',
+        description: 'Las filas personalizadas (Custom Rows) ahora son únicas por año fiscal. Si agregas una fila en 2025, no aparecerá en 2026, manteniendo tu estructura financiera completamente separada y precisa por cada año.',
+        type: 'improvement',
+        moduleKey: 'pl',
+        icon: 'Building2',
+    },
+    {
         id: 'v1.9-payments',
         date: '2026-03-13',
         title: 'Módulo de Pagos',

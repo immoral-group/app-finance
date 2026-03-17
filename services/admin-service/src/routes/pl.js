@@ -275,19 +275,43 @@ router.get('/matrix/:year', async (req, res) => {
             .select('id, name, code')
             .order('name');
 
-        // 2. Fetch Services (for revenue line items)
-        const { data: services } = await supabase
-            .from('services')
-            .select('id, name, code, department_id')
-            .eq('is_active', true)
-            .order('name');
+        // 2. Fetch Services assigned to this year (via junction table)
+        const { data: svcAssignments } = await supabase
+            .from('service_year_assignments')
+            .select('service_id')
+            .eq('fiscal_year', year)
+            .eq('is_active', true);
+        const assignedSvcIds = (svcAssignments || []).map(a => a.service_id);
 
-        // 3. Fetch Expense Categories
-        const { data: expenseCategories } = await supabase
-            .from('expense_categories')
-            .select('id, name, code, parent_category_id, is_general')
-            .eq('is_active', true)
-            .order('display_order');
+        let services = [];
+        if (assignedSvcIds.length > 0) {
+            const { data: svcData } = await supabase
+                .from('services')
+                .select('id, name, code, department_id')
+                .in('id', assignedSvcIds)
+                .eq('is_active', true)
+                .order('name');
+            services = svcData || [];
+        }
+
+        // 3. Fetch Expense Categories assigned to this year (via junction table)
+        const { data: catAssignments } = await supabase
+            .from('category_year_assignments')
+            .select('category_id')
+            .eq('fiscal_year', year)
+            .eq('is_active', true);
+        const assignedCatIds = (catAssignments || []).map(a => a.category_id);
+
+        let expenseCategories = [];
+        if (assignedCatIds.length > 0) {
+            const { data: catData } = await supabase
+                .from('expense_categories')
+                .select('id, name, code, parent_category_id, is_general')
+                .in('id', assignedCatIds)
+                .eq('is_active', true)
+                .order('display_order');
+            expenseCategories = catData || [];
+        }
 
         // 4. Fetch Employees (for personnel costs)
         const { data: employees } = await supabase
@@ -753,7 +777,10 @@ router.post('/matrix/save', async (req, res) => {
                     throw new Error(`Could not create category for: ${item}`);
                 }
                 categoryId = newCat.id;
-                console.log(`Auto-created expense category: ${item} (${categoryId})`);
+                // Assign new category to the current year in junction table
+                await supabase.from('category_year_assignments')
+                    .upsert({ category_id: categoryId, fiscal_year: parseInt(year), is_active: true }, { onConflict: 'category_id, fiscal_year' });
+                console.log(`Auto-created expense category: ${item} (${categoryId}) for year ${year}`);
             }
         }
 
@@ -908,15 +935,21 @@ router.post('/matrix/save', async (req, res) => {
 });
 /**
  * GET /pl/custom-rows
- * Fetch all custom rows
+ * Fetch custom rows filtered by year
  */
 router.get('/custom-rows', async (req, res) => {
     try {
-        const { data, error } = await supabase
+        const { year } = req.query;
+        let query = supabase
             .from('pl_custom_rows')
             .select('*')
             .order('created_at', { ascending: true });
 
+        if (year) {
+            query = query.eq('fiscal_year', year);
+        }
+
+        const { data, error } = await query;
         if (error) throw error;
         res.json({ rows: data || [] });
     } catch (error) {
@@ -930,17 +963,19 @@ router.get('/custom-rows', async (req, res) => {
  * Add a new custom row + auto-create expense_category or service in DB
  */
 router.post('/custom-rows', async (req, res) => {
-    const { block_type, section_key, dept, item_name } = req.body;
+    const { block_type, section_key, dept, item_name, fiscal_year } = req.body;
 
     try {
         if (!block_type || !section_key || !dept || !item_name) {
             return res.status(400).json({ error: 'Missing required fields: block_type, section_key, dept, item_name' });
         }
 
-        // 1. Insert into pl_custom_rows
+        const targetYear = fiscal_year || new Date().getFullYear();
+
+        // 1. Insert into pl_custom_rows with fiscal_year
         const { data: customRow, error: insertErr } = await supabase
             .from('pl_custom_rows')
-            .insert({ block_type, section_key, dept, item_name })
+            .insert({ block_type, section_key, dept, item_name, fiscal_year: targetYear })
             .select()
             .single();
 
@@ -969,11 +1004,20 @@ router.post('/custom-rows', async (req, res) => {
             if (!existingCat) {
                 // Create a new expense_category with a unique code
                 const code = item_name.substring(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, '') + '_' + Date.now().toString(36).slice(-6);
-                await supabase.from('expense_categories').insert({
+                const { data: newCat } = await supabase.from('expense_categories').insert({
                     name: item_name,
                     code: code,
                     is_general: false
-                });
+                }).select('id').single();
+                // Assign to the target year
+                if (newCat) {
+                    await supabase.from('category_year_assignments')
+                        .upsert({ category_id: newCat.id, fiscal_year: targetYear, is_active: true }, { onConflict: 'category_id, fiscal_year' });
+                }
+            } else {
+                // Category exists but may not be assigned to this year
+                await supabase.from('category_year_assignments')
+                    .upsert({ category_id: existingCat.id, fiscal_year: targetYear, is_active: true }, { onConflict: 'category_id, fiscal_year' });
             }
         } else if (block_type === 'revenue' && deptData) {
             // Check if service exists for this dept
@@ -986,12 +1030,21 @@ router.post('/custom-rows', async (req, res) => {
 
             if (!existingSvc) {
                 const code = item_name.substring(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, '') + '_' + Date.now().toString(36).slice(-6);
-                await supabase.from('services').insert({
+                const { data: newSvc } = await supabase.from('services').insert({
                     department_id: deptData.id,
                     name: item_name,
                     code: code,
                     service_type: 'revenue'
-                });
+                }).select('id').single();
+                // Assign to the target year
+                if (newSvc) {
+                    await supabase.from('service_year_assignments')
+                        .upsert({ service_id: newSvc.id, fiscal_year: targetYear, is_active: true }, { onConflict: 'service_id, fiscal_year' });
+                }
+            } else {
+                // Service exists but may not be assigned to this year
+                await supabase.from('service_year_assignments')
+                    .upsert({ service_id: existingSvc.id, fiscal_year: targetYear, is_active: true }, { onConflict: 'service_id, fiscal_year' });
             }
         }
 

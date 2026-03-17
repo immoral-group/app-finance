@@ -86,7 +86,8 @@ router.post('/', async (req, res) => {
             address,
             vertical_id,
             fee_config,
-            notes
+            notes,
+            fiscal_year
         } = req.body;
 
         // Validate required fields
@@ -123,6 +124,11 @@ router.post('/', async (req, res) => {
             .single();
 
         if (error) throw error;
+
+        // Assign to the specified fiscal year (or current year)
+        const targetYear = fiscal_year || new Date().getFullYear();
+        await supabase.from('client_year_assignments')
+            .upsert({ client_id: client.id, fiscal_year: targetYear, is_active: true }, { onConflict: 'client_id, fiscal_year' });
 
         res.status(201).json({ client });
     } catch (error) {
@@ -203,7 +209,7 @@ router.delete('/:id', async (req, res) => {
 router.post('/:id/duplicate', async (req, res) => {
     try {
         const { id } = req.params;
-        const { new_name } = req.body;
+        const { new_name, fiscal_year } = req.body;
 
         if (!new_name) {
             return res.status(400).json({ error: 'New client name is required' });
@@ -238,6 +244,11 @@ router.post('/:id/duplicate', async (req, res) => {
             .single();
 
         if (createError) throw createError;
+
+        // Assign to the specified fiscal year (or current year)
+        const targetYear = fiscal_year || new Date().getFullYear();
+        await supabase.from('client_year_assignments')
+            .upsert({ client_id: duplicate.id, fiscal_year: targetYear, is_active: true }, { onConflict: 'client_id, fiscal_year' });
 
         res.status(201).json({ client: duplicate });
     } catch (error) {

@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatCurrencyWithDecimals } from '@/lib/utils';
 import {
     Plus, Check, X, Search, Edit, Trash2, Loader2, Users,
     Table2, Copy, ChevronLeft, ChevronRight, ClipboardCopy,
@@ -27,6 +27,7 @@ const BENEFICIARY_TYPES = [
 const PAYMENT_TYPES = BENEFICIARY_TYPES;
 
 const ISSUING_BANKS = ['BBVA', 'Wise', 'Mercury Business', 'Mercury Nutfruit Budget'];
+const PAYMENT_METHODS = [...ISSUING_BANKS, 'PayPal', 'Payoneer'];
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
     pendiente: { label: 'Pendiente', color: 'text-amber-700', bg: 'bg-amber-100' },
@@ -409,7 +410,7 @@ export default function Payments() {
                                         <div key={p.id} className="bg-white border border-blue-100 px-3 py-1.5 rounded-md text-sm flex items-center gap-2 shadow-sm">
                                             <span className="font-medium text-blue-950">{p.beneficiary_name}</span>
                                             <span className="text-muted-foreground/40">|</span>
-                                            <span className="font-bold text-blue-700">{formatCurrency(p.total_amount, p.currency)}</span>
+                                            <span className="font-bold text-blue-700">{formatCurrencyWithDecimals(p.total_amount, p.currency)}</span>
                                             {p.due_date && <span className="text-xs text-blue-600/70">Vence: {format(new Date(p.due_date), 'dd/MM/yy')}</span>}
                                         </div>
                                     ))}
@@ -476,17 +477,17 @@ export default function Payments() {
                         <div className="h-5 w-px bg-border" />
                         <span className="text-green-600 flex items-center gap-2">
                             <span>Pagado:</span>
-                            {pagadoEUR > 0 && <span>{formatCurrency(pagadoEUR, 'EUR')}</span>}
+                            {pagadoEUR > 0 && <span>{formatCurrencyWithDecimals(pagadoEUR, 'EUR')}</span>}
                             {pagadoEUR > 0 && pagadoUSD > 0 && <span className="text-muted-foreground/50">|</span>}
-                            {pagadoUSD > 0 && <span>{formatCurrency(pagadoUSD, 'USD')}</span>}
+                            {pagadoUSD > 0 && <span>{formatCurrencyWithDecimals(pagadoUSD, 'USD')}</span>}
                             {pagadoEUR === 0 && pagadoUSD === 0 && <span>€0.00</span>}
                         </span>
                         <div className="h-5 w-px bg-border" />
                         <span className="text-amber-600 flex items-center gap-2">
                             <span>Pendiente:</span>
-                            {pendienteEUR > 0 && <span>{formatCurrency(pendienteEUR, 'EUR')}</span>}
+                            {pendienteEUR > 0 && <span>{formatCurrencyWithDecimals(pendienteEUR, 'EUR')}</span>}
                             {pendienteEUR > 0 && pendienteUSD > 0 && <span className="text-muted-foreground/50">|</span>}
-                            {pendienteUSD > 0 && <span>{formatCurrency(pendienteUSD, 'USD')}</span>}
+                            {pendienteUSD > 0 && <span>{formatCurrencyWithDecimals(pendienteUSD, 'USD')}</span>}
                             {pendienteEUR === 0 && pendienteUSD === 0 && <span>€0.00</span>}
                         </span>
                     </div>
@@ -546,13 +547,13 @@ export default function Payments() {
                                                     <td className="p-3 text-muted-foreground">{p.issuing_bank || '—'}</td>
                                                     <td className="p-3 text-xs text-muted-foreground">{p.amount_admk || '—'}</td>
                                                     <td className="p-3 text-xs text-muted-foreground">{p.amount_infinite || '—'}</td>
-                                                    <td className="p-3 text-right">{p.base_amount ? formatCurrency(p.base_amount, p.currency) : '—'}</td>
-                                                    <td className="p-3 text-right text-emerald-600/80">{p.incentives_amount ? formatCurrency(p.incentives_amount, p.currency) : '—'}</td>
-                                                    <td className="p-3 text-right text-rose-600/80">{p.commission_amount ? formatCurrency(p.commission_amount, p.currency) : '—'}</td>
+                                                    <td className="p-3 text-right">{p.base_amount ? formatCurrencyWithDecimals(p.base_amount, p.currency) : '—'}</td>
+                                                    <td className="p-3 text-right text-emerald-600/80">{p.incentives_amount ? formatCurrencyWithDecimals(p.incentives_amount, p.currency) : '—'}</td>
+                                                    <td className="p-3 text-right text-rose-600/80">{p.commission_amount ? formatCurrencyWithDecimals(p.commission_amount, p.currency) : '—'}</td>
                                                     <td className="p-3 text-right font-bold">
                                                         {totalEUR > 0 ? (
                                                             <span className="flex items-center justify-end">
-                                                                {formatCurrency(totalEUR)}
+                                                                {formatCurrencyWithDecimals(totalEUR)}
                                                                 <CopyButton text={String(totalEUR)} />
                                                             </span>
                                                         ) : '—'}
@@ -560,7 +561,7 @@ export default function Payments() {
                                                     <td className="p-3 text-right font-bold text-blue-600">
                                                         {totalUSD > 0 ? (
                                                             <span className="flex items-center justify-end">
-                                                                {formatCurrency(totalUSD, 'USD')}
+                                                                {formatCurrencyWithDecimals(totalUSD, 'USD')}
                                                                 <CopyButton text={String(totalUSD)} />
                                                             </span>
                                                         ) : '—'}
@@ -724,20 +725,20 @@ export default function Payments() {
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-medium">Base Imponible</label>
-                                <Input type="number" value={paymentForm.base_amount} onChange={e => setPaymentForm({ ...paymentForm, base_amount: e.target.value })} placeholder="0" />
+                                <Input type="number" step="0.01" value={paymentForm.base_amount} onChange={e => setPaymentForm({ ...paymentForm, base_amount: e.target.value })} placeholder="0" />
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-medium">Incentivos</label>
-                                <Input type="number" value={paymentForm.incentives_amount} onChange={e => setPaymentForm({ ...paymentForm, incentives_amount: e.target.value })} placeholder="0" />
+                                <Input type="number" step="0.01" value={paymentForm.incentives_amount} onChange={e => setPaymentForm({ ...paymentForm, incentives_amount: e.target.value })} placeholder="0" />
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-medium">Comisión</label>
-                                <Input type="number" value={paymentForm.commission_amount} onChange={e => setPaymentForm({ ...paymentForm, commission_amount: e.target.value })} placeholder="0" />
+                                <Input type="number" step="0.01" value={paymentForm.commission_amount} onChange={e => setPaymentForm({ ...paymentForm, commission_amount: e.target.value })} placeholder="0" />
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-medium">Total a Pagar (calculado)</label>
                                 <div className="h-10 px-3 border rounded-md bg-muted/30 flex items-center text-sm font-bold">
-                                    {formatCurrency(calculatedTotal, paymentForm.currency)}
+                                    {formatCurrencyWithDecimals(calculatedTotal, paymentForm.currency)}
                                 </div>
                             </div>
                             <div className="space-y-1">
@@ -787,7 +788,7 @@ export default function Payments() {
                                 <label className="text-sm font-medium">Método de Pago Preferido</label>
                                 <select className="w-full h-10 px-3 border rounded-md bg-background text-sm" value={beneficiaryForm.preferred_payment_method} onChange={e => setBeneficiaryForm({ ...beneficiaryForm, preferred_payment_method: e.target.value })}>
                                     <option value="">Seleccionar...</option>
-                                    {ISSUING_BANKS.map(b => <option key={b} value={b}>{b}</option>)}
+                                    {PAYMENT_METHODS.map(b => <option key={b} value={b}>{b}</option>)}
                                 </select>
                             </div>
                             <div className="space-y-1">

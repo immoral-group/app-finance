@@ -293,10 +293,10 @@ export default function Dashboard() {
         queryFn: () => adminApi.getPLMatrix(year, 'real'),
     });
 
-    // Custom rows for dynamic structures
+    // Custom rows for dynamic structures — filtered by year
     const { data: customRowsData } = useQuery({
-        queryKey: ['pl-custom-rows'],
-        queryFn: adminApi.getCustomRows,
+        queryKey: ['pl-custom-rows', year],
+        queryFn: () => adminApi.getCustomRows(year),
         staleTime: 60000,
     });
     const customRows = customRowsData?.rows || [];

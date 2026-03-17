@@ -14,6 +14,15 @@ export function formatCurrency(amount: number, currency: string = 'EUR') {
     }).format(Math.round(amount))
 }
 
+export function formatCurrencyWithDecimals(amount: number, currency: string = 'EUR') {
+    return new Intl.NumberFormat('es-ES', {
+        style: 'currency',
+        currency: currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(amount)
+}
+
 export function formatNumber(value: number) {
     return new Intl.NumberFormat('es-ES', {
         minimumFractionDigits: 0,

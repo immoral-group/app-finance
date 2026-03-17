@@ -324,11 +324,12 @@ export const adminApi = {
     },
 
     // P&L Custom Rows
-    getCustomRows: () => {
-        return fetchApi<{ rows: { id: string; block_type: string; section_key: string; dept: string; item_name: string }[] }>('/pl/custom-rows');
+    getCustomRows: (year?: number) => {
+        const query = year ? `?year=${year}` : '';
+        return fetchApi<{ rows: { id: string; block_type: string; section_key: string; dept: string; item_name: string }[] }>(`/pl/custom-rows${query}`);
     },
 
-    addCustomRow: (data: { block_type: 'revenue' | 'expense'; section_key: string; dept: string; item_name: string }) => {
+    addCustomRow: (data: { block_type: 'revenue' | 'expense'; section_key: string; dept: string; item_name: string; fiscal_year?: number }) => {
         return fetchApi<{ success: boolean; row: any }>('/pl/custom-rows', {
             method: 'POST',
             body: JSON.stringify(data)

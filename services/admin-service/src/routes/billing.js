@@ -21,19 +21,33 @@ router.get('/matrix', async (req, res) => {
 
         console.log(`Fetching matrix for ${year}-${month}`);
 
-        // 1. Fetch all active clients
-        // Removed separate contracts join to avoid schema cache issues if relationship is missing
-        const { data: clients, error: clientError } = await supabase
-            .from('clients')
-            .select(`
-                id,
-                name,
-                vertical_id,
-                fee_config,
-                vertical:verticals(code, name)
-            `)
-            .eq('is_active', true)
-            .order('name');
+        // 1. Fetch clients assigned to this year (via junction table)
+        const { data: clientAssignments } = await supabase
+            .from('client_year_assignments')
+            .select('client_id')
+            .eq('fiscal_year', year)
+            .eq('is_active', true);
+
+        const assignedClientIds = (clientAssignments || []).map(a => a.client_id);
+
+        let clients = [];
+        let clientError = null;
+        if (assignedClientIds.length > 0) {
+            const result = await supabase
+                .from('clients')
+                .select(`
+                    id,
+                    name,
+                    vertical_id,
+                    fee_config,
+                    vertical:verticals(code, name)
+                `)
+                .in('id', assignedClientIds)
+                .eq('is_active', true)
+                .order('name');
+            clients = result.data || [];
+            clientError = result.error;
+        }
 
         if (clientError) throw clientError;
 
@@ -56,15 +70,30 @@ router.get('/matrix', async (req, res) => {
             console.warn("Could not fetch contracts:", contractError.message);
         }
 
-        // 2. Fetch all services ordered by department display_order, then service display_order
-        const { data: services, error: serviceError } = await supabase
-            .from('services')
-            .select(`
-                id, code, name, department_id, display_order,
-                department:departments(id, code, name, display_order)
-            `)
-            .order('display_order', { ascending: true })
-            .order('display_order', { foreignTable: 'departments', ascending: true });
+        // 2. Fetch services assigned to this year (via junction table)
+        const { data: serviceAssignments } = await supabase
+            .from('service_year_assignments')
+            .select('service_id')
+            .eq('fiscal_year', year)
+            .eq('is_active', true);
+
+        const assignedServiceIds = (serviceAssignments || []).map(a => a.service_id);
+
+        let services = [];
+        let serviceError = null;
+        if (assignedServiceIds.length > 0) {
+            const result = await supabase
+                .from('services')
+                .select(`
+                    id, code, name, department_id, display_order,
+                    department:departments(id, code, name, display_order)
+                `)
+                .in('id', assignedServiceIds)
+                .order('display_order', { ascending: true })
+                .order('display_order', { foreignTable: 'departments', ascending: true });
+            services = result.data || [];
+            serviceError = result.error;
+        }
 
         if (serviceError) throw serviceError;
 
