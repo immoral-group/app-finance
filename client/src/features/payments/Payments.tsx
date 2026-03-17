@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
-import { formatCurrency, formatCurrencyWithDecimals } from '@/lib/utils';
+import { formatCurrencyWithDecimals } from '@/lib/utils';
 import {
     Plus, Check, X, Search, Edit, Trash2, Loader2, Users,
     Table2, Copy, ChevronLeft, ChevronRight, ClipboardCopy,
