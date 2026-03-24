@@ -10,7 +10,7 @@ export interface ChangelogEntry {
     date: string; // ISO date (YYYY-MM-DD)
     title: string;
     description: string;
-    type: 'new_module' | 'improvement' | 'fix';
+    type: 'new_module' | 'improvement' | 'fix' | 'in_progress';
     moduleKey?: string;       // ties to ALL_MODULES key — if set, requires permission
     superadminOnly?: boolean;
     icon?: string;            // lucide icon name
@@ -21,6 +21,42 @@ export interface ChangelogEntry {
  * The component will filter based on user permissions automatically.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+    {
+        id: 'v1.15-password-recovery',
+        date: '2026-03-24',
+        title: 'Recuperación de Contraseña',
+        description: 'Estamos implementando la función de "¿Olvidaste tu contraseña?" en la pantalla de login. Pronto podrás restablecer tu contraseña directamente desde tu email.',
+        type: 'in_progress',
+        icon: 'LogIn',
+    },
+    {
+        id: 'v1.14-commission-admin-panel',
+        date: '2026-03-24',
+        title: 'Panel de Gestión de Solicitudes',
+        description: 'Los administradores ahora ven un panel destacado en el Dashboard de Comisiones con las solicitudes de pago pendientes. Pueden aprobar, rechazar o eliminar solicitudes directamente, con historial completo y descarga de facturas.',
+        type: 'new_module',
+        moduleKey: 'commissions',
+        superadminOnly: true,
+        icon: 'Handshake',
+    },
+    {
+        id: 'v1.13-commission-payment-request',
+        date: '2026-03-24',
+        title: 'Solicitud de Pago de Comisiones',
+        description: 'Los partners ahora pueden solicitar el pago de sus comisiones pendientes adjuntando su factura. Se puede solicitar un mes específico o todas las comisiones del año. El admin recibe notificación por email y en la app.',
+        type: 'new_module',
+        moduleKey: 'commissions',
+        icon: 'Handshake',
+    },
+    {
+        id: 'v1.12-commission-month-filter',
+        date: '2026-03-24',
+        title: 'Filtro por Mes en Comisiones',
+        description: 'El detalle de cada partner ahora incluye un filtro rápido por mes. Ya no es necesario ver todas las operaciones del año, puedes seleccionar el mes exacto que necesitas revisar.',
+        type: 'improvement',
+        moduleKey: 'commissions',
+        icon: 'Handshake',
+    },
     {
         id: 'v1.11-payments-decimals-methods',
         date: '2026-03-17',

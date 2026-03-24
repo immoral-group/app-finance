@@ -5,7 +5,7 @@
     "type": "module",
     "scripts": {
         "install:all": "npm install && cd client && npm install && cd ../services/admin-service && npm install && cd ../billing-service && npm install && cd ../payroll-service && npm install && cd ../commissions-service && npm install",
-        "dev": "concurrently \"npm run dev:client\" \"npm run dev:admin\" \"npm run dev:billing\" \"npm run dev:payroll\" \"npm run dev:commissions\"",
+        "dev": "dotenv -e .env -- concurrently \"npm run dev:client\" \"npm run dev:admin\" \"npm run dev:billing\" \"npm run dev:payroll\" \"npm run dev:commissions\"",
         "dev:client": "cd client && npm run dev",
         "dev:admin": "cd services/admin-service && npm run dev",
         "dev:billing": "cd services/billing-service && npm run dev",
@@ -18,6 +18,7 @@
         "services/*"
     ],
     "devDependencies": {
-        "concurrently": "^8.2.2"
+        "concurrently": "^8.2.2",
+        "dotenv-cli": "^11.0.0"
     }
 }

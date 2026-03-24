@@ -33,6 +33,24 @@ export interface PartnerCommission {
     notes?: string;
 }
 
+export interface PaymentRequest {
+    id: string;
+    partner_id: string;
+    partner_email: string;
+    fiscal_year: number;
+    fiscal_month: number;
+    total_amount: number;
+    invoice_path: string;
+    invoice_filename?: string;
+    invoice_url?: string;
+    status: 'pending' | 'approved' | 'rejected';
+    notes?: string;
+    admin_notes?: string;
+    requested_at: string;
+    reviewed_at?: string;
+    partner?: { id: string; name: string; email?: string };
+}
+
 export const commissionsApi = {
     getPartners: () => {
         return fetchApi<{ partners: Partner[] }>('/partners', { service: 'COMMISSIONS' });
@@ -47,11 +65,16 @@ export const commissionsApi = {
         return fetchApi<{ commissions: PartnerCommission[] }>(`/partners/commissions/annual/${year}${query}`, { service: 'COMMISSIONS' });
     },
 
+    getMonthlyCommissions: (year: number, month: number, partnerId?: string) => {
+        const query = partnerId ? `?partner_id=${partnerId}` : '';
+        return fetchApi<{ commissions: PartnerCommission[] }>(`/partners/commissions/${year}/${month}${query}`, { service: 'COMMISSIONS' });
+    },
+
     calculateCommissions: (year: number, month: number) => {
         return fetchApi('/partners/commissions/calculate', {
             service: 'COMMISSIONS',
             method: 'POST',
-            body: JSON.stringify({ fiscal_year: year, fiscal_month: month, save: true }) // Auto-save for simplicity right now
+            body: JSON.stringify({ fiscal_year: year, fiscal_month: month, save: true })
         });
     },
 
@@ -83,9 +106,6 @@ export const commissionsApi = {
     },
 
     createCommission: (data: any) => {
-        // Since there wasn't a dedicated endpoint for single manual creation in the provided snippet
-        // We might need to handle this. Wait, let me check the backend. If it doesn't exist, we'll need to create it.
-        // For now, assume a POST /partners/commissions exists or we will adapt.
         return fetchApi('/partners/commissions', {
             service: 'COMMISSIONS',
             method: 'POST',
@@ -105,5 +125,53 @@ export const commissionsApi = {
             service: 'COMMISSIONS',
             method: 'DELETE'
         });
+    },
+
+    // Payment Requests
+    requestPayment: async (formData: FormData) => {
+        const { data: { session } } = await (await import('@/lib/supabase')).supabase.auth.getSession();
+        const token = session?.access_token;
+        const response = await fetch('/api/commissions/payment-requests', {
+            method: 'POST',
+            headers: {
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            },
+            body: formData // No Content-Type header — browser sets multipart boundary
+        });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Error al enviar solicitud');
+        }
+        return response.json();
+    },
+
+    getPaymentRequests: (params?: { partner_id?: string; status?: string; year?: number; month?: number }) => {
+        const query = new URLSearchParams();
+        if (params?.partner_id) query.set('partner_id', params.partner_id);
+        if (params?.status) query.set('status', params.status);
+        if (params?.year) query.set('year', String(params.year));
+        if (params?.month) query.set('month', String(params.month));
+        const qs = query.toString() ? `?${query.toString()}` : '';
+        return fetchApi<{ requests: PaymentRequest[] }>(`/payment-requests${qs}`, { service: 'COMMISSIONS' });
+    },
+
+    getPaymentRequestDetail: (id: string) => {
+        return fetchApi<{ request: PaymentRequest }>(`/payment-requests/${id}`, { service: 'COMMISSIONS' });
+    },
+
+    updatePaymentRequest: (id: string, data: { status: string; admin_notes?: string; reviewed_by?: string }) => {
+        return fetchApi(`/payment-requests/${id}`, {
+            service: 'COMMISSIONS',
+            method: 'PATCH',
+            body: JSON.stringify(data)
+        });
+    },
+
+    deletePaymentRequest: (id: string) => {
+        return fetchApi(`/payment-requests/${id}`, {
+            service: 'COMMISSIONS',
+            method: 'DELETE'
+        });
     }
 };
+

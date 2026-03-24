@@ -50,6 +50,15 @@ const TYPE_CONFIG: Record<ChangelogEntry['type'], {
         badgeDark: 'bg-amber-900/40 text-amber-300 ring-amber-400/20',
         accent: 'text-amber-600 dark:text-amber-400',
     },
+    in_progress: {
+        label: 'En desarrollo',
+        icon: Wrench,
+        gradient: 'from-violet-50 to-purple-50 border-violet-200/60',
+        gradientDark: 'from-violet-950/40 to-purple-950/30 border-violet-700/30',
+        badge: 'bg-violet-100 text-violet-700 ring-violet-500/20',
+        badgeDark: 'bg-violet-900/40 text-violet-300 ring-violet-400/20',
+        accent: 'text-violet-600 dark:text-violet-400',
+    },
 };
 
 
@@ -64,6 +73,9 @@ export function WhatsNew() {
     const [open, setOpen] = useState(false);
     const [seenIds, setSeenIds] = useState<Set<string>>(() => getSeenIds());
     const panelRef = useRef<HTMLDivElement>(null);
+
+    // Ocultar completamente para partners
+    if (isPartner()) return null;
 
     // ── Filter entries by user permissions ────────────────
     const visibleEntries = useMemo(() => {

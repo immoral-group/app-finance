@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 
 import partnersRoutes from './routes/partners.js';
 import platformsRoutes from './routes/platforms.js';
+import paymentRequestsRoutes from './routes/payment-requests.js';
 
 dotenv.config({ path: '../../.env' });
 
@@ -37,6 +38,7 @@ app.get('/health', (req, res) => {
 
 app.use('/partners', partnersRoutes);
 app.use('/platforms', platformsRoutes);
+app.use('/payment-requests', paymentRequestsRoutes);
 
 app.get('/', (req, res) => {
     res.json({
@@ -52,6 +54,12 @@ app.get('/', (req, res) => {
                 getCommissions: 'GET /partners/commissions/:year/:month',
                 editCommission: 'PATCH /partners/commissions/:id',
                 markPaid: 'POST /partners/commissions/:id/pay'
+            },
+            paymentRequests: {
+                create: 'POST /payment-requests',
+                list: 'GET /payment-requests',
+                detail: 'GET /payment-requests/:id',
+                update: 'PATCH /payment-requests/:id'
             },
             platforms: {
                 list: 'GET /platforms',

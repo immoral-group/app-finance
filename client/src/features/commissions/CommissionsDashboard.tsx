@@ -1,14 +1,19 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { commissionsApi } from '@/lib/api/commissions';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { commissionsApi, PaymentRequest } from '@/lib/api/commissions';
 import { Card, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 import { formatCurrency } from '@/lib/utils';
-import { Handshake, AlertCircle, CheckCircle2, TrendingUp, Users, Wallet } from 'lucide-react';
+import { Handshake, AlertCircle, CheckCircle2, TrendingUp, Users, Wallet, Clock, XCircle, Trash2, FileDown, Send } from 'lucide-react';
+import { toast } from 'sonner';
+import { useAuth } from '@/context/AuthContext';
 
 
 type PeriodType = 'year' | 'quarter' | 'month';
 
 export function CommissionsDashboard() {
+    const { user } = useAuth();
+    const queryClient = useQueryClient();
     const [year, setYear] = useState(new Date().getFullYear());
     const [periodType, setPeriodType] = useState<PeriodType>('month');
     const [selectedQuarter, setSelectedQuarter] = useState<number>(Math.floor(new Date().getMonth() / 3) + 1);
@@ -16,11 +21,20 @@ export function CommissionsDashboard() {
 
     const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-    // Fetch Annual Commissions (fetching everything for the year to filter locally)
+    // Fetch Annual Commissions
     const { data: commData, isLoading } = useQuery({
         queryKey: ['annual-commissions-all', year],
         queryFn: () => commissionsApi.getAnnualCommissions(year),
     });
+
+    // Fetch Payment Requests
+    const { data: requestsData } = useQuery({
+        queryKey: ['payment-requests-all', year],
+        queryFn: () => commissionsApi.getPaymentRequests({ year }),
+    });
+
+    const paymentRequests = requestsData?.requests || [];
+    const pendingRequests = paymentRequests.filter((r: PaymentRequest) => r.status === 'pending');
 
     const allCommissions = commData?.commissions || [];
 
@@ -68,8 +82,122 @@ export function CommissionsDashboard() {
         return `Año Completo ${year}`;
     }, [periodType, selectedMonth, selectedQuarter, year]);
 
+    // Mutations for payment requests
+    const updateRequestMutation = useMutation({
+        mutationFn: ({ id, data }: { id: string, data: { status: string; admin_notes?: string; reviewed_by?: string } }) =>
+            commissionsApi.updatePaymentRequest(id, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['payment-requests-all', year] });
+            toast.success('Estado de solicitud actualizado');
+        },
+        onError: () => toast.error('Error al actualizar solicitud')
+    });
+
+    const deleteRequestMutation = useMutation({
+        mutationFn: (id: string) => commissionsApi.deletePaymentRequest(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['payment-requests-all', year] });
+            toast.success('Solicitud eliminada');
+        },
+        onError: () => toast.error('Error al eliminar solicitud')
+    });
+
+    const getStatusBadge = (status: string) => {
+        switch (status) {
+            case 'pending': return { className: 'bg-yellow-100 text-yellow-800', icon: <Clock className="h-3 w-3" />, label: 'En revisión' };
+            case 'approved': return { className: 'bg-green-100 text-green-800', icon: <CheckCircle2 className="h-3 w-3" />, label: 'Aprobada' };
+            case 'rejected': return { className: 'bg-red-100 text-red-800', icon: <XCircle className="h-3 w-3" />, label: 'Rechazada' };
+            default: return { className: 'bg-gray-100 text-gray-800', icon: null, label: status };
+        }
+    };
+
+    const handleViewInvoice = async (req: PaymentRequest) => {
+        try {
+            const result = await commissionsApi.getPaymentRequestDetail(req.id);
+            if (result.request?.invoice_url) {
+                window.open(result.request.invoice_url, '_blank');
+            } else {
+                toast.error('No se pudo obtener el enlace de la factura');
+            }
+        } catch {
+            toast.error('Error al descargar factura');
+        }
+    };
+
     return (
         <div className="space-y-6">
+            {/* Pending Payment Requests Alert */}
+            {pendingRequests.length > 0 && (
+                <Card className="border-yellow-300 bg-yellow-50/50 shadow-sm">
+                    <div className="p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                            <div className="p-1.5 bg-yellow-100 rounded-full"><Send className="h-4 w-4 text-yellow-700" /></div>
+                            <h3 className="font-semibold text-yellow-800">
+                                {pendingRequests.length} solicitud{pendingRequests.length > 1 ? 'es' : ''} de pago pendiente{pendingRequests.length > 1 ? 's' : ''}
+                            </h3>
+                        </div>
+                        <div className="space-y-2">
+                            {pendingRequests.map((req: PaymentRequest) => (
+                                <div key={req.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 rounded-lg bg-white border border-yellow-200">
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1">
+                                        <span className="font-medium text-sm">{req.partner?.name || 'Partner'}</span>
+                                        <span className="text-xs text-muted-foreground">
+                                            {req.fiscal_month === 0 ? `Año completo ${req.fiscal_year}` : `${monthNames[req.fiscal_month - 1]} ${req.fiscal_year}`}
+                                        </span>
+                                        <span className="text-sm font-bold text-orange-600">{formatCurrency(req.total_amount)}</span>
+                                        {req.partner_email && <span className="text-xs text-muted-foreground">📧 {req.partner_email}</span>}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="text-xs gap-1"
+                                            onClick={() => handleViewInvoice(req)}
+                                        >
+                                            <FileDown className="h-3 w-3" /> Factura
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            className="text-xs bg-green-600 hover:bg-green-700 gap-1"
+                                            onClick={() => updateRequestMutation.mutate({
+                                                id: req.id,
+                                                data: { status: 'approved', reviewed_by: user?.id }
+                                            })}
+                                            disabled={updateRequestMutation.isPending}
+                                        >
+                                            <CheckCircle2 className="h-3 w-3" /> Aprobar
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="text-xs text-red-600 border-red-200 hover:bg-red-50 gap-1"
+                                            onClick={() => updateRequestMutation.mutate({
+                                                id: req.id,
+                                                data: { status: 'rejected', reviewed_by: user?.id }
+                                            })}
+                                            disabled={updateRequestMutation.isPending}
+                                        >
+                                            <XCircle className="h-3 w-3" /> Rechazar
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 w-7 p-0"
+                                            onClick={() => {
+                                                if (confirm('¿Eliminar esta solicitud?')) deleteRequestMutation.mutate(req.id);
+                                            }}
+                                            disabled={deleteRequestMutation.isPending}
+                                        >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </Card>
+            )}
+
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-muted/30 p-4 rounded-xl border border-muted">
                 <div>
                     <h2 className="text-xl font-bold">{renderedPeriodLabel}</h2>
@@ -202,6 +330,86 @@ export function CommissionsDashboard() {
                     </div>
                 </Card>
             </div>
+
+            {/* Payment Requests History */}
+            {paymentRequests.length > 0 && (
+                <Card>
+                    <div className="p-6">
+                        <h3 className="text-lg font-medium mb-4">Historial de Solicitudes de Pago</h3>
+                        <div className="rounded-md border overflow-x-auto">
+                            <table className="w-full text-sm min-w-[700px]">
+                                <thead className="bg-muted/50 border-b">
+                                    <tr>
+                                        <th className="h-9 px-4 text-left font-medium text-muted-foreground">Partner</th>
+                                        <th className="h-9 px-4 text-left font-medium text-muted-foreground">Período</th>
+                                        <th className="h-9 px-4 text-right font-medium text-muted-foreground">Monto</th>
+                                        <th className="h-9 px-4 text-left font-medium text-muted-foreground">Email</th>
+                                        <th className="h-9 px-4 text-center font-medium text-muted-foreground">Estado</th>
+                                        <th className="h-9 px-4 text-left font-medium text-muted-foreground">Fecha</th>
+                                        <th className="h-9 px-4 text-right font-medium text-muted-foreground">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {paymentRequests.map((req: PaymentRequest) => {
+                                        const badge = getStatusBadge(req.status);
+                                        return (
+                                            <tr key={req.id} className="border-b last:border-0 hover:bg-muted/50 transition-colors">
+                                                <td className="p-3 font-medium">{req.partner?.name || '-'}</td>
+                                                <td className="p-3 text-muted-foreground text-xs">
+                                                    {req.fiscal_month === 0 ? `Año ${req.fiscal_year}` : `${monthNames[req.fiscal_month - 1]} ${req.fiscal_year}`}
+                                                </td>
+                                                <td className="p-3 text-right font-bold text-orange-600">{formatCurrency(req.total_amount)}</td>
+                                                <td className="p-3 text-xs text-muted-foreground">{req.partner_email}</td>
+                                                <td className="p-3 text-center">
+                                                    <select
+                                                        className={`px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer outline-none text-center appearance-none ${badge.className}`}
+                                                        value={req.status}
+                                                        onChange={(e) => updateRequestMutation.mutate({
+                                                            id: req.id,
+                                                            data: { status: e.target.value, reviewed_by: user?.id }
+                                                        })}
+                                                    >
+                                                        <option value="pending">EN REVISIÓN</option>
+                                                        <option value="approved">APROBADA</option>
+                                                        <option value="rejected">RECHAZADA</option>
+                                                    </select>
+                                                </td>
+                                                <td className="p-3 text-xs text-muted-foreground">
+                                                    {new Date(req.requested_at).toLocaleDateString('es-ES')}
+                                                </td>
+                                                <td className="p-3 text-right">
+                                                    <div className="flex justify-end gap-1">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 w-7 p-0"
+                                                            title="Ver factura"
+                                                            onClick={() => handleViewInvoice(req)}
+                                                        >
+                                                            <FileDown className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 w-7 p-0"
+                                                            onClick={() => {
+                                                                if (confirm('¿Eliminar esta solicitud?')) deleteRequestMutation.mutate(req.id);
+                                                            }}
+                                                            disabled={deleteRequestMutation.isPending}
+                                                        >
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </Card>
+            )}
 
             {/* Bottom Row: Recent Transactions View */}
             <Card>

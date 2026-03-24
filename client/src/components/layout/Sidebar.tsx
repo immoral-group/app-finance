@@ -319,7 +319,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                                 >
                                     {Icon && <Icon size={16} className={isChildActive && isDark ? 'text-primary' : ''} />}
                                     <span className="flex-1 text-left">{item.label}</span>
-                                    {parentHighlight && (
+                                    {!isPartner() && parentHighlight && (
                                         <HighlightDot
                                             moduleKey={item.requiredPermission!}
                                             highlight={parentHighlight}
@@ -379,7 +379,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                         >
                             {Icon && <Icon size={16} className={isActive && isDark ? 'text-primary' : ''} />}
                             <span className="flex-1">{item.label}</span>
-                            {highlight && (
+                            {!isPartner() && highlight && (
                                 <HighlightDot
                                     moduleKey={item.requiredPermission!}
                                     highlight={highlight}

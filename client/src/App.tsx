@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/context/ThemeContext';
 import { Layout } from '@/components/layout/Layout';
 import ProtectedRoute from '@/components/layout/ProtectedRoute';
 import Login from '@/features/auth/Login';
+import ResetPassword from '@/features/auth/ResetPassword';
 
 import BillingMatrix from '@/features/billing/BillingMatrix';
 import MediaTracker from '@/features/media-investment/MediaTracker';
@@ -33,6 +34,7 @@ function App() {
           <BrowserRouter>
             <Routes>
               <Route path="/login" element={<Login />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
 
               <Route element={<ProtectedRoute />}>
                 <Route element={<Layout />}>
