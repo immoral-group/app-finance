@@ -234,7 +234,7 @@ const QUARTERS = [
 ];
 
 export default function Dashboard() {
-    const { isDeptHead, isSuperAdmin, isPartner, profile } = useAuth();
+    const { isDeptHead, isPartner, profile } = useAuth();
 
     // Redirect dept_head to their own department dashboard
     if (isDeptHead() && profile?.department_code) {
@@ -246,6 +246,12 @@ export default function Dashboard() {
     if (isPartner()) {
         return <Navigate to="/commissions" replace />;
     }
+
+    return <DashboardContent />;
+}
+
+function DashboardContent() {
+    const { isSuperAdmin } = useAuth();
     const [year] = useState(new Date().getFullYear());
     const [visibleWidgets, setVisibleWidgets] = useState<Record<WidgetType, boolean>>({
         kpis: true,
