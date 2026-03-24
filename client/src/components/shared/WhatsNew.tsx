@@ -74,19 +74,12 @@ export function WhatsNew() {
     const [seenIds, setSeenIds] = useState<Set<string>>(() => getSeenIds());
     const panelRef = useRef<HTMLDivElement>(null);
 
-    // Ocultar completamente para partners
-    if (isPartner()) return null;
-
     // ── Filter entries by user permissions ────────────────
     const visibleEntries = useMemo(() => {
+        if (isPartner()) return []; // Partners don't see novedades
         return CHANGELOG.filter(entry => {
             // superadminOnly entries
             if (entry.superadminOnly && !isSuperAdmin()) return false;
-            // Partner users: only see entries tied to 'commissions' or global entries
-            if (isPartner()) {
-                if (entry.moduleKey && entry.moduleKey !== 'commissions') return false;
-                return true;
-            }
             // Module-specific entries: check permission
             if (entry.moduleKey && !isSuperAdmin() && !hasPermission(entry.moduleKey)) return false;
             return true;
@@ -115,7 +108,7 @@ export function WhatsNew() {
         setSeenIds(new Set([...seenIds, ...ids]));
     };
 
-    // ── Don't render if no entries ───────────────────────
+    // ── Don't render if no entries (or partner) ──────────
     if (visibleEntries.length === 0) return null;
 
     return (
