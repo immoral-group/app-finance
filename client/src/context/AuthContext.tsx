@@ -84,6 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
             if (session) {
+                setLoading(true); // Prevent rendering until profile is ready
                 fetchProfile().then(() => {
                     // Log login activity
                     if (_event === 'SIGNED_IN' && session.user?.id) {
