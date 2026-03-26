@@ -13,7 +13,11 @@ import {
     Settings2,
     MoreHorizontal,
     BarChart3,
-    LayoutDashboard
+    LayoutDashboard,
+    FileText,
+    Landmark,
+    AlertCircle,
+    X
 } from 'lucide-react';
 
 const DashboardDetalle = lazy(() => import('./DashboardDetalle'));
@@ -262,6 +266,30 @@ function DashboardContent() {
     const [visibleVerticals, setVisibleVerticals] = useState<Set<string>>(new Set());
     const [dashboardTab, setDashboardTab] = useState<DashboardTab>('general');
     const [showGroupForCards, setShowGroupForCards] = useState<Set<string>>(new Set());
+
+    // Holded invoice detail modal
+    const [holdedDetailType, setHoldedDetailType] = useState<'pending' | 'overdue' | null>(null);
+    const [holdedDetailInvoices, setHoldedDetailInvoices] = useState<any[]>([]);
+    const [holdedDetailLoading, setHoldedDetailLoading] = useState(false);
+
+    const openHoldedDetail = async (type: 'pending' | 'overdue') => {
+        setHoldedDetailType(type);
+        setHoldedDetailLoading(true);
+        try {
+            const res = await adminApi.getHoldedInvoices();
+            const invoices = res?.invoices || [];
+            const now = Math.floor(Date.now() / 1000);
+            const filtered = invoices.filter((inv: any) => {
+                if (inv.status === 1 || inv.status === 3) return false; // exclude paid & cancelled
+                if (type === 'overdue') return inv.dueDate && inv.dueDate < now;
+                return !inv.dueDate || inv.dueDate >= now; // pending = not yet overdue
+            });
+            setHoldedDetailInvoices(filtered);
+        } catch {
+            setHoldedDetailInvoices([]);
+        }
+        setHoldedDetailLoading(false);
+    };
 
     // Time period state
     const [timePeriod, setTimePeriod] = useState<TimePeriod>('annual');
@@ -551,6 +579,14 @@ function DashboardContent() {
 
     const isLoading = isLoadingPL;
 
+    // Holded summary for dashboard cards
+    const { data: holdedSummary } = useQuery({
+        queryKey: ['holded-summary'],
+        queryFn: () => adminApi.getHoldedSummary(),
+        staleTime: 300000, // 5 minutes
+        retry: 1,
+    });
+
     if (isLoading) {
         return (
             <div className="flex items-center justify-center h-96">
@@ -733,6 +769,8 @@ function DashboardContent() {
                         )
                     }
 
+
+
                     {/* Department Profitability — from PL matrix */}
                     {
                         visibleWidgets.departments && (
@@ -909,7 +947,170 @@ function DashboardContent() {
                             </div>
                         )
                     }
+
+                    {/* Holded SL — Financial Overview */}
+                    {holdedSummary?.connected && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-700">
+                            <div className="flex items-center gap-3">
+                                <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white font-bold text-[10px]">H</div>
+                                <h2 className="text-lg font-bold text-foreground">Holded SL</h2>
+                                <span className="text-xs text-muted-foreground">Facturación y Tesorería</span>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <Card className="bg-white border-l-4 border-l-orange-500 shadow-sm hover:shadow-md transition-shadow cursor-pointer" onClick={() => openHoldedDetail('pending')}>
+                                    <CardContent className="p-5">
+                                        <div className="flex items-center justify-between pb-1">
+                                            <p className="text-xs font-medium text-muted-foreground">Facturas Pendientes</p>
+                                            <FileText className="h-4 w-4 text-orange-500" />
+                                        </div>
+                                        <h2 className="text-2xl font-bold mt-1">{formatCurrency(holdedSummary.invoices_pending?.total || 0)}</h2>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                                            {holdedSummary.invoices_pending?.count || 0} factura{(holdedSummary.invoices_pending?.count || 0) !== 1 ? 's' : ''} aún no vencidas
+                                        </p>
+                                    </CardContent>
+                                </Card>
+
+                                <Card className="bg-white border-l-4 border-l-red-500 shadow-sm hover:shadow-md transition-shadow cursor-pointer" onClick={() => openHoldedDetail('overdue')}>
+                                    <CardContent className="p-5">
+                                        <div className="flex items-center justify-between pb-1">
+                                            <p className="text-xs font-medium text-muted-foreground">Facturas Vencidas</p>
+                                            <AlertCircle className="h-4 w-4 text-red-500" />
+                                        </div>
+                                        <h2 className={`text-2xl font-bold mt-1 ${(holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                            {formatCurrency(holdedSummary.invoices_overdue?.total || 0)}
+                                        </h2>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                                            {holdedSummary.invoices_overdue?.count || 0} vencida{(holdedSummary.invoices_overdue?.count || 0) !== 1 ? 's' : ''}
+                                        </p>
+                                    </CardContent>
+                                </Card>
+
+                                <Card className="bg-white border-l-4 border-l-purple-500 shadow-sm hover:shadow-md transition-shadow">
+                                    <CardContent className="p-5">
+                                        <div className="flex items-center justify-between pb-1">
+                                            <p className="text-xs font-medium text-muted-foreground">Estimado por Recibir</p>
+                                            <TrendingUp className="h-4 w-4 text-purple-500" />
+                                        </div>
+                                        <h2 className="text-2xl font-bold mt-1">{formatCurrency(holdedSummary.invoices_estimado?.total || 0)}</h2>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                                            {holdedSummary.invoices_estimado?.count || 0} factura{(holdedSummary.invoices_estimado?.count || 0) !== 1 ? 's' : ''} (pendientes + vencidas)
+                                        </p>
+                                    </CardContent>
+                                </Card>
+
+                                <Card className="bg-white border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-shadow">
+                                    <CardContent className="p-5">
+                                        <div className="flex items-center justify-between pb-1">
+                                            <p className="text-xs font-medium text-muted-foreground">Saldo en Caja</p>
+                                            <Landmark className="h-4 w-4 text-blue-500" />
+                                        </div>
+                                        <h2 className="text-2xl font-bold mt-1">{formatCurrency(holdedSummary.treasury_balance || 0)}</h2>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                                            Total en tesorería
+                                        </p>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        </div>
+                    )}
                 </>
+            )}
+
+            {/* Holded Invoice Detail Modal */}
+            {holdedDetailType && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setHoldedDetailType(null)}>
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" />
+                    <div
+                        className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 slide-in-from-bottom-4 duration-300"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Header */}
+                        <div className={`flex items-center justify-between px-6 py-4 border-b rounded-t-2xl ${
+                            holdedDetailType === 'overdue'
+                                ? 'bg-gradient-to-r from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20'
+                                : 'bg-gradient-to-r from-orange-50 to-orange-100/50 dark:from-orange-950/30 dark:to-orange-900/20'
+                        }`}>
+                            <div className="flex items-center gap-3">
+                                <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${
+                                    holdedDetailType === 'overdue'
+                                        ? 'bg-red-100 dark:bg-red-900/40 text-red-600'
+                                        : 'bg-orange-100 dark:bg-orange-900/40 text-orange-600'
+                                }`}>
+                                    {holdedDetailType === 'overdue' ? <AlertCircle size={18} /> : <FileText size={18} />}
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-foreground">
+                                        {holdedDetailType === 'overdue' ? 'Facturas Vencidas' : 'Facturas Pendientes'}
+                                    </h3>
+                                    <p className="text-[11px] text-muted-foreground">
+                                        {holdedDetailType === 'overdue' ? 'Facturas con fecha de vencimiento pasada' : 'Facturas aún no vencidas pendientes de cobro'}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setHoldedDetailType(null)}
+                                className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+                            >
+                                <X size={18} className="text-muted-foreground" />
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="overflow-y-auto flex-1">
+                            {holdedDetailLoading ? (
+                                <div className="flex items-center justify-center py-16">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+                                </div>
+                            ) : holdedDetailInvoices.length === 0 ? (
+                                <div className="py-16 text-center text-sm text-muted-foreground">
+                                    No hay facturas {holdedDetailType === 'overdue' ? 'vencidas' : 'pendientes'}
+                                </div>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b bg-muted/30">
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground">Nº</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground">Cliente</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground">Vencimiento</th>
+                                            <th className="px-5 py-3 text-right text-xs font-semibold text-muted-foreground">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {holdedDetailInvoices.map((inv: any, i: number) => {
+                                            const now = Math.floor(Date.now() / 1000);
+                                            const isOverdue = inv.dueDate && inv.dueDate < now;
+                                            return (
+                                                <tr key={inv.id || i} className="hover:bg-muted/20 transition-colors">
+                                                    <td className="px-5 py-3 font-mono font-semibold text-foreground text-xs">
+                                                        {inv.docNumber || '-'}
+                                                    </td>
+                                                    <td className="px-5 py-3 text-foreground text-xs max-w-[220px] truncate">
+                                                        {inv.contactName || '-'}
+                                                    </td>
+                                                    <td className={`px-5 py-3 text-xs ${isOverdue ? 'text-red-600 font-semibold' : 'text-muted-foreground'}`}>
+                                                        {inv.dueDate ? new Date(inv.dueDate * 1000).toLocaleDateString('es-ES') : '-'}
+                                                        {isOverdue && <span className="ml-1">⚠</span>}
+                                                    </td>
+                                                    <td className="px-5 py-3 text-right font-semibold tabular-nums text-foreground text-xs">
+                                                        {inv.total != null ? `${Number(inv.total).toFixed(2)} €` : '-'}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr className="border-t bg-muted/30 font-bold">
+                                            <td className="px-5 py-3 text-xs" colSpan={3}>Total ({holdedDetailInvoices.length} factura{holdedDetailInvoices.length !== 1 ? 's' : ''})</td>
+                                            <td className="px-5 py-3 text-right tabular-nums text-xs">
+                                                {holdedDetailInvoices.reduce((s: number, inv: any) => s + (inv.total || 0), 0).toFixed(2)} €
+                                            </td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            )}
+                        </div>
+                    </div>
+                </div>
             )}
 
             {dashboardTab === 'detalle' && (

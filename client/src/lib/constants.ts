@@ -62,6 +62,7 @@ export const ALL_MODULES = [
     { key: 'clients', label: 'Clients & Fees' },
     { key: 'settings', label: 'Settings' },
     { key: 'user_management', label: 'Gestión de Usuarios' },
+    { key: 'developers', label: 'Developers' },
 ];
 
 export const NAV_ITEMS: NavItem[] = [
@@ -86,5 +87,6 @@ export const NAV_ITEMS: NavItem[] = [
     { label: 'Clients & Fees', path: '/clients', icon: 'Users', requiredPermission: 'clients' },
     { label: 'Settings', path: '/settings', icon: 'Settings', requiredPermission: 'settings', superadminOnly: true },
     { label: 'Gestión de Usuarios', path: '/users', icon: 'Shield', requiredPermission: 'user_management', superadminOnly: true },
+    { label: 'Developers', path: '/developers', icon: 'Activity', requiredPermission: 'developers', superadminOnly: true },
 ];
 

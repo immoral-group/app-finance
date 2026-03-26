@@ -83,7 +83,7 @@ export function WhatsNew() {
             // Module-specific entries: check permission
             if (entry.moduleKey && !isSuperAdmin() && !hasPermission(entry.moduleKey)) return false;
             return true;
-        }).slice(0, 5);
+        }).slice(0, 10);
     }, [hasPermission, isSuperAdmin, isPartner]);
 
     const unseenCount = useMemo(() => {

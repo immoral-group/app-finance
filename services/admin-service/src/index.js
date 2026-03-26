@@ -23,6 +23,9 @@ import chatRoutes from './routes/chat.js';
 import messagesRoutes from './routes/messages.js';
 import notificationsRoutes from './routes/notifications.js';
 import yearManagementRoutes from './routes/year-management.js';
+import developersRoutes from './routes/developers.js';
+import apiGateway from './routes/api-gateway.js';
+import integrationsRoutes from './routes/integrations.js';
 
 dotenv.config();
 
@@ -48,6 +51,13 @@ app.use('/chat', chatRoutes);
 app.use('/messages', messagesRoutes);
 app.use('/notifications', notificationsRoutes);
 app.use('/year-management', yearManagementRoutes);
+app.use('/developers', developersRoutes);
+
+// Public API Gateway (requires API key auth via x-api-key header)
+app.use('/api', apiGateway);
+
+// External integrations (Holded, etc.)
+app.use('/integrations', integrationsRoutes);
 
 
 // Health Check

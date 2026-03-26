@@ -17,6 +17,9 @@ type TabType = typeof TABS[number];
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
+// Hours per person per month (default constant, can be customized in the future)
+const HOURS_PER_PERSON_MONTH = 160;
+
 // All departments that map from URL to display & filter
 const DEPT_MAP: Record<string, { label: string; deptNames: string[] }> = {
     immedia: { label: 'Immedia', deptNames: ['Immedia'] },
@@ -864,6 +867,37 @@ export default function DepartmentPL() {
         const resultadoMonthly = revTotals.map((v, i) => fmtCurrency(v - totalExpWithGroup[i]));
         const resultadoAnual = fmtCurrency(revAnual - totalExpWithGroup.reduce((a, b) => a + b, 0));
 
+        // === COST PER HOUR calculations ===
+        // Count people PER MONTH dynamically: a person counts in a month only if their personal cost > 0 that month
+        // This ensures adding a new worker in a future month doesn't retroactively change past months
+        const deptPeoplePerMonth = Array(12).fill(0).map((_, monthIdx) => {
+            let count = 0;
+            deptPersonal.forEach(group => {
+                group.items.forEach(item => {
+                    if (item.toLowerCase().includes('externo')) return; // skip Externos
+                    const val = getCompValue(compRealValues, 'personal', group.dept, item, monthIdx);
+                    if (val > 0) count++;
+                });
+            });
+            return count;
+        });
+
+        // Personal cost monthly (from real values)
+        const personalCostMonthly = calcCompSectionTotal(compRealValues, 'personal', deptPersonal);
+
+        // Horas totales por mes = 160 * personas ese mes
+        const totalHoursPerMonth = deptPeoplePerMonth.map(p => HOURS_PER_PERSON_MONTH * p);
+
+        // Coste/Hora = personal cost / horas totales (por mes)
+        const costPerHourMonthly = personalCostMonthly.map((v, i) =>
+            totalHoursPerMonth[i] > 0 ? fmtCurrency(v / totalHoursPerMonth[i]) : 0
+        );
+
+        // Coste/Hora Real = total gastos (con Group) / horas totales (por mes)
+        const costPerHourRealMonthly = totalExpWithGroup.map((v, i) =>
+            totalHoursPerMonth[i] > 0 ? fmtCurrency(v / totalHoursPerMonth[i]) : 0
+        );
+
         const budgetResultadoMonthly = budgetRevTotals.map((v, i) => fmtCurrency(v - budgetExpMonthly[i]));
 
         // Current month index (0-indexed)
@@ -1282,6 +1316,84 @@ export default function DepartmentPL() {
                                     ))}
                                     <td className={`border border-blue-400 px-1 py-2 text-right font-bold text-sm tabular-nums ${resultadoAnual >= 0 ? 'text-blue-900' : 'text-red-600'}`}>
                                         {fmtDisplay(resultadoAnual)}
+                                    </td>
+                                </tr>
+
+                                {/* Spacer */}
+                                <tr><td colSpan={14} className="py-1 bg-white border-0"></td></tr>
+
+                                {/* === COST PER HOUR SECTION === */}
+                                {/* Personas en el Departamento */}
+                                <tr className="bg-cyan-50">
+                                    <td className="border border-cyan-300 px-2 py-1.5 text-xs font-semibold text-cyan-800">
+                                        👥 Personas en el Departamento
+                                    </td>
+                                    {deptPeoplePerMonth.map((count, i) => (
+                                        <td key={i} className="border border-cyan-300 px-1 py-1.5 text-right text-xs font-medium text-cyan-700 tabular-nums">
+                                            {count > 0 ? count : <span className="text-gray-300">—</span>}
+                                        </td>
+                                    ))}
+                                    <td className="border border-cyan-300 px-1 py-1.5 text-right text-xs font-bold text-cyan-800 bg-cyan-100 tabular-nums">
+                                        {(() => {
+                                            const maxPeople = Math.max(...deptPeoplePerMonth);
+                                            return maxPeople > 0 ? `${maxPeople} máx` : '—';
+                                        })()}
+                                    </td>
+                                </tr>
+
+                                {/* Coste/Hora (solo personal) */}
+                                <tr className="bg-cyan-50/70">
+                                    <td className="border border-cyan-200 px-2 py-1.5 text-xs font-medium text-cyan-700">
+                                        Coste/Hora <span className="font-normal text-cyan-500">(Personal)</span>
+                                    </td>
+                                    {costPerHourMonthly.map((val, i) => (
+                                        <td key={i} className="border border-cyan-200 px-1 py-1.5 text-right text-xs font-medium text-cyan-700 tabular-nums">
+                                            {val > 0 ? `${fmtDisplay(val)} €` : <span className="text-gray-300">—</span>}
+                                        </td>
+                                    ))}
+                                    <td className="border border-cyan-200 px-1 py-1.5 text-right text-xs font-bold text-cyan-800 bg-cyan-100 tabular-nums">
+                                        {(() => {
+                                            const totalPersonal = personalCostMonthly.reduce((a, b) => a + b, 0);
+                                            const totalHoursYear = totalHoursPerMonth.reduce((a, b) => a + b, 0);
+                                            return totalHoursYear > 0 ? `${fmtDisplay(fmtCurrency(totalPersonal / totalHoursYear))} €` : '—';
+                                        })()}
+                                    </td>
+                                </tr>
+
+                                {/* Horas Totales */}
+                                <tr className="bg-cyan-50/50">
+                                    <td className="border border-cyan-200 px-2 py-1.5 text-xs font-medium text-cyan-700">
+                                        Horas Totales <span className="font-normal text-cyan-500">({HOURS_PER_PERSON_MONTH}h/persona)</span>
+                                    </td>
+                                    {totalHoursPerMonth.map((hours, i) => (
+                                        <td key={i} className="border border-cyan-200 px-1 py-1.5 text-right text-xs font-medium text-cyan-700 tabular-nums">
+                                            {hours > 0 ? fmtDisplay(hours) : <span className="text-gray-300">—</span>}
+                                        </td>
+                                    ))}
+                                    <td className="border border-cyan-200 px-1 py-1.5 text-right text-xs font-bold text-cyan-800 bg-cyan-100 tabular-nums">
+                                        {(() => {
+                                            const totalHoursYear = totalHoursPerMonth.reduce((a, b) => a + b, 0);
+                                            return totalHoursYear > 0 ? fmtDisplay(totalHoursYear) : '—';
+                                        })()}
+                                    </td>
+                                </tr>
+
+                                {/* Coste/Hora Real (todos los gastos) */}
+                                <tr className="bg-cyan-100">
+                                    <td className="border border-cyan-400 px-2 py-2 font-bold text-cyan-900 text-xs">
+                                        💰 Coste/Hora Real
+                                    </td>
+                                    {costPerHourRealMonthly.map((val, i) => (
+                                        <td key={i} className={`border border-cyan-400 px-1 py-2 text-right font-bold text-xs tabular-nums ${val > 0 ? 'text-cyan-800' : 'text-gray-300'}`}>
+                                            {val > 0 ? `${fmtDisplay(val)} €` : '—'}
+                                        </td>
+                                    ))}
+                                    <td className="border border-cyan-400 px-1 py-2 text-right font-bold text-xs text-cyan-900 bg-cyan-200 tabular-nums">
+                                        {(() => {
+                                            const totalExp = totalExpWithGroup.reduce((a, b) => a + b, 0);
+                                            const totalHoursYear = totalHoursPerMonth.reduce((a, b) => a + b, 0);
+                                            return totalHoursYear > 0 ? `${fmtDisplay(fmtCurrency(totalExp / totalHoursYear))} €` : '—';
+                                        })()}
                                     </td>
                                 </tr>
                             </tbody>

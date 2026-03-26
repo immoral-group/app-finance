@@ -1140,4 +1140,277 @@ router.patch('/custom-rows/:id', async (req, res) => {
     }
 });
 
+// ================================================
+// COST PER HOUR ENDPOINT
+// ================================================
+
+/**
+ * GET /pl/cost-per-hour/:year/:dept
+ * Returns cost-per-hour metrics for a specific department and year.
+ * :dept can be: immedia, imcontent, immoralia
+ * 
+ * Response includes monthly arrays (12 elements, one per month):
+ * - people_per_month: number of people with personal cost > 0 that month
+ * - personal_cost_per_month: total personal cost for the dept
+ * - cost_per_hour: personal cost / (160 * people)
+ * - total_hours_per_month: 160 * people
+ * - total_expenses_per_month: ALL dept expenses (personal + comisiones + marketing + etc + group cost)
+ * - cost_per_hour_real: total expenses / total hours
+ */
+router.get('/cost-per-hour/:year/:dept', async (req, res) => {
+    const { year, dept } = req.params;
+    const HOURS_PER_PERSON = 160;
+    const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+    // Map URL dept code to display name
+    const DEPT_MAP = {
+        immedia: 'Immedia',
+        imcontent: 'Imcontent',
+        immoralia: 'Immoralia',
+    };
+
+    const deptName = DEPT_MAP[dept?.toLowerCase()];
+    if (!deptName) {
+        return res.status(400).json({
+            error: `Invalid department: '${dept}'. Valid values: ${Object.keys(DEPT_MAP).join(', ')}`
+        });
+    }
+
+    // Personal items per department (mirroring frontend EXPENSE_STRUCTURE)
+    // These are used to identify which expense items are "personal" for counting people
+    const PERSONAL_ITEMS = {
+        Immedia: ['Alba', 'Andrés', 'Leidy'],
+        Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'],
+        Immoralia: ['David', 'Manel'],
+    };
+
+    // Expense section keys to aggregate for total department expenses
+    const EXPENSE_SECTION_KEYS = ['personal', 'comisiones', 'marketing', 'formacion', 'software', 'adspent', 'gastosOp'];
+
+    // Valid section keys for classification
+    const VALID_SECTION_KEYS = new Set([
+        'personal', 'comisiones', 'marketing', 'formacion',
+        'software', 'gastosOp', 'adspent'
+    ]);
+
+    try {
+        // 1. Fetch all actual expenses for the year
+        const { data: expenseData, error: expError } = await supabase
+            .from('actual_expenses')
+            .select('*, category:expense_categories(name)')
+            .eq('fiscal_year', year);
+
+        if (expError) throw expError;
+
+        // 2. Fetch departments for ID -> name mapping
+        const { data: departments } = await supabase
+            .from('departments')
+            .select('id, name');
+
+        const deptIdMap = {};
+        departments?.forEach(d => deptIdMap[d.id] = d.name);
+
+        // 3. Fetch custom rows (in case new personal items were added)
+        const { data: customRows } = await supabase
+            .from('pl_custom_rows')
+            .select('*')
+            .eq('fiscal_year', year)
+            .eq('block_type', 'expense')
+            .eq('section_key', 'personal');
+
+        // Build the full list of known personal item names for this dept
+        const personalItemNames = [...(PERSONAL_ITEMS[deptName] || [])];
+        customRows?.forEach(cr => {
+            if (cr.dept === deptName && !personalItemNames.includes(cr.item_name)) {
+                personalItemNames.push(cr.item_name);
+            }
+        });
+
+        // Exclude "Externos" type entries from person counting
+        const countablePersonalItems = personalItemNames.filter(
+            name => !name.toLowerCase().includes('externo')
+        );
+
+        // 4. Process expense data into keyed monthly values
+        // Key: "dept::item::section_key" → monthly values
+        const expensesByKey = {};
+
+        expenseData?.forEach(exp => {
+            const expDept = deptIdMap[exp.department_id] || 'Otros';
+            const catName = exp.category?.name || 'Otros';
+            const monthIdx = exp.fiscal_month - 1;
+            const val = Number(exp.amount || 0);
+            const rawDesc = exp.description || '';
+            const sectionKey = VALID_SECTION_KEYS.has(rawDesc) ? rawDesc : '';
+            const key = `${expDept}::${catName}::${sectionKey}`;
+
+            if (!expensesByKey[key]) {
+                expensesByKey[key] = { dept: expDept, name: catName, section_key: sectionKey, values: Array(12).fill(0) };
+            }
+            expensesByKey[key].values[monthIdx] += val;
+        });
+
+        // 5. Calculate personal cost per month for the department
+        const personalCostPerMonth = Array(12).fill(0);
+        Object.values(expensesByKey).forEach(entry => {
+            if (entry.dept === deptName && (entry.section_key === 'personal' || entry.section_key === '')) {
+                // Check if this item name matches any known personal item
+                if (personalItemNames.some(pName => pName === entry.name) || entry.section_key === 'personal') {
+                    entry.values.forEach((v, i) => personalCostPerMonth[i] += v);
+                }
+            }
+        });
+
+        // 6. Count people per month: a person counts if they have cost > 0 that month
+        const peoplePerMonth = Array(12).fill(0);
+        countablePersonalItems.forEach(personName => {
+            for (let m = 0; m < 12; m++) {
+                // Find expense entry matching this person
+                const hasExpense = Object.values(expensesByKey).some(entry =>
+                    entry.dept === deptName &&
+                    entry.name === personName &&
+                    entry.values[m] > 0
+                );
+                if (hasExpense) peoplePerMonth[m]++;
+            }
+        });
+
+        // 7. Calculate total department expenses per month (all categories)
+        const totalExpensesPerMonth = Array(12).fill(0);
+        Object.values(expensesByKey).forEach(entry => {
+            if (entry.dept === deptName) {
+                entry.values.forEach((v, i) => totalExpensesPerMonth[i] += v);
+            }
+        });
+
+        // 8. Calculate Group cost (Immoral general expenses distributed by revenue %)
+        // Fetch revenue data for group % calculation
+        let groupCostPerMonth = Array(12).fill(0);
+        if (deptName !== 'Immoral') {
+            // Get all revenue for the year to calculate dept's share
+            const { data: allMonthlyBillings } = await supabase
+                .from('monthly_billing')
+                .select('id, fiscal_month, fee_paid, client_id, client:clients(is_active, vertical:verticals(name))')
+                .eq('fiscal_year', year);
+
+            const { data: billingDetails } = await supabase
+                .from('billing_details')
+                .select('monthly_billing_id, amount, service:services(code, name)')
+                .in('monthly_billing_id', (allMonthlyBillings || []).map(mb => mb.id));
+
+            // Calculate total general revenue and dept revenue per month
+            // (simplified — uses same service-to-dept mapping as frontend)
+            const deptServiceMapping = {
+                Immedia: ['Paid General', 'Paid imfilms', 'Setup inicial'],
+                Imcontent: ['Branding', 'Diseño', 'Contenido con IA', 'RRSS', 'Estrategia Digital', 'Influencers', 'Budget Nutfruit'],
+                Immoralia: ['Setup inicial IA', 'Automation', 'Consultoría'],
+            };
+
+            // Total general revenue per month (all depts)
+            // For simplicity, use the existing matrix endpoint approach
+            const totalGeneralRevenue = Array(12).fill(0);
+            const deptRevenue = Array(12).fill(0);
+
+            // Paid media revenue from monthly billing
+            const activeBillings = (allMonthlyBillings || []).filter(mb => mb.client?.is_active);
+            activeBillings.forEach(mb => {
+                const monthIdx = mb.fiscal_month - 1;
+                const fee = Number(mb.fee_paid || 0);
+                totalGeneralRevenue[monthIdx] += fee;
+                // Fee paid goes to Immedia (Paid General/imfilms)
+                if (deptName === 'Immedia') deptRevenue[monthIdx] += fee;
+            });
+
+            // Service revenue from billing_details
+            const serviceCodeToDept = {
+                'BRANDING': 'Imcontent', 'CONTENT_DESIGN': 'Imcontent',
+                'AI_CONTENT': 'Imcontent', 'SOCIAL_MEDIA_MGMT': 'Imcontent',
+                'DIGITAL_STRATEGY': 'Imcontent', 'INFLUENCER_UGC': 'Imcontent',
+                'IMMORALIA_SETUP': 'Immoralia', 'AGENCY_AUTO': 'Immoralia',
+                'CONSULTING_AUTO': 'Immoralia', 'PAID_MEDIA_SETUP': 'Immedia',
+                'WEB_DEV': 'Imloyal', 'SEO': 'Imseo', 'MKT_AUTO_EMAIL': 'Imloyal',
+                'OTHER_HOURS': 'Immoral',
+            };
+
+            const mbMap = {};
+            activeBillings.forEach(mb => mbMap[mb.id] = mb);
+
+            (billingDetails || []).forEach(detail => {
+                if (!detail.service) return;
+                const mb = mbMap[detail.monthly_billing_id];
+                if (!mb) return;
+                const monthIdx = mb.fiscal_month - 1;
+                const amount = Number(detail.amount || 0);
+                const svcDept = serviceCodeToDept[detail.service.code];
+
+                totalGeneralRevenue[monthIdx] += amount;
+                if (svcDept === deptName) deptRevenue[monthIdx] += amount;
+            });
+
+            // Immoral expenses (sum all)
+            const immoralExpenses = Array(12).fill(0);
+            Object.values(expensesByKey).forEach(entry => {
+                if (entry.dept === 'Immoral') {
+                    entry.values.forEach((v, i) => immoralExpenses[i] += v);
+                }
+            });
+
+            // Group cost = immoral expenses * (dept revenue / total revenue)
+            groupCostPerMonth = totalGeneralRevenue.map((totalRev, i) => {
+                const pct = totalRev > 0 ? deptRevenue[i] / totalRev : 0;
+                return Math.round(immoralExpenses[i] * pct * 100) / 100;
+            });
+        }
+
+        // 9. Add group cost to total expenses
+        const totalExpWithGroup = totalExpensesPerMonth.map((v, i) =>
+            Math.round((v + groupCostPerMonth[i]) * 100) / 100
+        );
+
+        // 10. Calculate derived metrics
+        const totalHoursPerMonth = peoplePerMonth.map(p => HOURS_PER_PERSON * p);
+
+        const costPerHour = personalCostPerMonth.map((cost, i) =>
+            totalHoursPerMonth[i] > 0 ? Math.round((cost / totalHoursPerMonth[i]) * 100) / 100 : 0
+        );
+
+        const costPerHourReal = totalExpWithGroup.map((cost, i) =>
+            totalHoursPerMonth[i] > 0 ? Math.round((cost / totalHoursPerMonth[i]) * 100) / 100 : 0
+        );
+
+        // 11. Calculate annual totals
+        const totalHoursYear = totalHoursPerMonth.reduce((a, b) => a + b, 0);
+        const totalPersonalYear = personalCostPerMonth.reduce((a, b) => a + b, 0);
+        const totalExpensesYear = totalExpWithGroup.reduce((a, b) => a + b, 0);
+
+        res.json({
+            department: deptName,
+            year: parseInt(year),
+            hours_per_person: HOURS_PER_PERSON,
+            months: MONTHS,
+            people_per_month: peoplePerMonth,
+            people_names: countablePersonalItems,
+            personal_cost_per_month: personalCostPerMonth,
+            cost_per_hour: costPerHour,
+            total_hours_per_month: totalHoursPerMonth,
+            total_expenses_per_month: totalExpWithGroup,
+            group_cost_per_month: groupCostPerMonth,
+            cost_per_hour_real: costPerHourReal,
+            annual_summary: {
+                max_people: Math.max(...peoplePerMonth),
+                total_hours: totalHoursYear,
+                total_personal_cost: totalPersonalYear,
+                avg_cost_per_hour: totalHoursYear > 0 ? Math.round((totalPersonalYear / totalHoursYear) * 100) / 100 : 0,
+                total_expenses: totalExpensesYear,
+                avg_cost_per_hour_real: totalHoursYear > 0 ? Math.round((totalExpensesYear / totalHoursYear) * 100) / 100 : 0,
+            }
+        });
+
+    } catch (error) {
+        console.error('Error calculating cost per hour:', error);
+        res.status(500).json({ error: 'Failed to calculate cost per hour' });
+    }
+});
+
 export default router;

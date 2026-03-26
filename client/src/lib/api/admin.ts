@@ -346,4 +346,78 @@ export const adminApi = {
             body: JSON.stringify({ item_name })
         });
     },
+
+    // Cost Per Hour
+    getCostPerHour: (year: number, dept: string) => {
+        return fetchApi<{
+            department: string;
+            year: number;
+            hours_per_person: number;
+            months: string[];
+            people_per_month: number[];
+            people_names: string[];
+            personal_cost_per_month: number[];
+            cost_per_hour: number[];
+            total_hours_per_month: number[];
+            total_expenses_per_month: number[];
+            group_cost_per_month: number[];
+            cost_per_hour_real: number[];
+            annual_summary: {
+                max_people: number;
+                total_hours: number;
+                total_personal_cost: number;
+                avg_cost_per_hour: number;
+                total_expenses: number;
+                avg_cost_per_hour_real: number;
+            };
+        }>(`/pl/cost-per-hour/${year}/${dept}`);
+    },
+
+    // Developers
+    getApiKeys: () => {
+        return fetchApi<{ keys: any[] }>('/developers/api-keys');
+    },
+
+    getApiScopes: () => {
+        return fetchApi<{ scopes: { key: string; label: string; module: string }[] }>('/developers/scopes');
+    },
+
+    createApiKey: (data: { name: string; permissions: string[]; expires_at?: string; created_by?: string }) => {
+        return fetchApi<{ success: boolean; key: any }>('/developers/api-keys', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+
+    updateApiKey: (id: string, data: { name?: string; permissions?: string[]; is_active?: boolean }) => {
+        return fetchApi('/developers/api-keys/' + id, {
+            method: 'PATCH',
+            body: JSON.stringify(data)
+        });
+    },
+
+    deleteApiKey: (id: string) => {
+        return fetchApi('/developers/api-keys/' + id, { method: 'DELETE' });
+    },
+
+    getApiDocs: () => {
+        return fetchApi<any>('/developers/docs');
+    },
+
+    // Holded Integration
+    getHoldedStatus: () => fetchApi<{ connected: boolean; error?: string }>('/integrations/holded/status'),
+    getHoldedInvoices: (params?: Record<string, string>) => {
+        const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+        return fetchApi<{ invoices: any[] }>(`/integrations/holded/invoices${qs}`);
+    },
+    getHoldedInvoice: (id: string) => fetchApi<any>(`/integrations/holded/invoices/${id}`),
+    getHoldedContacts: () => fetchApi<{ contacts: any[] }>('/integrations/holded/contacts'),
+    getHoldedTreasury: () => fetchApi<{ accounts: any[] }>('/integrations/holded/treasury'),
+    getHoldedSummary: () => fetchApi<{
+        connected: boolean;
+        invoices_pending?: { count: number; total: number };
+        invoices_overdue?: { count: number; total: number };
+        invoices_estimado?: { count: number; total: number };
+        treasury_balance?: number;
+    }>('/integrations/holded/summary'),
 };

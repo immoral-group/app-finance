@@ -20,6 +20,7 @@ import Dashboard from '@/features/dashboard/Dashboard';
 import { ClientsPage } from '@/features/clients/ClientsPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import UserManagement from '@/features/users/UserManagement';
+import Developers from '@/features/developers/Developers';
 
 // Placeholder components
 // Placeholder components removed
@@ -51,6 +52,7 @@ function App() {
                   <Route path="clients" element={<ClientsPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="users" element={<UserManagement />} />
+                  <Route path="developers" element={<Developers />} />
                 </Route>
               </Route>
 
