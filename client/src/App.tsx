@@ -6,6 +6,7 @@ import { Layout } from '@/components/layout/Layout';
 import ProtectedRoute from '@/components/layout/ProtectedRoute';
 import Login from '@/features/auth/Login';
 import ResetPassword from '@/features/auth/ResetPassword';
+import { useEffect } from 'react';
 
 import BillingMatrix from '@/features/billing/BillingMatrix';
 import MediaTracker from '@/features/media-investment/MediaTracker';
@@ -25,14 +26,28 @@ import Developers from '@/features/developers/Developers';
 // Placeholder components
 // Placeholder components removed
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000, // 5 minutos antes de considerar los datos stale
+    },
+  },
+});
 
 function App() {
+  // Configurar scroll restoration manual para preservar posición al cambiar de tab
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
-          <BrowserRouter>
+          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/reset-password" element={<ResetPassword />} />

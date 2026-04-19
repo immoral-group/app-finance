@@ -26,6 +26,7 @@ import yearManagementRoutes from './routes/year-management.js';
 import developersRoutes from './routes/developers.js';
 import apiGateway from './routes/api-gateway.js';
 import integrationsRoutes from './routes/integrations.js';
+import changelogRoutes from './routes/changelog.js';
 
 dotenv.config();
 
@@ -58,6 +59,9 @@ app.use('/api', apiGateway);
 
 // External integrations (Holded, etc.)
 app.use('/integrations', integrationsRoutes);
+
+// Change log (historial de cambios por módulo)
+app.use('/changelog', changelogRoutes);
 
 
 // Health Check

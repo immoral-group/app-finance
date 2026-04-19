@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { MoreHorizontal, Trash2, Copy, MessageSquare, X, Check, CheckCircle2, Plus, Search, UserPlus, Calculator } from 'lucide-react';
+import { MoreHorizontal, Trash2, Copy, MessageSquare, X, Check, CheckCircle2, Plus, Search, UserPlus, Calculator, EyeOff } from 'lucide-react';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -14,6 +14,9 @@ import {
 } from "@/components/ui/DropdownMenu";
 import { formatNumber } from '@/lib/utils';
 import { toast } from 'sonner';
+
+const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 interface CommentModalProps {
     isOpen: boolean;
@@ -226,6 +229,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
 
     // Add Row modal
     const [showAddRow, setShowAddRow] = useState(false);
+    const [hideConfirm, setHideConfirm] = useState<{ client_id: string; client_name: string } | null>(null);
 
     const queryClient = useQueryClient();
 
@@ -532,6 +536,19 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
         onError: () => toast.error('Error al duplicar la fila')
     });
 
+    const hideRowMutation = useMutation({
+        mutationFn: (client_id: string) =>
+            adminApi.hideClient({ client_id, fiscal_year: year, fiscal_month: month }),
+        onSuccess: (_data, client_id) => {
+            setLocalRows(prev => prev.filter(r => r.client_id !== client_id));
+            queryClient.invalidateQueries({ queryKey: ['billing-matrix'] });
+            queryClient.invalidateQueries({ queryKey: ['billing-hidden-clients', year, month] });
+            toast.success(`Cliente ocultado a partir de ${MONTH_NAMES[month - 1]} ${year}`);
+            setHideConfirm(null);
+        },
+        onError: () => toast.error('Error al ocultar el cliente')
+    });
+
     const handleRowAction = (action: string, client_id: string) => {
         if (action === 'delete') {
             if (confirm('¿Estás seguro de que deseas eliminar esta fila? Se borrarán todos los datos de billing de este cliente para este mes.')) {
@@ -727,6 +744,13 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                                                 <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                                                 <DropdownMenuSeparator />
                                                 <DropdownMenuItem onClick={() => handleRowAction('duplicate', row.client_id)}><Copy className="mr-2 h-4 w-4" /> Duplicar Fila</DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    onClick={() => setHideConfirm({ client_id: row.client_id, client_name: row.client_name })}
+                                                    className="text-amber-600"
+                                                >
+                                                    <EyeOff className="mr-2 h-4 w-4" /> Ocultar Fila
+                                                </DropdownMenuItem>
+                                                <DropdownMenuSeparator />
                                                 <DropdownMenuItem onClick={() => handleRowAction('delete', row.client_id)} className="text-red-600"><Trash2 className="mr-2 h-4 w-4" /> Eliminar Fila</DropdownMenuItem>
                                             </DropdownMenuContent>
                                         </DropdownMenu>
@@ -913,6 +937,48 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                     onSelectExisting={handleAddExistingClient}
                     existingClients={allClients}
                 />
+
+                {/* Confirmación para ocultar fila */}
+                {hideConfirm && (
+                    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                        <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+                            <div className="flex items-start gap-3">
+                                <div className="p-2 rounded-full bg-amber-100 shrink-0">
+                                    <EyeOff size={18} className="text-amber-600" />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-gray-900">¿Ocultar este cliente?</h3>
+                                    <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+                                        <span className="font-medium text-gray-800">{hideConfirm.client_name}</span> dejará de
+                                        aparecer a partir de{' '}
+                                        <span className="font-medium text-gray-800">{MONTH_NAMES[month - 1]} {year}</span>.
+                                    </p>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Los meses anteriores con datos registrados no se ven afectados.
+                                        Los cálculos de fee y P&L permanecen intactos.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex gap-2 justify-end pt-1">
+                                <button
+                                    className="px-3 py-1.5 text-sm border rounded-md hover:bg-gray-50 disabled:opacity-50"
+                                    onClick={() => setHideConfirm(null)}
+                                    disabled={hideRowMutation.isPending}
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-md disabled:opacity-50"
+                                    onClick={() => hideRowMutation.mutate(hideConfirm.client_id)}
+                                    disabled={hideRowMutation.isPending}
+                                >
+                                    <EyeOff size={14} />
+                                    {hideRowMutation.isPending ? 'Ocultando...' : 'Ocultar en meses posteriores'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </>
     );

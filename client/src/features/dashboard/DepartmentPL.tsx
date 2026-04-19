@@ -10,6 +10,7 @@ import {
     ReferenceLine
 } from 'recharts';
 import { CommentModal } from '@/features/pl/PLMatrix';
+import { useUrlState } from '@/hooks/useUrlState';
 
 const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación'] as const;
 type TabType = typeof TABS[number];
@@ -50,6 +51,7 @@ const EXPENSE_STRUCTURE = {
         { dept: 'Imcontent', items: ['Externos'] },
         { dept: 'Immoralia', items: ['Externos'] },
         { dept: 'Imsales', items: ['Jorge Orts'] },
+        { dept: 'Imfilms', items: ['Olga Garasym'] },
     ],
     comisionesItems: [
         { dept: 'Imfilms', items: ['The connector'] },
@@ -124,8 +126,8 @@ export default function DepartmentPL() {
     const deptNames = config?.deptNames || [deptCode || ''];
     const deptLabel = config?.label || deptCode || 'Departamento';
 
-    const [year, setYear] = useState(new Date().getFullYear());
-    const [activeTab, setActiveTab] = useState<TabType>('Dashboard');
+    const [year, setYear] = useUrlState('year', new Date().getFullYear(), (v) => Number(v));
+    const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Dashboard');
     const [bannerMonth, setBannerMonth] = useState<number | 'ytd'>('ytd');
     const [cellValues, setCellValues] = useState<Record<string, number>>({});
     const queryClient = useQueryClient();
@@ -258,23 +260,17 @@ export default function DepartmentPL() {
         queryKey: ['pl-matrix', year, typeParam],
         queryFn: () => adminApi.getPLMatrix(year, typeParam),
         enabled: activeTab !== 'Comparación',
-        refetchOnWindowFocus: true,
-        staleTime: 0
     });
 
     // Fetch both for Comparación and Dashboard
     const { data: realData } = useQuery({
         queryKey: ['pl-matrix', year, 'real'],
         queryFn: () => adminApi.getPLMatrix(year, 'real' as 'budget' | 'real'),
-        refetchOnWindowFocus: true,
-        staleTime: 0
     });
 
     const { data: budgetData } = useQuery({
         queryKey: ['pl-matrix', year, 'budget'],
         queryFn: () => adminApi.getPLMatrix(year, 'budget'),
-        refetchOnWindowFocus: true,
-        staleTime: 0
     });
 
     // Custom rows query — filtered by year
@@ -318,12 +314,10 @@ export default function DepartmentPL() {
         return merged;
     }, [customRows]);
 
-    // Clear cellValues when switching tabs or year
-    useEffect(() => {
-        setCellValues({});
-    }, [typeParam, year]);
+    // Populate cellValues from API data.
+    // Uses string key to avoid re-parsing on background refetches while editing.
+    const prevMatrixRef = useRef<string | null>(null);
 
-    // Populate cellValues from API data
     // Build reverse mapping for expense items: "dept::item" → [section_key, ...]
     // Uses merged structure so custom rows are included
     const expenseSectionMap = useMemo(() => {
@@ -342,6 +336,10 @@ export default function DepartmentPL() {
 
     useEffect(() => {
         if (!matrixData?.sections) return;
+
+        const currentKey = JSON.stringify([year, typeParam]);
+        if (prevMatrixRef.current === currentKey) return;
+        prevMatrixRef.current = currentKey;
 
         const newValues: Record<string, number> = {};
 
@@ -392,7 +390,14 @@ export default function DepartmentPL() {
         }
 
         setCellValues(prev => ({ ...prev, ...newValues }));
-    }, [matrixData, typeParam, expenseSectionMap]);
+    }, [matrixData, typeParam, expenseSectionMap, year]);
+
+    // Remove cache on unmount so the next visit always fetches fresh data
+    useEffect(() => {
+        return () => {
+            queryClient.removeQueries({ queryKey: ['pl-matrix', year] });
+        };
+    }, [year, queryClient]);
 
     // Populate comparison data
     const [compRealValues, setCompRealValues] = useState<Record<string, number>>({});

@@ -53,5 +53,29 @@ export const mediaApi = {
             method: 'POST',
             body: JSON.stringify(data),
         });
-    }
+    },
+
+    hideClient: async (data: {
+        client_id: string;
+        fiscal_year: number;
+        fiscal_month: number;
+    }) => {
+        return fetchApi('/media/hide-client', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
+
+    getHiddenClients: async (year: number, month: number): Promise<{
+        hidden: Array<{ id: string; name: string; hidden_from_yyyymm: number }>
+    }> => {
+        return fetchApi(`/media/hidden-clients/${year}/${month}`);
+    },
+
+    unhideClient: async (data: { client_id: string; fiscal_year: number; fiscal_month: number }) => {
+        return fetchApi('/media/unhide-client', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
 };

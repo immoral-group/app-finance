@@ -7,7 +7,7 @@ import { fetchApi } from './client';
 export interface Beneficiary {
     id: string;
     name: string;
-    type: 'equipo' | 'influencer' | 'comisiones' | 'transfer' | 'piso_yure';
+    type: 'equipo' | 'influencer' | 'comisiones' | 'transfer' | 'piso_yure' | 'proveedor';
     bank_details?: string;
     preferred_payment_method?: string;
     notes?: string;
@@ -31,7 +31,7 @@ export interface Payment {
     commission_amount: number;
     incentives_amount: number;
     total_amount: number;
-    currency: 'EUR' | 'USD';
+    currency: 'EUR' | 'USD' | 'COP';
     payment_status: 'pendiente' | 'programado' | 'pagado';
     payment_date?: string;
     due_date?: string;
@@ -56,7 +56,7 @@ export type UpdatePaymentDTO = Partial<Omit<Payment, 'id' | 'created_at' | 'upda
 
 export type CreateBeneficiaryDTO = {
     name: string;
-    type?: 'equipo' | 'influencer' | 'comisiones' | 'transfer' | 'piso_yure';
+    type?: 'equipo' | 'influencer' | 'comisiones' | 'transfer' | 'piso_yure' | 'proveedor';
     bank_details?: string;
     preferred_payment_method?: string;
     notes?: string;

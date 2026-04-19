@@ -13,6 +13,7 @@ import {
     Eye, AlertCircle, CalendarRange
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
 
 type PaymentTab = 'payments' | 'beneficiaries';
 
@@ -22,6 +23,7 @@ const BENEFICIARY_TYPES = [
     { value: 'comisiones', label: 'Comisiones' },
     { value: 'transfer', label: 'Transfer' },
     { value: 'piso_yure', label: 'Piso Yure' },
+    { value: 'proveedor', label: 'Proveedor' },
 ];
 
 const PAYMENT_TYPES = BENEFICIARY_TYPES;
@@ -48,7 +50,7 @@ const emptyPaymentForm = {
     base_amount: '',
     commission_amount: '',
     incentives_amount: '',
-    currency: 'EUR' as 'EUR' | 'USD',
+    currency: 'EUR' as 'EUR' | 'USD' | 'COP',
     payment_date: '',
     due_date: '',
     notes: '',
@@ -170,12 +172,14 @@ export default function Payments() {
 
     const programados = useMemo(() => payments.filter(p => p.payment_status === 'programado'), [payments]);
 
-    const { pagadoEUR, pagadoUSD, pendienteEUR, pendienteUSD } = useMemo(() => {
+    const { pagadoEUR, pagadoUSD, pagadoCOP, pendienteEUR, pendienteUSD, pendienteCOP } = useMemo(() => {
         const pEUR = filteredPayments.filter(p => p.payment_status === 'pagado' && p.currency === 'EUR').reduce((s, p) => s + Number(p.total_amount), 0);
         const pUSD = filteredPayments.filter(p => p.payment_status === 'pagado' && p.currency === 'USD').reduce((s, p) => s + Number(p.total_amount), 0);
+        const pCOP = filteredPayments.filter(p => p.payment_status === 'pagado' && p.currency === 'COP').reduce((s, p) => s + Number(p.total_amount), 0);
         const pendEUR = filteredPayments.filter(p => p.payment_status !== 'pagado' && p.currency === 'EUR').reduce((s, p) => s + Number(p.total_amount), 0);
         const pendUSD = filteredPayments.filter(p => p.payment_status !== 'pagado' && p.currency === 'USD').reduce((s, p) => s + Number(p.total_amount), 0);
-        return { pagadoEUR: pEUR, pagadoUSD: pUSD, pendienteEUR: pendEUR, pendienteUSD: pendUSD };
+        const pendCOP = filteredPayments.filter(p => p.payment_status !== 'pagado' && p.currency === 'COP').reduce((s, p) => s + Number(p.total_amount), 0);
+        return { pagadoEUR: pEUR, pagadoUSD: pUSD, pagadoCOP: pCOP, pendienteEUR: pendEUR, pendienteUSD: pendUSD, pendienteCOP: pendCOP };
     }, [filteredPayments]);
 
     // Unique banks for filter
@@ -480,7 +484,9 @@ export default function Payments() {
                             {pagadoEUR > 0 && <span>{formatCurrencyWithDecimals(pagadoEUR, 'EUR')}</span>}
                             {pagadoEUR > 0 && pagadoUSD > 0 && <span className="text-muted-foreground/50">|</span>}
                             {pagadoUSD > 0 && <span>{formatCurrencyWithDecimals(pagadoUSD, 'USD')}</span>}
-                            {pagadoEUR === 0 && pagadoUSD === 0 && <span>€0.00</span>}
+                            {(pagadoEUR > 0 || pagadoUSD > 0) && pagadoCOP > 0 && <span className="text-muted-foreground/50">|</span>}
+                            {pagadoCOP > 0 && <span>{formatCurrencyWithDecimals(pagadoCOP, 'COP')}</span>}
+                            {pagadoEUR === 0 && pagadoUSD === 0 && pagadoCOP === 0 && <span>€0.00</span>}
                         </span>
                         <div className="h-5 w-px bg-border" />
                         <span className="text-amber-600 flex items-center gap-2">
@@ -488,7 +494,9 @@ export default function Payments() {
                             {pendienteEUR > 0 && <span>{formatCurrencyWithDecimals(pendienteEUR, 'EUR')}</span>}
                             {pendienteEUR > 0 && pendienteUSD > 0 && <span className="text-muted-foreground/50">|</span>}
                             {pendienteUSD > 0 && <span>{formatCurrencyWithDecimals(pendienteUSD, 'USD')}</span>}
-                            {pendienteEUR === 0 && pendienteUSD === 0 && <span>€0.00</span>}
+                            {(pendienteEUR > 0 || pendienteUSD > 0) && pendienteCOP > 0 && <span className="text-muted-foreground/50">|</span>}
+                            {pendienteCOP > 0 && <span>{formatCurrencyWithDecimals(pendienteCOP, 'COP')}</span>}
+                            {pendienteEUR === 0 && pendienteUSD === 0 && pendienteCOP === 0 && <span>€0.00</span>}
                         </span>
                     </div>
 
@@ -509,6 +517,7 @@ export default function Payments() {
                                         <th className="h-10 px-3 text-right font-medium text-muted-foreground">Comisión</th>
                                         <th className="h-10 px-3 text-right font-medium text-muted-foreground">Total EUR</th>
                                         <th className="h-10 px-3 text-right font-medium text-muted-foreground">Total USD</th>
+                                        <th className="h-10 px-3 text-right font-medium text-muted-foreground">Total COP</th>
                                         <th className="h-10 px-3 text-center font-medium text-muted-foreground">Estado</th>
                                         <th className="h-10 px-3 text-center font-medium text-muted-foreground">Fecha Pago</th>
                                         <th className="h-10 px-3 text-center font-medium text-muted-foreground w-24">Acciones</th>
@@ -516,15 +525,16 @@ export default function Payments() {
                                 </thead>
                                 <tbody>
                                     {loadingPayments ? (
-                                        <tr><td colSpan={14} className="p-8 text-center text-muted-foreground bg-white"><Loader2 className="animate-spin mx-auto w-6 h-6" /></td></tr>
+                                        <tr><td colSpan={15} className="p-8 text-center text-muted-foreground bg-white"><Loader2 className="animate-spin mx-auto w-6 h-6" /></td></tr>
                                     ) : filteredPayments.length === 0 ? (
-                                        <tr><td colSpan={14} className="p-8 text-center text-muted-foreground bg-white">No se encontraron pagos.</td></tr>
+                                        <tr><td colSpan={15} className="p-8 text-center text-muted-foreground bg-white">No se encontraron pagos.</td></tr>
                                     ) : (
                                         filteredPayments.map(p => {
                                             const sc = STATUS_CONFIG[p.payment_status] || STATUS_CONFIG.pendiente;
                                             const bankDetails = getBeneficiaryBankDetails(p);
                                             const totalEUR = p.currency === 'EUR' ? p.total_amount : 0;
                                             const totalUSD = p.currency === 'USD' ? p.total_amount : 0;
+                                            const totalCOP = p.currency === 'COP' ? p.total_amount : 0;
                                             return (
                                                 <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors">
                                                     <td className="p-3">
@@ -563,6 +573,14 @@ export default function Payments() {
                                                             <span className="flex items-center justify-end">
                                                                 {formatCurrencyWithDecimals(totalUSD, 'USD')}
                                                                 <CopyButton text={String(totalUSD)} />
+                                                            </span>
+                                                        ) : '—'}
+                                                    </td>
+                                                    <td className="p-3 text-right font-bold text-orange-700">
+                                                        {totalCOP > 0 ? (
+                                                            <span className="flex items-center justify-end">
+                                                                {formatCurrencyWithDecimals(totalCOP, 'COP')}
+                                                                <CopyButton text={String(totalCOP)} />
                                                             </span>
                                                         ) : '—'}
                                                     </td>
@@ -710,9 +728,10 @@ export default function Payments() {
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-medium">Moneda</label>
-                                <select className="w-full h-10 px-3 border rounded-md bg-background text-sm" value={paymentForm.currency} onChange={e => setPaymentForm({ ...paymentForm, currency: e.target.value as 'EUR' | 'USD' })}>
+                                <select className="w-full h-10 px-3 border rounded-md bg-background text-sm" value={paymentForm.currency} onChange={e => setPaymentForm({ ...paymentForm, currency: e.target.value as 'EUR' | 'USD' | 'COP' })}>
                                     <option value="EUR">EUR (€)</option>
                                     <option value="USD">USD ($)</option>
+                                    <option value="COP">COP ($)</option>
                                 </select>
                             </div>
                             <div className="space-y-1">
@@ -806,6 +825,9 @@ export default function Payments() {
                     </div>
                 </div>
             )}
+
+            {/* Historial de cambios */}
+            <ChangeLogPanel module="payments" />
 
             {/* MODAL: VIEW BANK DETAILS */}
             {viewBankDetailsFor && (

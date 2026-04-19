@@ -1,6 +1,7 @@
 import express from 'express';
 import Joi from 'joi';
 import supabase from '../config/supabase.js';
+import { logChange, extractUser } from '../utils/changeLogger.js';
 
 const router = express.Router();
 
@@ -451,6 +452,9 @@ router.post('/commissions', async (req, res) => {
             resultData.notes = actualNotes;
         }
 
+        const { userId: _c1Uid, userEmail: _c1Ue } = extractUser(req);
+        logChange(supabase, { module: 'commissions', table: 'monthly_partner_commissions', recordId: resultData?.id, recordLabel: `Comisión creada — ${value.commission_amount} · ${value.fiscal_year}/${String(value.fiscal_month).padStart(2, '0')}`, operation: 'create', newValue: String(value.commission_amount), userId: _c1Uid, userEmail: _c1Ue }).catch(() => {});
+
         res.json({
             success: true,
             message: 'Commission created successfully',
@@ -534,6 +538,9 @@ router.patch('/commissions/:id', async (req, res) => {
             data.notes = actualNotes;
         }
 
+        const { userId: _c2Uid, userEmail: _c2Ue } = extractUser(req);
+        logChange(supabase, { module: 'commissions', table: 'monthly_partner_commissions', recordId: id, recordLabel: `Comisión editada`, operation: 'update', userId: _c2Uid, userEmail: _c2Ue }).catch(() => {});
+
         res.json({
             success: true,
             message: 'Commission updated successfully',
@@ -559,6 +566,8 @@ router.delete('/commissions/:id', async (req, res) => {
             .eq('id', id);
 
         if (error) throw error;
+        const { userId: _c3Uid, userEmail: _c3Ue } = extractUser(req);
+        logChange(supabase, { module: 'commissions', table: 'monthly_partner_commissions', recordId: id, recordLabel: `Comisión eliminada`, operation: 'delete', userId: _c3Uid, userEmail: _c3Ue }).catch(() => {});
         res.json({ success: true, message: 'Commission deleted successfully' });
     } catch (error) {
         console.error('Error deleting commission:', error);
@@ -598,6 +607,9 @@ router.post('/commissions/:id/pay', async (req, res) => {
         if (updateError) {
             return res.status(500).json({ error: 'Failed to mark as paid', details: updateError.message });
         }
+
+        const { userId: _c4Uid, userEmail: _c4Ue } = extractUser(req);
+        logChange(supabase, { module: 'commissions', table: 'monthly_partner_commissions', recordId: id, recordLabel: `Comisión marcada como pagada`, operation: 'update', fieldName: 'is_paid', newValue: 'true', userId: _c4Uid, userEmail: _c4Ue }).catch(() => {});
 
         res.json({
             success: true,

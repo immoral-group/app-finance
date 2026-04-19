@@ -7,7 +7,7 @@
 CREATE TABLE IF NOT EXISTS beneficiaries (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    type VARCHAR(20) NOT NULL DEFAULT 'transfer' CHECK (type IN ('equipo', 'influencer', 'comisiones', 'transfer', 'piso_yure')),
+    type VARCHAR(20) NOT NULL DEFAULT 'transfer' CHECK (type IN ('equipo', 'influencer', 'comisiones', 'transfer', 'piso_yure', 'proveedor')),
     bank_details TEXT,
     preferred_payment_method VARCHAR(100),
     notes TEXT,
@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 COMMENT ON TABLE payments IS 'Registro completo de pagos de la empresa';
+
+-- ============================================================
+-- MIGRATION: Add 'proveedor' type to beneficiaries
+-- Run this in Supabase SQL Editor if the table already exists
+-- ============================================================
+-- ALTER TABLE beneficiaries DROP CONSTRAINT IF EXISTS beneficiaries_type_check;
+-- ALTER TABLE beneficiaries ADD CONSTRAINT beneficiaries_type_check
+--     CHECK (type IN ('equipo', 'influencer', 'comisiones', 'transfer', 'piso_yure', 'proveedor'));
 
 -- 3. Index for faster queries
 CREATE INDEX IF NOT EXISTS idx_payments_fiscal ON payments(fiscal_year, fiscal_month);

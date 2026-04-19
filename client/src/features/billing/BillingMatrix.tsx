@@ -1,24 +1,47 @@
 import { useState, useCallback } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { MatrixGrid } from './MatrixGrid';
 import { PeriodSelector } from '@/components/shared/PeriodSelector';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Download, UserPlus } from 'lucide-react';
+import { Download, UserPlus, EyeOff, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 import { ClientModal } from '@/features/clients/components/ClientModal';
 import { clientsApi } from '@/lib/api/clients';
 import { CreateClientDTO } from '@/types/client';
 import { toast } from 'sonner';
+import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
+
+const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 
 export default function BillingMatrix() {
     const [date, setDate] = useState(new Date());
     const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+    const [hiddenPanelOpen, setHiddenPanelOpen] = useState(false);
 
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
     const queryClient = useQueryClient();
+
+    // Query clientes ocultos en este período
+    const { data: hiddenData } = useQuery({
+        queryKey: ['billing-hidden-clients', year, month],
+        queryFn: () => adminApi.getHiddenClients(year, month),
+        staleTime: 30_000,
+    });
+    const hiddenClients = hiddenData?.hidden ?? [];
+
+    const unhideClientMutation = useMutation({
+        mutationFn: (client_id: string) => adminApi.unhideClient({ client_id, fiscal_year: year, fiscal_month: month }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['billing-matrix', year, month] });
+            queryClient.invalidateQueries({ queryKey: ['billing-hidden-clients', year, month] });
+            toast.success('Cliente reactivado y visible nuevamente');
+        },
+        onError: () => toast.error('Error al reactivar el cliente'),
+    });
 
     // Fetch billing data (MATRIX VIEW)
     const { data: matrixData, isLoading, isError } = useQuery({
@@ -167,6 +190,54 @@ export default function BillingMatrix() {
                 </div>
             </div>
 
+            {/* Banner de clientes ocultos */}
+            {hiddenClients.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 overflow-hidden">
+                    <button
+                        onClick={() => setHiddenPanelOpen(o => !o)}
+                        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-amber-100/60 transition-colors"
+                    >
+                        <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
+                            <EyeOff size={14} />
+                            <span>
+                                {hiddenClients.length} cliente{hiddenClients.length > 1 ? 's' : ''} oculto{hiddenClients.length > 1 ? 's' : ''} en este período
+                            </span>
+                            <span className="text-amber-500 font-normal text-xs">— haz clic para ver cuáles</span>
+                        </div>
+                        {hiddenPanelOpen
+                            ? <ChevronUp size={14} className="text-amber-500" />
+                            : <ChevronDown size={14} className="text-amber-500" />}
+                    </button>
+
+                    {hiddenPanelOpen && (
+                        <div className="border-t border-amber-200 divide-y divide-amber-100">
+                            {hiddenClients.map(client => {
+                                const hiddenYear = Math.floor(client.hidden_from_yyyymm / 100);
+                                const hiddenMonth = client.hidden_from_yyyymm % 100;
+                                return (
+                                    <div key={client.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
+                                        <div>
+                                            <span className="text-sm font-medium text-gray-800">{client.name}</span>
+                                            <span className="ml-2 text-xs text-muted-foreground">
+                                                Oculto desde {MONTH_NAMES[hiddenMonth - 1]} {hiddenYear}
+                                            </span>
+                                        </div>
+                                        <button
+                                            onClick={() => unhideClientMutation.mutate(client.id)}
+                                            disabled={unhideClientMutation.isPending}
+                                            className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium bg-white border border-gray-200 hover:border-green-400 hover:text-green-700 hover:bg-green-50 transition-colors disabled:opacity-50"
+                                        >
+                                            <Eye size={12} />
+                                            Mostrar
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
+
             <Card className="overflow-hidden border-none shadow-none bg-transparent">
                 <div className="p-0">
                     {isLoading ? (
@@ -194,6 +265,9 @@ export default function BillingMatrix() {
                 onClose={() => setIsClientModalOpen(false)}
                 onSave={handleCreateClient}
             />
+
+            {/* Historial de cambios */}
+            <ChangeLogPanel module="billing" />
         </div>
     );
 }

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
+import { useUrlState } from '@/hooks/useUrlState';
 import {
     Wallet,
     TrendingUp,
@@ -60,6 +61,7 @@ const EXPENSE_STRUCTURE = {
         { dept: 'Imcontent', items: ['Externos'] },
         { dept: 'Immoralia', items: ['Externos'] },
         { dept: 'Imsales', items: ['Jorge Orts'] },
+        { dept: 'Imfilms', items: ['Olga Garasym'] },
     ],
     comisionesItems: [
         { dept: 'Imfilms', items: ['The connector'] },
@@ -192,6 +194,7 @@ const DEPT_CONFIGS: Record<string, {
         label: 'Imfilms',
         deptNames: ['Imfilms'],
         expenseCategories: [
+            { label: 'Personal', key: 'personal' },
             { label: 'Comisiones', key: 'comisiones' },
             { label: 'Marketing', key: 'marketing' },
         ],
@@ -204,6 +207,7 @@ const DEPT_CONFIGS: Record<string, {
         label: 'Imfashion',
         deptNames: ['Imfashion'],
         expenseCategories: [
+            { label: 'Personal', key: 'personal' },
             { label: 'Comisiones', key: 'comisiones' },
             { label: 'Marketing', key: 'marketing' },
             { label: 'Formación', key: 'formacion' },
@@ -262,9 +266,9 @@ function DashboardContent() {
         departments: true,
     });
     const [isConfiguring, setIsConfiguring] = useState(false);
-    const [deptFilter, setDeptFilter] = useState<'all' | 'main' | 'verticals'>('main');
+    const [deptFilter, setDeptFilter] = useUrlState<'all' | 'main' | 'verticals'>('depts', 'main');
     const [visibleVerticals, setVisibleVerticals] = useState<Set<string>>(new Set());
-    const [dashboardTab, setDashboardTab] = useState<DashboardTab>('general');
+    const [dashboardTab, setDashboardTab] = useUrlState<DashboardTab>('tab', 'general');
     const [showGroupForCards, setShowGroupForCards] = useState<Set<string>>(new Set());
 
     // Holded invoice detail modal
@@ -292,9 +296,9 @@ function DashboardContent() {
     };
 
     // Time period state
-    const [timePeriod, setTimePeriod] = useState<TimePeriod>('annual');
-    const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-    const [selectedQuarter, setSelectedQuarter] = useState(Math.floor(new Date().getMonth() / 3));
+    const [timePeriod, setTimePeriod] = useUrlState<TimePeriod>('period', 'annual');
+    const [selectedMonth, setSelectedMonth] = useUrlState('month', new Date().getMonth(), (v) => Number(v));
+    const [selectedQuarter, setSelectedQuarter] = useUrlState('quarter', Math.floor(new Date().getMonth() / 3), (v) => Number(v));
 
     // Get active months based on time period
     const activeMonths = useMemo(() => {
@@ -1025,17 +1029,15 @@ function DashboardContent() {
                         onClick={e => e.stopPropagation()}
                     >
                         {/* Header */}
-                        <div className={`flex items-center justify-between px-6 py-4 border-b rounded-t-2xl ${
-                            holdedDetailType === 'overdue'
-                                ? 'bg-gradient-to-r from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20'
-                                : 'bg-gradient-to-r from-orange-50 to-orange-100/50 dark:from-orange-950/30 dark:to-orange-900/20'
-                        }`}>
+                        <div className={`flex items-center justify-between px-6 py-4 border-b rounded-t-2xl ${holdedDetailType === 'overdue'
+                            ? 'bg-gradient-to-r from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20'
+                            : 'bg-gradient-to-r from-orange-50 to-orange-100/50 dark:from-orange-950/30 dark:to-orange-900/20'
+                            }`}>
                             <div className="flex items-center gap-3">
-                                <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${
-                                    holdedDetailType === 'overdue'
-                                        ? 'bg-red-100 dark:bg-red-900/40 text-red-600'
-                                        : 'bg-orange-100 dark:bg-orange-900/40 text-orange-600'
-                                }`}>
+                                <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${holdedDetailType === 'overdue'
+                                    ? 'bg-red-100 dark:bg-red-900/40 text-red-600'
+                                    : 'bg-orange-100 dark:bg-orange-900/40 text-orange-600'
+                                    }`}>
                                     {holdedDetailType === 'overdue' ? <AlertCircle size={18} /> : <FileText size={18} />}
                                 </div>
                                 <div>

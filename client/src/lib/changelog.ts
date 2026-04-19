@@ -22,6 +22,33 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.26-pl-matrix-imfilms-personal',
+        date: '2026-04-19',
+        title: 'P&L Matrix: Personal Imfilms',
+        description: 'Nueva fila de Gastos de Personal para Imfilms — Olga Garasym. El gasto registrado se refleja automáticamente en la tarjeta de Imfilms del Dashboard, que ahora incluye la categoría Personal.',
+        type: 'improvement',
+        moduleKey: 'pl',
+        icon: 'Building2',
+    },
+    {
+        id: 'v1.25-media-month-review-warning',
+        date: '2026-04-19',
+        title: 'Media Investment: Aviso de Revisión de Mes',
+        description: 'Al entrar al módulo de Control de Inversión de Medios aparece un aviso recordando que la facturación se hace a mes vencido. El botón de confirmación se habilita tras 5 segundos para asegurar que se ha leído.',
+        type: 'improvement',
+        moduleKey: 'media',
+        icon: 'AlertCircle',
+    },
+    {
+        id: 'v1.24-hide-client-history-fix',
+        date: '2026-04-19',
+        title: 'Fix: Historial de Clientes Ocultos',
+        description: 'Corregido un error por el que reactivar un cliente en un mes posterior borraba su estado oculto en meses anteriores. Ahora el aviso de clientes ocultos persiste correctamente en todos los períodos donde aplica, tanto en Billing Matrix como en Media Investment.',
+        type: 'fix',
+        moduleKey: 'billing',
+        icon: 'EyeOff',
+    },
+    {
         id: 'v1.23-dashboard-holded-detail-modal',
         date: '2026-03-26',
         title: 'Dashboard: Detalle de Facturas',

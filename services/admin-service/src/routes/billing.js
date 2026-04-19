@@ -2,6 +2,7 @@ import express from 'express';
 import Joi from 'joi';
 import supabase from '../config/supabase.js';
 import { createNotifications } from './notifications.js';
+import { logChange, extractUser } from '../utils/changeLogger.js';
 
 const router = express.Router();
 
@@ -40,6 +41,8 @@ router.get('/matrix', async (req, res) => {
                     name,
                     vertical_id,
                     fee_config,
+                    hidden_from_yyyymm,
+                    visible_from_yyyymm,
                     vertical:verticals(code, name)
                 `)
                 .in('id', assignedClientIds)
@@ -50,6 +53,14 @@ router.get('/matrix', async (req, res) => {
         }
 
         if (clientError) throw clientError;
+
+        // Filtrar clientes ocultos para este mes (no afecta cálculos de fees — solo la respuesta visual)
+        // Un cliente está oculto en X si: hidden_from_yyyymm <= X AND (visible_from_yyyymm IS NULL OR visible_from_yyyymm > X)
+        const yyyymm = parseInt(year) * 100 + parseInt(month);
+        const visibleClients = clients.filter(c => {
+            if (!c.hidden_from_yyyymm || c.hidden_from_yyyymm > yyyymm) return true;   // nunca oculto o oculto en futuro
+            return c.visible_from_yyyymm != null && c.visible_from_yyyymm <= yyyymm;    // fue reactivado antes o en este mes
+        });
 
         // 1b. Fetch Contracts separately (for Vencimiento)
         const clientIds = clients.map(c => c.id);
@@ -373,8 +384,8 @@ router.get('/matrix', async (req, res) => {
             }
         }
 
-        // 6. Structure Data
-        const matrix = clients.map(client => {
+        // 6. Structure Data (solo clientes visibles en este período)
+        const matrix = visibleClients.map(client => {
             const billing = billingRecords.find(b => b.client_id === client.id) || null;
             const clientDetails = billing ? details.filter(d => d.monthly_billing_id === billing.id) : [];
 
@@ -439,6 +450,123 @@ router.get('/matrix', async (req, res) => {
 
     } catch (err) {
         console.error('Matrix Error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * GET /billing/hidden-clients?year=X&month=Y
+ * Devuelve clientes asignados a ese año que están ocultos en ese período
+ */
+router.get('/hidden-clients', async (req, res) => {
+    try {
+        const { year, month } = req.query;
+        if (!year || !month) return res.status(400).json({ error: 'Year and month required' });
+
+        const yyyymm = parseInt(year) * 100 + parseInt(month);
+
+        // Solo clientes asignados a este año
+        const { data: assignments } = await supabase
+            .from('client_year_assignments')
+            .select('client_id')
+            .eq('fiscal_year', parseInt(year))
+            .eq('is_active', true);
+
+        const assignedIds = (assignments || []).map(a => a.client_id);
+        if (assignedIds.length === 0) return res.json({ hidden: [] });
+
+        const { data: allHidden, error } = await supabase
+            .from('clients')
+            .select('id, name, hidden_from_yyyymm, visible_from_yyyymm')
+            .in('id', assignedIds)
+            .eq('is_active', true)
+            .not('hidden_from_yyyymm', 'is', null)
+            .lte('hidden_from_yyyymm', yyyymm)
+            .order('name');
+
+        if (error) return res.status(500).json({ error: error.message });
+
+        // Excluir los que ya fueron reactivados antes o en este mes
+        const hidden = (allHidden || []).filter(c =>
+            c.visible_from_yyyymm == null || c.visible_from_yyyymm > yyyymm
+        );
+
+        res.json({ hidden });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /billing/hide-client
+ * Oculta un cliente a partir del mes indicado (solo visual, no borra datos)
+ */
+router.post('/hide-client', async (req, res) => {
+    try {
+        const schema = Joi.object({
+            client_id:    Joi.string().uuid().required(),
+            fiscal_year:  Joi.number().integer().required(),
+            fiscal_month: Joi.number().integer().min(1).max(12).required(),
+        });
+        const { error, value } = schema.validate(req.body);
+        if (error) return res.status(400).json({ error: error.details[0].message });
+
+        const yyyymm = value.fiscal_year * 100 + value.fiscal_month;
+        const { error: updateError } = await supabase
+            .from('clients')
+            .update({ hidden_from_yyyymm: yyyymm, visible_from_yyyymm: null })
+            .eq('id', value.client_id);
+
+        if (updateError) return res.status(500).json({ error: updateError.message });
+
+        const { userId, userEmail } = extractUser(req);
+        logChange(supabase, {
+            module: 'billing', table: 'clients', recordId: value.client_id,
+            recordLabel: `Cliente oculto desde ${value.fiscal_year}/${String(value.fiscal_month).padStart(2, '0')}`,
+            operation: 'update', fieldName: 'hidden_from_yyyymm', newValue: String(yyyymm),
+            userId, userEmail,
+        }).catch(() => {});
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /billing/unhide-client
+ * Reactiva un cliente oculto
+ */
+router.post('/unhide-client', async (req, res) => {
+    try {
+        const schema = Joi.object({
+            client_id:    Joi.string().uuid().required(),
+            fiscal_year:  Joi.number().integer().required(),
+            fiscal_month: Joi.number().integer().min(1).max(12).required(),
+        });
+        const { error, value } = schema.validate(req.body);
+        if (error) return res.status(400).json({ error: error.details[0].message });
+
+        // Marcar visible_from_yyyymm en lugar de borrar hidden_from_yyyymm,
+        // para preservar el historial en meses anteriores
+        const visibleFrom = value.fiscal_year * 100 + value.fiscal_month;
+        const { error: updateError } = await supabase
+            .from('clients')
+            .update({ visible_from_yyyymm: visibleFrom })
+            .eq('id', value.client_id);
+
+        if (updateError) return res.status(500).json({ error: updateError.message });
+
+        const { userId, userEmail } = extractUser(req);
+        logChange(supabase, {
+            module: 'billing', table: 'clients', recordId: value.client_id,
+            recordLabel: `Cliente reactivado en Billing Matrix desde ${value.fiscal_year}/${String(value.fiscal_month).padStart(2, '0')}`,
+            operation: 'update', fieldName: 'visible_from_yyyymm', newValue: String(visibleFrom),
+            userId, userEmail,
+        }).catch(() => {});
+
+        res.json({ success: true });
+    } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
@@ -530,7 +658,7 @@ router.post('/matrix/save', async (req, res) => {
             // Upsert Detail
             const { data: existingDetail } = await supabase
                 .from('billing_details')
-                .select('id, cell_metadata')
+                .select('id, cell_metadata, amount')
                 .eq('monthly_billing_id', billing.id)
                 .eq('service_id', service_id)
                 .single();
@@ -583,6 +711,32 @@ router.post('/matrix/save', async (req, res) => {
                     const body = `Cliente · ${field || service_id} · ${year}/${month}${comment ? `\n"${comment}"` : ''}`;
                     createNotifications(assigned_to, 'note_assigned', title, body, 'billing_note', `${client_id}-${service_id}-${year}-${month}`)
                         .catch(e => console.error('Billing notif error:', e.message));
+                }
+            }
+
+            // Log cambio de celda: detecta create/update/delete, omite guardados de solo-comentario
+            if (value !== undefined && value !== null) {
+                const { userId: _bUid, userEmail: _bUe } = extractUser(req);
+                let _billingOp;
+                if (isEmptyValue && !hasComment && existingDetail) {
+                    _billingOp = 'delete';
+                } else if (!existingDetail && !isEmptyValue) {
+                    _billingOp = 'create';
+                } else if (existingDetail && !isEmptyValue && Math.abs(numValue - parseFloat(existingDetail.amount || 0)) > 0.001) {
+                    _billingOp = 'update';
+                }
+                if (_billingOp) {
+                    logChange(supabase, {
+                        module: 'billing',
+                        table: 'billing_details',
+                        recordId: existingDetail?.id || null,
+                        recordLabel: `${service.name} — ${year}/${String(month).padStart(2, '0')}`,
+                        operation: _billingOp,
+                        fieldName: 'amount',
+                        oldValue: existingDetail ? String(parseFloat(existingDetail.amount || 0)) : null,
+                        newValue: _billingOp !== 'delete' ? String(numValue) : null,
+                        userId: _bUid, userEmail: _bUe,
+                    }).catch(() => {});
                 }
             }
 

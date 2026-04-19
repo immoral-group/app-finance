@@ -2,12 +2,46 @@
 
 This directory contains all SQL files for setting up the Immoral Finance App database in Supabase.
 
+---
+
+## ⚡ Migraciones recientes (ejecutar si recreas la BD o incorporas a un equipo nuevo)
+
+Las migraciones están en `database/migrations/`. Todas usan `IF NOT EXISTS` / `IF EXISTS` — son seguras de re-ejecutar.
+
+| Archivo | Fecha | Qué hace |
+|---|---|---|
+| `migrations/001_user_roles.sql` | — | Roles de usuario |
+| `migrations/002_fix_user_profiles.sql` | — | Fix perfiles |
+| `migrations/05_add_actuals_column.sql` | — | Columna actuals |
+| `migrations/06_add_cell_metadata.sql` | — | Metadatos de celda |
+| `migrations/add_fee_config.sql` | — | Config de fees |
+| `migrations/add_pl_custom_rows.sql` | — | Filas custom en P&L |
+| `migrations/cleanup_duplicate_expenses.sql` | — | Limpieza duplicados |
+| `change_log.sql` _(raíz database/)_ | 2026-04-17 | Tabla `change_log` para historial de cambios por módulo |
+| `migrations/add_proveedor_cop_payments.sql` | 2026-04-17 | Tipo `proveedor` en beneficiaries + permite COP en payments |
+| `migrations/add_hidden_from_clients.sql` | 2026-04-17 | Columna `hidden_from_yyyymm` en `clients` para ocultar filas por período |
+
+### Orden de ejecución para una BD desde cero
+```
+1. schema.sql
+2. functions.sql
+3. materialized_views.sql
+4. rls_policies.sql
+5. (migrations/* en orden cronológico)
+6. change_log.sql
+7. migrations/add_proveedor_cop_payments.sql
+8. migrations/add_hidden_from_clients.sql
+```
+
+---
+
 ## Files
 
 - **schema.sql** - Complete database schema with tables, indexes, and constraints
 - **functions.sql** - Business logic functions for calculations and validations
 - **materialized_views.sql** - Pre-aggregated views for dashboard performance
 - **rls_policies.sql** - Row-Level Security policies for role-based access control
+- **change_log.sql** - Tabla `change_log` para auditoría de cambios por módulo (2026-04-17)
 
 ## Deployment Order
 

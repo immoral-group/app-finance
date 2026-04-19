@@ -420,4 +420,14 @@ export const adminApi = {
         invoices_estimado?: { count: number; total: number };
         treasury_balance?: number;
     }>('/integrations/holded/summary'),
+
+    // Ocultar / reactivar filas de clientes en Billing Matrix
+    getHiddenClients: (year: number, month: number) =>
+        fetchApi<{ hidden: Array<{ id: string; name: string; hidden_from_yyyymm: number }> }>(
+            `/billing/hidden-clients?year=${year}&month=${month}`
+        ),
+    hideClient: (data: { client_id: string; fiscal_year: number; fiscal_month: number }) =>
+        fetchApi('/billing/hide-client', { method: 'POST', body: JSON.stringify(data) }),
+    unhideClient: (data: { client_id: string; fiscal_year: number; fiscal_month: number }) =>
+        fetchApi('/billing/unhide-client', { method: 'POST', body: JSON.stringify(data) }),
 };

@@ -4,6 +4,8 @@ import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
 import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
+import { useUrlState } from '@/hooks/useUrlState';
+import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
 
 const TABS = ['Real', 'Presupuesto', 'Comparación'] as const;
 type TabType = typeof TABS[number];
@@ -38,6 +40,7 @@ const EXPENSE_STRUCTURE = {
         { dept: 'Imcontent', items: ['Externos'] },
         { dept: 'Immoralia', items: ['Externos'] },
         { dept: 'Imsales', items: ['Jorge Orts'] },
+        { dept: 'Imfilms', items: ['Olga Garasym'] },
     ],
     comisionesItems: [
         { dept: 'Imfilms', items: ['The connector'] },
@@ -333,8 +336,8 @@ const CellInput = ({
 };
 
 export default function PLMatrix() {
-    const [year, setYear] = useState(new Date().getFullYear());
-    const [activeTab, setActiveTab] = useState<TabType>('Real');
+    const [year, setYear] = useUrlState('year', new Date().getFullYear(), (v) => Number(v));
+    const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Real');
     const [cellValues, setCellValues] = useState<Record<string, CellData>>({});
     const queryClient = useQueryClient();
 
@@ -392,22 +395,18 @@ export default function PLMatrix() {
         queryKey: ['pl-matrix', year, typeParam],
         queryFn: () => adminApi.getPLMatrix(year, typeParam),
         enabled: activeTab !== 'Comparación',
-        refetchOnWindowFocus: true,
-        staleTime: 0
     });
 
     const { data: realData, isLoading: loadingReal } = useQuery({
         queryKey: ['pl-matrix', year, 'real'],
         queryFn: () => adminApi.getPLMatrix(year, 'real'),
         enabled: activeTab === 'Comparación',
-        staleTime: 0,
     });
 
     const { data: budgetData, isLoading: loadingBudget } = useQuery({
         queryKey: ['pl-matrix', year, 'budget'],
         queryFn: () => adminApi.getPLMatrix(year, 'budget'),
         enabled: activeTab === 'Comparación',
-        staleTime: 0,
     });
 
     // Custom rows query — filtered by year
@@ -557,16 +556,28 @@ export default function PLMatrix() {
         cellNotes[getNoteKey(viewType, section, dept, item, monthIdx)] || null;
 
     // ── State Population ─────────────────────────────────────────────────────
-    // Clear cellValues when year or tab changes to prevent stale data
-    useEffect(() => {
-        setCellValues({});
-    }, [typeParam, year]);
+    // Parse matrix data and merge into cellValues.
+    // Uses string key to avoid re-parsing on background refetches while the user
+    // is actively editing (prevents overwriting in-progress input).
+    const prevMatrixRef = useRef<string | null>(null);
 
     useEffect(() => {
         if (!matrixData?.sections) return;
+        const currentKey = JSON.stringify([year, typeParam]);
+        if (prevMatrixRef.current === currentKey) return;
+        prevMatrixRef.current = currentKey;
         const newValues = parseMatrixData(matrixData, typeParam as 'real' | 'budget');
         setCellValues(prev => ({ ...prev, ...newValues }));
-    }, [matrixData, typeParam]);
+    }, [matrixData, typeParam, year]);
+
+    // Remove cache on unmount so that on next visit there is no stale entry.
+    // This ensures prevMatrixRef picks up the fresh network response (with any
+    // recently saved values) instead of skipping it after the stale cache parse.
+    useEffect(() => {
+        return () => {
+            queryClient.removeQueries({ queryKey: ['pl-matrix', year] });
+        };
+    }, [year, queryClient]);
 
     const realValues = realData ? parseMatrixData(realData, 'real') : {};
     const budgetValues = budgetData ? parseMatrixData(budgetData, 'budget') : {};
@@ -1529,6 +1540,9 @@ export default function PLMatrix() {
                     </table>
                 </div>
             )}
+
+            {/* Historial de cambios */}
+            <ChangeLogPanel module="pl" />
         </div>
     );
 }

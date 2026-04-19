@@ -1,6 +1,7 @@
 import express from 'express';
 import supabase from '../config/supabase.js';
 import { createNotifications } from './notifications.js';
+import { logChange, extractUser } from '../utils/changeLogger.js';
 
 const router = express.Router();
 
@@ -784,12 +785,18 @@ router.post('/matrix/save', async (req, res) => {
             }
         }
 
+        // Variables para log (se asignan en cada rama)
+        let _plLogOp = null;
+        let _plOldVal = null;
+        let _plRecordId = null;
+        let _plLogTable = null;
+
         if (type === 'budget') {
             // BUDGET SAVE
             if (!categoryId && !serviceId) throw new Error(`Category/Service not found for ${item} in ${dept}`);
 
             let query = supabase.from('budget_lines')
-                .select('id, cell_metadata')
+                .select('id, cell_metadata, m01, m02, m03, m04, m05, m06, m07, m08, m09, m10, m11, m12')
                 .eq('fiscal_year', year)
                 .eq('department_id', departmentId)
                 .eq('line_type', section === 'revenue' ? 'revenue' : 'expense');
@@ -842,6 +849,12 @@ router.post('/matrix/save', async (req, res) => {
                 });
             }
 
+            // Asignar datos de log para presupuesto
+            _plLogTable = 'budget_lines';
+            _plLogOp = existingLine ? 'update' : 'create';
+            _plOldVal = existingLine ? String(existingLine[monthKey] || 0) : null;
+            _plRecordId = existingLine?.id || null;
+
         } else {
             // REAL SAVE
             if (section === 'revenue') {
@@ -860,7 +873,7 @@ router.post('/matrix/save', async (req, res) => {
 
                 const { data: existingRev } = await supabase
                     .from('actual_revenue')
-                    .select('id')
+                    .select('id, amount')
                     .eq('fiscal_year', year)
                     .eq('fiscal_month', month)
                     .eq('department_id', departmentId)
@@ -883,6 +896,21 @@ router.post('/matrix/save', async (req, res) => {
                     });
                 }
 
+                // Log ingreso real (fire-and-forget) — antes del early return
+                const _revOp = existingRev ? 'update' : 'create';
+                const { userId: _rvUid, userEmail: _rvUe } = extractUser(req);
+                logChange(supabase, {
+                    module: 'pl',
+                    table: 'actual_revenue',
+                    recordId: existingRev?.id || null,
+                    recordLabel: `${dept} · ${item} · Real ${year}/${String(month).padStart(2, '0')}`,
+                    operation: _revOp,
+                    fieldName: `${section}.${monthKey}`,
+                    oldValue: existingRev ? String(existingRev.amount || 0) : null,
+                    newValue: String(value),
+                    userId: _rvUid, userEmail: _rvUe,
+                }).catch(() => {});
+
                 return res.json({ success: true });
             }
 
@@ -891,7 +919,7 @@ router.post('/matrix/save', async (req, res) => {
             // Query for existing expense record
             let expQuery = supabase
                 .from('actual_expenses')
-                .select('id, cell_metadata')
+                .select('id, cell_metadata, amount')
                 .eq('fiscal_year', year)
                 .eq('fiscal_month', month)
                 .eq('department_id', departmentId)
@@ -925,6 +953,28 @@ router.post('/matrix/save', async (req, res) => {
                     cell_metadata: metaUpdate
                 });
             }
+
+            // Asignar datos de log para gastos reales
+            _plLogTable = 'actual_expenses';
+            _plLogOp = existingExp ? 'update' : 'create';
+            _plOldVal = existingExp ? String(existingExp.amount || 0) : null;
+            _plRecordId = existingExp?.id || null;
+        }
+
+        // Log de cambio en P&L Matrix (fire-and-forget)
+        if (_plLogOp) {
+            const { userId: _plUid, userEmail: _plUe } = extractUser(req);
+            logChange(supabase, {
+                module: 'pl',
+                table: _plLogTable,
+                recordId: _plRecordId,
+                recordLabel: `${dept} · ${item} · ${type} ${year}/${String(month).padStart(2, '0')}`,
+                operation: _plLogOp,
+                fieldName: `${section}.${monthKey}`,
+                oldValue: _plOldVal,
+                newValue: String(value),
+                userId: _plUid, userEmail: _plUe,
+            }).catch(() => {});
         }
 
         res.json({ success: true });

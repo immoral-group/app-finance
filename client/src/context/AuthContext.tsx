@@ -1,8 +1,9 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { adminApi } from '@/lib/api/admin';
 import { activityApi } from '@/lib/api/activity';
+import { Loader2 } from 'lucide-react';
 
 export interface UserPermission {
     module: string;
@@ -55,6 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [permissions, setPermissions] = useState<UserPermission[]>([]);
     const [loading, setLoading] = useState(true);
+    const initialLoadDone = useRef(false);
 
     const fetchProfile = async () => {
         try {
@@ -63,7 +65,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setPermissions(data.permissions);
         } catch (err) {
             console.warn('Could not fetch user profile:', err);
-            // If profile fetch fails, user can still use app but with no permissions
             setProfile(null);
             setPermissions([]);
         }
@@ -73,9 +74,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
             if (session) {
-                fetchProfile().finally(() => setLoading(false));
+                fetchProfile().finally(() => {
+                    setLoading(false);
+                    initialLoadDone.current = true;
+                });
             } else {
                 setLoading(false);
+                initialLoadDone.current = true;
             }
         });
 
@@ -84,13 +89,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
             if (session) {
-                setLoading(true); // Prevent rendering until profile is ready
+                // SOLO bloquear rendering en la carga inicial.
+                // En TOKEN_REFRESHED (al volver a la pestaña) NO poner loading=true,
+                // porque eso desmonta y remonta toda la app perdiendo todo el estado.
+                if (!initialLoadDone.current) {
+                    setLoading(true);
+                }
+
                 fetchProfile().then(() => {
-                    // Log login activity
                     if (_event === 'SIGNED_IN' && session.user?.id) {
                         activityApi.logActivity(session.user.id, 'login').catch(() => { });
                     }
-                }).finally(() => setLoading(false));
+                }).finally(() => {
+                    setLoading(false);
+                    initialLoadDone.current = true;
+                });
             } else {
                 setProfile(null);
                 setPermissions([]);
@@ -108,9 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const hasPermission = (module: string): boolean => {
-        // If profile hasn't loaded yet, allow access (graceful degradation)
         if (!profile) return true;
-        // Superadmin bypasses all permission checks
         if (profile.role === 'superadmin') return true;
         return permissions.some(p => p.module === module && p.can_view);
     };
@@ -121,7 +132,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return permissions.some(p => p.module === module && p.can_edit);
     };
 
-    // When profile is null, treat as superadmin for nav visibility
     const isSuperAdmin = () => profile?.role === 'superadmin';
     const isDeptHead = () => profile?.role === 'dept_head';
     const isPartner = () => profile?.role === 'partner';
@@ -129,6 +139,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshProfile = async () => {
         await fetchProfile();
     };
+
+    // SOLO mostrar loader en la carga INICIAL.
+    // Después de eso, renderizar children SIEMPRE para no perder estado.
+    if (!initialLoadDone.current) {
+        return (
+            <AuthContext.Provider value={{
+                session,
+                user: session?.user ?? null,
+                profile,
+                permissions,
+                loading,
+                signOut,
+                hasPermission,
+                canEdit,
+                isSuperAdmin,
+                isDeptHead,
+                isPartner,
+                refreshProfile,
+            }}>
+                <div className="flex h-screen items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+            </AuthContext.Provider>
+        );
+    }
 
     return (
         <AuthContext.Provider value={{
@@ -145,7 +180,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             isPartner,
             refreshProfile,
         }}>
-            {!loading && children}
+            {children}
         </AuthContext.Provider>
     );
 }

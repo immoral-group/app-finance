@@ -1,16 +1,21 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { mediaApi } from '@/lib/api/media';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { PeriodSelector } from '@/components/shared/PeriodSelector';
 import { formatCurrency } from '@/lib/utils';
-import { Download, AlertCircle, UserPlus } from 'lucide-react';
+import { Download, AlertCircle, UserPlus, EyeOff, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { ClientModal } from '@/features/clients/components/ClientModal';
 import { clientsApi } from '@/lib/api/clients';
 import { CreateClientDTO } from '@/types/client';
 import { toast } from 'sonner';
+import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
+
+const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 const REQUIRED_COLUMNS = [
     { code: 'BRAND', label: 'Branding' },
@@ -88,7 +93,18 @@ function NumericCell({ value, onSave, className }: { value: number | string; onS
 function MediaTrackerContent() {
     const [date, setDate] = useState(new Date());
     const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+    const [hideConfirm, setHideConfirm] = useState<{ client_id: string; client_name: string } | null>(null);
+    const [hiddenPanelOpen, setHiddenPanelOpen] = useState(false);
+    const [showWarning, setShowWarning] = useState(true);
+    const [countdown, setCountdown] = useState(5);
+    const { profile } = useAuth();
     const queryClient = useQueryClient();
+
+    useEffect(() => {
+        if (!showWarning || countdown <= 0) return;
+        const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+        return () => clearTimeout(timer);
+    }, [showWarning, countdown]);
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
 
@@ -131,6 +147,40 @@ function MediaTrackerContent() {
         mutationFn: mediaApi.updatePlatformInvestment,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['media-investment', year, month] });
+        }
+    });
+
+    const hideClientMutation = useMutation({
+        mutationFn: (client_id: string) =>
+            mediaApi.hideClient({ client_id, fiscal_year: year, fiscal_month: month }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['media-investment', year, month] });
+            queryClient.invalidateQueries({ queryKey: ['media-hidden-clients', year, month] });
+            toast.success(`Cliente ocultado a partir de ${MONTH_NAMES[month - 1]} ${year}`);
+            setHideConfirm(null);
+        },
+        onError: () => {
+            toast.error('Error al ocultar el cliente');
+        }
+    });
+
+    // Query clientes ocultos en este período
+    const { data: hiddenData } = useQuery({
+        queryKey: ['media-hidden-clients', year, month],
+        queryFn: () => mediaApi.getHiddenClients(year, month),
+        staleTime: 30_000,
+    });
+    const hiddenClients = hiddenData?.hidden ?? [];
+
+    const unhideClientMutation = useMutation({
+        mutationFn: (client_id: string) => mediaApi.unhideClient({ client_id, fiscal_year: year, fiscal_month: month }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['media-investment', year, month] });
+            queryClient.invalidateQueries({ queryKey: ['media-hidden-clients', year, month] });
+            toast.success('Cliente reactivado y visible nuevamente');
+        },
+        onError: () => {
+            toast.error('Error al reactivar el cliente');
         }
     });
 
@@ -250,9 +300,7 @@ function MediaTrackerContent() {
             totalsRow.join(';')
         ].join('\n');
 
-        const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-        const filename = `MediaInvestment_${monthNames[month - 1]}_${year}.csv`;
+        const filename = `MediaInvestment_${MONTH_NAMES[month - 1]}_${year}.csv`;
 
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
@@ -318,6 +366,54 @@ function MediaTrackerContent() {
                 </div>
             </div>
 
+            {/* Banner de clientes ocultos */}
+            {hiddenClients.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 overflow-hidden">
+                    <button
+                        onClick={() => setHiddenPanelOpen(o => !o)}
+                        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-amber-100/60 transition-colors"
+                    >
+                        <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
+                            <EyeOff size={14} />
+                            <span>
+                                {hiddenClients.length} cliente{hiddenClients.length > 1 ? 's' : ''} oculto{hiddenClients.length > 1 ? 's' : ''} en este período
+                            </span>
+                            <span className="text-amber-500 font-normal text-xs">— haz clic para ver cuáles</span>
+                        </div>
+                        {hiddenPanelOpen
+                            ? <ChevronUp size={14} className="text-amber-500" />
+                            : <ChevronDown size={14} className="text-amber-500" />}
+                    </button>
+
+                    {hiddenPanelOpen && (
+                        <div className="border-t border-amber-200 divide-y divide-amber-100">
+                            {hiddenClients.map(client => {
+                                const hiddenYear = Math.floor(client.hidden_from_yyyymm / 100);
+                                const hiddenMonth = client.hidden_from_yyyymm % 100;
+                                return (
+                                    <div key={client.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
+                                        <div>
+                                            <span className="text-sm font-medium text-gray-800">{client.name}</span>
+                                            <span className="ml-2 text-xs text-muted-foreground">
+                                                Oculto desde {MONTH_NAMES[hiddenMonth - 1]} {hiddenYear}
+                                            </span>
+                                        </div>
+                                        <button
+                                            onClick={() => unhideClientMutation.mutate(client.id)}
+                                            disabled={unhideClientMutation.isPending}
+                                            className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium bg-white border border-gray-200 hover:border-green-400 hover:text-green-700 hover:bg-green-50 transition-colors disabled:opacity-50"
+                                        >
+                                            <Eye size={12} />
+                                            Mostrar
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
+
             <Card className="overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm border-collapse">
@@ -348,9 +444,18 @@ function MediaTrackerContent() {
                                     const diff = (inv.planned_investment || 0) - (inv.total_actual || 0);
 
                                     return (
-                                        <tr key={inv.client_id} className="border-b hover:bg-gray-50/50">
-                                            <td className="p-3 font-medium sticky left-0 bg-white z-10 border-r flex items-center h-full">
-                                                {inv.client_name}
+                                        <tr key={inv.client_id} className="border-b hover:bg-gray-50/50 group">
+                                            <td className="p-3 font-medium sticky left-0 bg-white z-10 border-r">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span>{inv.client_name}</span>
+                                                    <button
+                                                        onClick={() => setHideConfirm({ client_id: inv.client_id, client_name: inv.client_name })}
+                                                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-amber-100 text-gray-300 hover:text-amber-600 shrink-0"
+                                                        title="Ocultar cliente en meses posteriores"
+                                                    >
+                                                        <EyeOff size={14} />
+                                                    </button>
+                                                </div>
                                             </td>
 
                                             {/* Planned Investment (Editable) */}
@@ -426,12 +531,97 @@ function MediaTrackerContent() {
                 </div>
             </Card>
 
+            {/* Modal: aviso de revisión de mes */}
+            {showWarning && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6 space-y-5">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 rounded-full bg-amber-100 shrink-0">
+                                <AlertCircle size={20} className="text-amber-600" />
+                            </div>
+                            <h3 className="font-semibold text-gray-900 text-lg leading-snug pt-1">
+                                Antes de seguir, revisa el mes
+                            </h3>
+                        </div>
+                        <div className="space-y-3 text-sm text-gray-700 leading-relaxed">
+                            <p>
+                                Hola <span className="font-semibold">{profile?.display_name ?? 'usuario'}</span>,
+                            </p>
+                            <p>
+                                <span className="font-medium text-amber-700">Importante:</span> la facturación se hace a mes vencido.
+                                Eso significa que, aunque estés en el mes actual, puede que tengas que cargar la inversión del mes anterior.
+                            </p>
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-amber-800">
+                                <p>Ejemplo: si estás en abril, seguramente te toque completar marzo.</p>
+                                <p className="mt-1 font-medium">Revísalo siempre antes de guardar.</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-end pt-1">
+                            <Button
+                                onClick={() => setShowWarning(false)}
+                                disabled={countdown > 0}
+                                className="min-w-[140px]"
+                            >
+                                {countdown > 0 ? `Entendido (${countdown}s)` : 'Entendido'}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Confirmación para ocultar cliente */}
+            {hideConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 rounded-full bg-amber-100 shrink-0">
+                                <EyeOff size={18} className="text-amber-600" />
+                            </div>
+                            <div>
+                                <h3 className="font-semibold text-gray-900">¿Ocultar este cliente?</h3>
+                                <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+                                    <span className="font-medium text-gray-800">{hideConfirm.client_name}</span> dejará de
+                                    aparecer a partir de{' '}
+                                    <span className="font-medium text-gray-800">{MONTH_NAMES[month - 1]} {year}</span>.
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    Los meses anteriores con datos registrados no se ven afectados.
+                                    Los datos del cliente se conservan intactos.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex gap-2 justify-end pt-1">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setHideConfirm(null)}
+                                disabled={hideClientMutation.isPending}
+                            >
+                                Cancelar
+                            </Button>
+                            <Button
+                                size="sm"
+                                className="gap-1.5 bg-amber-500 hover:bg-amber-600 text-white border-0"
+                                onClick={() => hideClientMutation.mutate(hideConfirm.client_id)}
+                                disabled={hideClientMutation.isPending}
+                            >
+                                <EyeOff size={14} />
+                                {hideClientMutation.isPending ? 'Ocultando...' : 'Ocultar en meses posteriores'}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Client Modal — same as Clients & Fees */}
             <ClientModal
                 isOpen={isClientModalOpen}
                 onClose={() => setIsClientModalOpen(false)}
                 onSave={handleCreateClient}
             />
+
+            {/* Historial de cambios */}
+            <ChangeLogPanel module="media" />
         </div>
     );
 }

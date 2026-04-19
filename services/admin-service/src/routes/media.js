@@ -1,6 +1,7 @@
 import express from 'express';
 import Joi from 'joi';
 import supabase from '../config/supabase.js';
+import { logChange, extractUser } from '../utils/changeLogger.js';
 
 const router = express.Router();
 
@@ -39,14 +40,22 @@ router.get('/investment/:year/:month', async (req, res) => {
     try {
         const { year, month } = req.params;
 
-        // 1. Get all clients (active)
+        // 1. Get all clients (active, with hide override)
         const { data: clients, error: clientsError } = await supabase
             .from('clients')
-            .select('id, name')
+            .select('id, name, hidden_from_yyyymm, visible_from_yyyymm')
             .eq('is_active', true)
             .order('name');
 
         if (clientsError) return res.status(500).json({ error: clientsError.message });
+
+        // Filtrar clientes ocultos para este mes
+        // Un cliente está oculto en X si: hidden_from_yyyymm <= X AND (visible_from_yyyymm IS NULL OR visible_from_yyyymm > X)
+        const yyyymm = parseInt(year) * 100 + parseInt(month);
+        const visibleClients = (clients || []).filter(c => {
+            if (!c.hidden_from_yyyymm || c.hidden_from_yyyymm > yyyymm) return true;
+            return c.visible_from_yyyymm != null && c.visible_from_yyyymm <= yyyymm;
+        });
 
         // 2. Get Monthly Billing (for Planned Investment)
         const { data: billing, error: billingError } = await supabase
@@ -70,7 +79,7 @@ router.get('/investment/:year/:month', async (req, res) => {
         if (invError) return res.status(500).json({ error: invError.message });
 
         // 4. Transform structure for frontend
-        const matrix = clients.map(client => {
+        const matrix = visibleClients.map(client => {
             const clientBilling = billing.find(b => b.client_id === client.id);
             const clientInvestments = investments.filter(inv => inv.client_id === client.id);
 
@@ -169,6 +178,20 @@ router.post('/planned', async (req, res) => {
         }
 
         if (result.error) throw result.error;
+
+        // Log de cambio (fire-and-forget — no bloquea la respuesta)
+        const { userId, userEmail } = extractUser(req);
+        logChange(supabase, {
+            module: 'media',
+            table: 'monthly_billing',
+            recordId: existing?.id || result.data?.[0]?.id,
+            recordLabel: `Inversión Planificada ${value.fiscal_year}/${String(value.fiscal_month).padStart(2, '0')}`,
+            operation: existing ? 'update' : 'create',
+            fieldName: 'total_ad_investment',
+            newValue: value.amount,
+            userId, userEmail,
+        }).catch(() => {});
+
         res.json({ success: true, data: result.data });
 
     } catch (err) {
@@ -210,10 +233,142 @@ router.post('/platform', async (req, res) => {
 
         if (upsertError) throw upsertError;
 
+        // Log de cambio (fire-and-forget — no bloquea la respuesta)
+        const { userId, userEmail } = extractUser(req);
+        logChange(supabase, {
+            module: 'media',
+            table: 'client_ad_investment',
+            recordId: data?.id,
+            recordLabel: `Inversión Real ${value.fiscal_year}/${String(value.fiscal_month).padStart(2, '0')}`,
+            operation: 'update',
+            fieldName: 'actual_amount',
+            newValue: value.amount,
+            userId, userEmail,
+        }).catch(() => {});
+
         res.json({ success: true, data });
 
     } catch (err) {
         console.error('Error saving platform investment:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * GET /media/hidden-clients/:year/:month
+ * Devuelve los clientes ocultos para el período indicado
+ */
+router.get('/hidden-clients/:year/:month', async (req, res) => {
+    try {
+        const { year, month } = req.params;
+        const yyyymm = parseInt(year) * 100 + parseInt(month);
+
+        const { data: allHidden, error } = await supabase
+            .from('clients')
+            .select('id, name, hidden_from_yyyymm, visible_from_yyyymm')
+            .eq('is_active', true)
+            .not('hidden_from_yyyymm', 'is', null)
+            .lte('hidden_from_yyyymm', yyyymm)
+            .order('name');
+
+        if (error) return res.status(500).json({ error: error.message });
+
+        // Excluir los que ya fueron reactivados antes o en este mes
+        const hidden = (allHidden || []).filter(c =>
+            c.visible_from_yyyymm == null || c.visible_from_yyyymm > yyyymm
+        );
+
+        res.json({ hidden });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /media/unhide-client
+ * Reactiva un cliente oculto (elimina el hidden_from_yyyymm)
+ */
+router.post('/unhide-client', async (req, res) => {
+    try {
+        const schema = Joi.object({
+            client_id:    Joi.string().uuid().required(),
+            fiscal_year:  Joi.number().integer().required(),
+            fiscal_month: Joi.number().integer().min(1).max(12).required(),
+        });
+
+        const { error, value } = schema.validate(req.body);
+        if (error) return res.status(400).json({ error: error.details[0].message });
+
+        // Marcar visible_from_yyyymm en lugar de borrar hidden_from_yyyymm,
+        // para preservar el historial en meses anteriores
+        const visibleFrom = value.fiscal_year * 100 + value.fiscal_month;
+        const { error: updateError } = await supabase
+            .from('clients')
+            .update({ visible_from_yyyymm: visibleFrom })
+            .eq('id', value.client_id);
+
+        if (updateError) return res.status(500).json({ error: updateError.message });
+
+        // Log (fire-and-forget)
+        const { userId, userEmail } = extractUser(req);
+        logChange(supabase, {
+            module: 'media',
+            table: 'clients',
+            recordId: value.client_id,
+            recordLabel: `Cliente reactivado desde ${value.fiscal_year}/${String(value.fiscal_month).padStart(2, '0')}`,
+            operation: 'update',
+            fieldName: 'visible_from_yyyymm',
+            newValue: String(visibleFrom),
+            userId, userEmail,
+        }).catch(() => {});
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /media/hide-client
+ * Oculta un cliente a partir del mes indicado (meses anteriores no se ven afectados)
+ * No elimina datos — solo marca hidden_from_yyyymm en la tabla clients
+ */
+router.post('/hide-client', async (req, res) => {
+    try {
+        const schema = Joi.object({
+            client_id:   Joi.string().uuid().required(),
+            fiscal_year: Joi.number().integer().required(),
+            fiscal_month: Joi.number().integer().min(1).max(12).required(),
+        });
+
+        const { error, value } = schema.validate(req.body);
+        if (error) return res.status(400).json({ error: error.details[0].message });
+
+        const yyyymm = value.fiscal_year * 100 + value.fiscal_month;
+
+        const { error: updateError } = await supabase
+            .from('clients')
+            .update({ hidden_from_yyyymm: yyyymm, visible_from_yyyymm: null })
+            .eq('id', value.client_id);
+
+        if (updateError) return res.status(500).json({ error: updateError.message });
+
+        // Log (fire-and-forget)
+        const { userId, userEmail } = extractUser(req);
+        logChange(supabase, {
+            module: 'media',
+            table: 'clients',
+            recordId: value.client_id,
+            recordLabel: `Cliente oculto desde ${value.fiscal_year}/${String(value.fiscal_month).padStart(2, '0')}`,
+            operation: 'update',
+            fieldName: 'hidden_from_yyyymm',
+            newValue: String(yyyymm),
+            userId, userEmail,
+        }).catch(() => {});
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error hiding client:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

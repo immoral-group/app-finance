@@ -6,11 +6,13 @@ import { PartnerDetail } from './PartnerDetail';
 import { Partner, commissionsApi } from '@/lib/api/commissions';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
+import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
+import { useUrlState } from '@/hooks/useUrlState';
 
 export default function CommissionsIndex() {
     const { profile, isPartner } = useAuth();
     const [selectedPartner, setSelectedPartner] = useState<Partner | null>(null);
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'partners'>('dashboard');
+    const [activeTab, setActiveTab] = useUrlState<'dashboard' | 'partners'>('tab', 'dashboard');
 
     // If user is a partner, fetch their linked partner record
     const { data: partnersData } = useQuery({
@@ -92,6 +94,9 @@ export default function CommissionsIndex() {
                 {activeTab === 'dashboard' && <CommissionsDashboard />}
                 {activeTab === 'partners' && <PartnersList onSelectPartner={setSelectedPartner} />}
             </div>
+
+            {/* Historial de cambios */}
+            <ChangeLogPanel module="commissions" />
         </div>
     );
 }

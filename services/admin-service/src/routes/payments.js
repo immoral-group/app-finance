@@ -1,5 +1,6 @@
 import express from 'express';
 import supabase from '../config/supabase.js';
+import { logChange, extractUser } from '../utils/changeLogger.js';
 
 const router = express.Router();
 
@@ -30,6 +31,8 @@ router.post('/beneficiaries', async (req, res) => {
         .single();
 
     if (error) return res.status(500).json({ error: error.message });
+    const { userId: _uid1, userEmail: _ue1 } = extractUser(req);
+    logChange(supabase, { module: 'payments', table: 'beneficiaries', recordId: data?.id, recordLabel: name, operation: 'create', userId: _uid1, userEmail: _ue1 }).catch(() => {});
     res.json({ success: true, beneficiary: data });
 });
 
@@ -55,6 +58,8 @@ router.patch('/beneficiaries/:id', async (req, res) => {
         .single();
 
     if (error) return res.status(500).json({ error: error.message });
+    const { userId: _uid2, userEmail: _ue2 } = extractUser(req);
+    logChange(supabase, { module: 'payments', table: 'beneficiaries', recordId: id, recordLabel: data?.name || id, operation: 'update', userId: _uid2, userEmail: _ue2 }).catch(() => {});
     res.json({ success: true, beneficiary: data });
 });
 
@@ -63,6 +68,8 @@ router.delete('/beneficiaries/:id', async (req, res) => {
     const { id } = req.params;
     const { error } = await supabase.from('beneficiaries').delete().eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
+    const { userId: _uid3, userEmail: _ue3 } = extractUser(req);
+    logChange(supabase, { module: 'payments', table: 'beneficiaries', recordId: id, recordLabel: `Beneficiario eliminado`, operation: 'delete', userId: _uid3, userEmail: _ue3 }).catch(() => {});
     res.json({ success: true });
 });
 
@@ -191,6 +198,8 @@ router.post('/', async (req, res) => {
         .single();
 
     if (error) return res.status(500).json({ error: error.message });
+    const { userId: _uid4, userEmail: _ue4 } = extractUser(req);
+    logChange(supabase, { module: 'payments', table: 'payments', recordId: data?.id, recordLabel: `${beneficiary_name || 'Sin beneficiario'} — ${total_amount} ${currency || 'EUR'}`, operation: 'create', newValue: `${total_amount} ${currency || 'EUR'}`, userId: _uid4, userEmail: _ue4 }).catch(() => {});
     res.json({ success: true, payment: data });
 });
 
@@ -218,6 +227,9 @@ router.patch('/:id', async (req, res) => {
         .single();
 
     if (error) return res.status(500).json({ error: error.message });
+    const { userId: _uid5, userEmail: _ue5 } = extractUser(req);
+    const changedFields = Object.keys(updateData).filter(k => k !== 'updated_at').join(', ');
+    logChange(supabase, { module: 'payments', table: 'payments', recordId: id, recordLabel: data?.beneficiary_name || id, operation: 'update', fieldName: changedFields || null, userId: _uid5, userEmail: _ue5 }).catch(() => {});
     res.json({ success: true, payment: data });
 });
 
@@ -247,6 +259,8 @@ router.delete('/:id', async (req, res) => {
     const { id } = req.params;
     const { error } = await supabase.from('payments').delete().eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
+    const { userId: _uid6, userEmail: _ue6 } = extractUser(req);
+    logChange(supabase, { module: 'payments', table: 'payments', recordId: id, recordLabel: `Pago eliminado`, operation: 'delete', userId: _uid6, userEmail: _ue6 }).catch(() => {});
     res.json({ success: true });
 });
 
