@@ -16,9 +16,9 @@ export function Layout() {
     }, [location.pathname]);
 
     return (
-        <div className="min-h-screen bg-muted/40 font-sans">
+        <div className="min-h-[100dvh] bg-muted/40 font-sans">
             <Sidebar isOpen={isMobileOpen} onClose={() => setIsMobileOpen(false)} />
-            <div className="md:pl-64 flex flex-col min-h-screen w-full transition-all">
+            <div className="md:pl-64 flex flex-col min-h-[100dvh] w-full transition-all">
                 <Header onMenuToggle={() => setIsMobileOpen(!isMobileOpen)} />
                 <main className="flex-1 p-4 md:p-6 overflow-x-hidden md:overflow-x-auto w-full max-w-[100vw]">
                     <div className="mx-auto w-full max-w-7xl animate-in fade-in zoom-in duration-300">

@@ -35,7 +35,7 @@ export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
     }, []);
 
     return (
-        <header className="h-14 px-4 md:px-5 border-b border-border bg-card flex items-center justify-between sticky top-0 z-30 w-full backdrop-blur-sm">
+        <header className="h-14 px-4 md:px-5 border-b border-border bg-card flex items-center justify-between sticky top-0 z-30 w-full backdrop-blur-sm" style={{ paddingLeft: 'max(1rem, env(safe-area-inset-left))', paddingRight: 'max(1rem, env(safe-area-inset-right))' }}>
 
             {/* Hamburger + Buscador */}
             <div className="flex items-center gap-2 md:gap-0">

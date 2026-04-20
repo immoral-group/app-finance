@@ -571,13 +571,24 @@ export default function PLMatrix() {
     }, [matrixData, typeParam, year]);
 
     // Remove cache on unmount so that on next visit there is no stale entry.
-    // This ensures prevMatrixRef picks up the fresh network response (with any
-    // recently saved values) instead of skipping it after the stale cache parse.
     useEffect(() => {
         return () => {
             queryClient.removeQueries({ queryKey: ['pl-matrix', year] });
         };
     }, [year, queryClient]);
+
+    // When switching tabs, clear the TARGET tab's cache and reset prevMatrixRef.
+    // Without this, React Query returns stale cache immediately, prevMatrixRef
+    // marks it as "seen", and the subsequent fresh network response is skipped —
+    // causing saved values to disappear until the user leaves and re-enters.
+    const handleTabChange = (tab: TabType) => {
+        const targetType = tab === 'Presupuesto' ? 'budget' : tab === 'Real' ? 'real' : null;
+        if (targetType) {
+            queryClient.removeQueries({ queryKey: ['pl-matrix', year, targetType] });
+        }
+        prevMatrixRef.current = null;
+        setActiveTab(tab);
+    };
 
     const realValues = realData ? parseMatrixData(realData, 'real') : {};
     const budgetValues = budgetData ? parseMatrixData(budgetData, 'budget') : {};
@@ -597,10 +608,9 @@ export default function PLMatrix() {
     const saveMutation = useMutation({
         mutationFn: adminApi.savePLMatrixCell,
         onSuccess: () => {
-            // We consciously DO NOT invalidate 'pl-matrix' here.
-            // Invalidating immediately causes a refetch that may return stale data
-            // for fast-typing users, visually wiping out their input.
-            // The local cellValues state is already updated optimistically in handleCellChange.
+            // Optimistic update in handleCellChange already reflects the saved value.
+            // Cache is invalidated on tab switch (handleTabChange) so fresh server
+            // data is always fetched when returning to this tab.
         },
         onError: () => {
             toast.error('Error al guardar');
@@ -889,8 +899,8 @@ export default function PLMatrix() {
 
     const renderRevenueRows = () => {
         const rows: React.ReactNode[] = [];
-        // For past years in real tab, revenue is editable (manual entry)
-        const isRevenueEditable = activeTab === 'Real' && isPastYear;
+        // Budget tab: always editable. Real tab: only editable for past years (manual entry)
+        const isRevenueEditable = activeTab === 'Presupuesto' || (activeTab === 'Real' && isPastYear);
         mergedRevenueStructure.forEach((group, groupIdx) => {
             group.services.forEach((service, serviceIdx) => {
                 rows.push(
@@ -1139,7 +1149,7 @@ export default function PLMatrix() {
                     </h1>
                     <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                         {TABS.map(tab => (
-                            <Button key={tab} variant={activeTab === tab ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab(tab)} className="text-xs h-7 px-3">{tab}</Button>
+                            <Button key={tab} variant={activeTab === tab ? 'default' : 'ghost'} size="sm" onClick={() => handleTabChange(tab)} className="text-xs h-7 px-3">{tab}</Button>
                         ))}
                     </div>
                     {activeTab === 'Comparación' && (

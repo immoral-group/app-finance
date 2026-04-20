@@ -276,43 +276,21 @@ router.get('/matrix/:year', async (req, res) => {
             .select('id, name, code')
             .order('name');
 
-        // 2. Fetch Services assigned to this year (via junction table)
-        const { data: svcAssignments } = await supabase
-            .from('service_year_assignments')
-            .select('service_id')
-            .eq('fiscal_year', year)
-            .eq('is_active', true);
-        const assignedSvcIds = (svcAssignments || []).map(a => a.service_id);
+        // 2. Fetch ALL Services (no year filter — saved budget lines must always resolve their service name).
+        const { data: allSvcData } = await supabase
+            .from('services')
+            .select('id, name, code, department_id')
+            .eq('is_active', true)
+            .order('name');
+        const services = allSvcData || [];
 
-        let services = [];
-        if (assignedSvcIds.length > 0) {
-            const { data: svcData } = await supabase
-                .from('services')
-                .select('id, name, code, department_id')
-                .in('id', assignedSvcIds)
-                .eq('is_active', true)
-                .order('name');
-            services = svcData || [];
-        }
-
-        // 3. Fetch Expense Categories assigned to this year (via junction table)
-        const { data: catAssignments } = await supabase
-            .from('category_year_assignments')
-            .select('category_id')
-            .eq('fiscal_year', year)
-            .eq('is_active', true);
-        const assignedCatIds = (catAssignments || []).map(a => a.category_id);
-
-        let expenseCategories = [];
-        if (assignedCatIds.length > 0) {
-            const { data: catData } = await supabase
-                .from('expense_categories')
-                .select('id, name, code, parent_category_id, is_general')
-                .in('id', assignedCatIds)
-                .eq('is_active', true)
-                .order('display_order');
-            expenseCategories = catData || [];
-        }
+        // 3. Fetch ALL Expense Categories (no is_active filter, no year filter).
+        // Budget values saved for any category must always be retrievable.
+        const { data: allCatData } = await supabase
+            .from('expense_categories')
+            .select('id, name, code, parent_category_id, is_general')
+            .order('display_order');
+        const expenseCategories = allCatData || [];
 
         // 4. Fetch Employees (for personnel costs)
         const { data: employees } = await supabase
@@ -347,24 +325,25 @@ router.get('/matrix/:year', async (req, res) => {
                     const dept = departments?.find(d => d.id === line.department_id);
                     const deptName = dept?.name || 'Otros';
 
-                    // Resolve service name
-                    let name = line.description;
+                    // Resolve service name: prefer services table lookup, fall back to notes/description
+                    let name = line.notes || line.description;
                     if (line.service_id) {
                         const svc = services?.find(s => s.id === line.service_id);
                         if (svc) name = svc.name;
                     }
                     name = name || 'Sin descripción';
 
-                    if (!revenueByDept[deptName]) revenueByDept[deptName] = { rows: [], subtotal: Array(12).fill(0) };
-
-                    revenueByDept[deptName].rows.push({
-                        id: line.id,
+                    // Merge duplicate lines (same dept+name) by taking last non-zero value per month.
+                    // Duplicates can exist from previous saves that used wrong column names in the lookup.
+                    const key = `${deptName}::${name}`;
+                    if (!revenueByDept[key]) revenueByDept[key] = {
+                        dept: deptName,
                         name,
-                        values,
-                        metadata: rowMetadata,
-                        editable: true
-                    });
-                    values.forEach((v, i) => revenueByDept[deptName].subtotal[i] += v);
+                        values: Array(12).fill(0),
+                        metadata: {}
+                    };
+                    values.forEach((v, i) => { if (v !== 0) revenueByDept[key].values[i] = v; });
+                    Object.assign(revenueByDept[key].metadata, rowMetadata);
                 } else {
                     // Expense
                     const cat = expenseCategories?.find(c => c.id === line.expense_category_id);
@@ -378,32 +357,37 @@ router.get('/matrix/:year', async (req, res) => {
                     if (!expensesByCategory[key]) expensesByCategory[key] = {
                         dept: deptName,
                         name: catName,
-                        rows: [],
-                        subtotal: Array(12).fill(0)
+                        values: Array(12).fill(0),
+                        metadata: {}
                     };
 
-                    expensesByCategory[key].rows.push({
-                        id: line.id,
-                        name: line.description || catName,
-                        values,
-                        metadata: rowMetadata,
-                        editable: true
+                    // Merge values from multiple budget_lines for the same dept+category.
+                    // Multiple lines can exist if the categoryId was inconsistent across saves.
+                    // Take the last non-zero value per month so no data is lost.
+                    values.forEach((v, i) => {
+                        if (v !== 0) expensesByCategory[key].values[i] = v;
                     });
-                    values.forEach((v, i) => expensesByCategory[key].subtotal[i] += v);
+                    Object.assign(expensesByCategory[key].metadata, rowMetadata);
                 }
             });
 
-            // Build INGRESOS section
+            // Build INGRESOS section — group by dept for headers
             const ingresoRows = [];
             let ingresoSubtotal = Array(12).fill(0);
-            Object.entries(revenueByDept).forEach(([deptName, data]) => {
-                ingresoRows.push({
-                    type: 'header',
-                    name: deptName,
-                    values: data.subtotal
-                });
-                data.rows.forEach(row => ingresoRows.push({ ...row, type: 'item', dept: deptName }));
-                data.subtotal.forEach((v, i) => ingresoSubtotal[i] += v);
+            // Group merged entries by dept for header rows
+            const revByDeptGrouped = {};
+            Object.values(revenueByDept).forEach(data => {
+                if (!revByDeptGrouped[data.dept]) revByDeptGrouped[data.dept] = { items: [], subtotal: Array(12).fill(0) };
+                revByDeptGrouped[data.dept].items.push(data);
+                data.values.forEach((v, i) => revByDeptGrouped[data.dept].subtotal[i] += v);
+            });
+            Object.entries(revByDeptGrouped).forEach(([deptName, group]) => {
+                ingresoRows.push({ type: 'header', name: deptName, values: group.subtotal });
+                group.items.forEach(item => ingresoRows.push({
+                    type: 'item', dept: deptName, name: item.name,
+                    values: item.values, metadata: item.metadata, editable: true
+                }));
+                group.subtotal.forEach((v, i) => ingresoSubtotal[i] += v);
             });
 
             sections.push({
@@ -417,17 +401,15 @@ router.get('/matrix/:year', async (req, res) => {
             const gastoRows = [];
             let gastoSubtotal = Array(12).fill(0);
             Object.values(expensesByCategory).forEach((data) => {
-                data.rows.forEach(row => {
-                    gastoRows.push({
-                        type: 'item',
-                        dept: data.dept,
-                        name: data.name,
-                        values: row.values,
-                        metadata: row.metadata,
-                        editable: true
-                    });
+                gastoRows.push({
+                    type: 'item',
+                    dept: data.dept,
+                    name: data.name,
+                    values: data.values,
+                    metadata: data.metadata,
+                    editable: true
                 });
-                data.subtotal.forEach((v, i) => gastoSubtotal[i] += v);
+                data.values.forEach((v, i) => gastoSubtotal[i] += v);
             });
 
             sections.push({
@@ -760,7 +742,18 @@ router.post('/matrix/save', async (req, res) => {
             if (svcData) {
                 serviceId = svcData.id;
             } else {
-                console.warn(`Service not found for ${dept} - ${item}`);
+                // Auto-create service so the budget_line constraint (service_id NOT NULL) is satisfied
+                const code = item.substring(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, '') + '_' + Date.now().toString(36).slice(-6);
+                const { data: newSvc, error: svcErr } = await supabase.from('services')
+                    .insert({ name: item, code, department_id: departmentId, is_active: true, service_type: 'revenue' })
+                    .select('id')
+                    .single();
+                if (svcErr) {
+                    console.error('Error creating service:', svcErr);
+                    throw new Error(`Could not create service for: ${item}`);
+                }
+                serviceId = newSvc.id;
+                console.log(`Auto-created service: ${item} (${serviceId}) for dept ${dept}`);
             }
         } else {
             const { data: catData } = await supabase.from('expense_categories').select('id').eq('name', item).maybeSingle();
@@ -770,7 +763,7 @@ router.post('/matrix/save', async (req, res) => {
                 // Auto-create expense category if not found
                 const code = item.substring(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, '') + '_' + Date.now().toString(36).slice(-6);
                 const { data: newCat, error: catErr } = await supabase.from('expense_categories')
-                    .insert({ name: item, code: code, is_general: false })
+                    .insert({ name: item, code: code, is_general: false, is_active: true })
                     .select('id')
                     .single();
                 if (catErr) {
@@ -793,10 +786,12 @@ router.post('/matrix/save', async (req, res) => {
 
         if (type === 'budget') {
             // BUDGET SAVE
-            if (!categoryId && !serviceId) throw new Error(`Category/Service not found for ${item} in ${dept}`);
+            // For expense: categoryId required. For revenue: serviceId preferred but not required
+            // (service name from REVENUE_STRUCTURE may not exist in services table).
+            if (section !== 'revenue' && !categoryId) throw new Error(`Category not found for ${item} in ${dept}`);
 
             let query = supabase.from('budget_lines')
-                .select('id, cell_metadata, m01, m02, m03, m04, m05, m06, m07, m08, m09, m10, m11, m12')
+                .select('id, cell_metadata, jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec')
                 .eq('fiscal_year', year)
                 .eq('department_id', departmentId)
                 .eq('line_type', section === 'revenue' ? 'revenue' : 'expense');
@@ -824,29 +819,33 @@ router.post('/matrix/save', async (req, res) => {
             }
 
             if (existingLine) {
-                await supabase.from('budget_lines')
+                console.log(`[BUDGET SAVE] UPDATE existing line id=${existingLine.id}, ${monthKey}=${value}`);
+                const { error: updateErr } = await supabase.from('budget_lines')
                     .update({
                         [monthKey]: Number(value),
                         cell_metadata: newMeta,
                         notes: item
                     })
                     .eq('id', existingLine.id);
+                if (updateErr) throw new Error(`Budget update failed: ${updateErr.message}`);
             } else {
                 const insertMeta = {};
                 if (comment || (assigned_to && assigned_to.length > 0)) {
                     insertMeta[monthKey] = { comment, assigned_to, updated_at: new Date().toISOString() };
                 }
 
-                await supabase.from('budget_lines').insert({
+                console.log(`[BUDGET SAVE] INSERT new line, dept=${dept}, service_id=${serviceId}, category_id=${categoryId}, ${monthKey}=${value}`);
+                const { error: insertErr } = await supabase.from('budget_lines').insert({
                     fiscal_year: year,
                     department_id: departmentId,
                     line_type: section === 'revenue' ? 'revenue' : 'expense',
-                    service_id: serviceId,
+                    service_id: serviceId || null,
                     expense_category_id: categoryId,
                     [monthKey]: Number(value),
                     notes: item,
                     cell_metadata: insertMeta
                 });
+                if (insertErr) throw new Error(`Budget insert failed: ${insertErr.message}`);
             }
 
             // Asignar datos de log para presupuesto

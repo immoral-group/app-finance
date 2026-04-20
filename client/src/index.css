@@ -81,6 +81,11 @@
     @apply bg-background text-foreground;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     transition: background-color 0.3s ease, color 0.3s ease;
+    /* iOS safe area — respeta notch, status bar y home indicator */
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   /* ── Dark mode: Override hardcoded bg-white / bg-gray-* in modals and tables ── */

@@ -233,9 +233,16 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                 />
             )}
             <div className={cn(
-                "h-screen w-60 bg-sidebar border-r border-sidebar-border flex flex-col fixed left-0 top-0 z-50 transition-transform duration-300 ease-in-out md:translate-x-0",
+                "w-60 bg-sidebar border-r border-sidebar-border flex flex-col fixed left-0 z-50 transition-transform duration-300 ease-in-out md:translate-x-0",
                 isOpen ? "translate-x-0" : "-translate-x-full"
-            )}>
+            )}
+            style={{
+                top: 0,
+                height: '100dvh',
+                paddingTop: 'env(safe-area-inset-top)',
+                paddingBottom: 'env(safe-area-inset-bottom)',
+                paddingLeft: 'env(safe-area-inset-left)',
+            }}>
 
             {/* Logo */}
             <div className="h-14 px-5 flex items-center gap-3 border-b border-sidebar-border flex-shrink-0">
