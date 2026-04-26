@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
     LayoutDashboard, Receipt, BarChart3, CreditCard, Users,
     PieChart, FileText, Settings, LogOut, Wallet, Handshake,
-    LineChart, Building2, ChevronDown, ChevronRight, Shield, X, Activity
+    LineChart, Building2, ChevronDown, ChevronRight, Shield, X, Activity, ShoppingCart
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -16,7 +16,7 @@ import logoPath from '@/assets/logo.png';
 const Icons: Record<string, any> = {
     LayoutDashboard, Receipt, BarChart3, CreditCard, Users,
     PieChart, FileText, Settings, Wallet, Handshake,
-    LineChart, Building2, Shield, Activity
+    LineChart, Building2, Shield, Activity, ShoppingCart
 };
 
 // ── Highlight Tooltip (rendered via portal to body) ──────
@@ -219,6 +219,8 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
         if (isPartner()) {
             return item.requiredPermission === 'commissions';
         }
+        // Dept heads don't need standalone Dashboard — their dept view has a Dashboard tab
+        if (isDeptHead() && item.requiredPermission === 'dashboard') return false;
         if (item.superadminOnly && !isSuperAdmin()) return false;
         if (item.requiredPermission && !hasPermission(item.requiredPermission)) return false;
         return true;

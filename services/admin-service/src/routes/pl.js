@@ -220,6 +220,37 @@ router.get('/summary/:year', async (req, res) => {
             if (summary.departments['Immoralia']) summary.departments['Immoralia'].income.real[monthIdx] += immoraliaVal;
         });
 
+        // B2. Process Real Income for Imsales (from billing_details, since it has no column in monthly_billing)
+        {
+            const mbIds = (billingData || []).map(b => b.id);
+            if (mbIds.length > 0) {
+                const { data: imsalesDetails } = await supabase
+                    .from('billing_details')
+                    .select('monthly_billing_id, amount, service:services(code)')
+                    .in('monthly_billing_id', mbIds)
+                    .in('service.code', ['IMSALES_SETUP', 'IMSALES_CAPTACI_N']);
+
+                const filtered = (imsalesDetails || []).filter(d => d.service?.code);
+                const mbIdToMonth = {};
+                (billingData || []).forEach(b => { mbIdToMonth[b.id] = b.fiscal_month - 1; });
+
+                if (!summary.departments['Imsales']) {
+                    summary.departments['Imsales'] = {
+                        income: { budget: Array(12).fill(0), real: Array(12).fill(0) },
+                        expenses: { budget: Array(12).fill(0), real: Array(12).fill(0) }
+                    };
+                }
+
+                filtered.forEach(d => {
+                    const monthIdx = mbIdToMonth[d.monthly_billing_id];
+                    if (monthIdx === undefined) return;
+                    const val = Number(d.amount || 0);
+                    summary.income.real[monthIdx] += val;
+                    summary.departments['Imsales'].income.real[monthIdx] += val;
+                });
+            }
+        }
+
         // C. Process Real Expenses
         expenseData.forEach(expense => {
             const monthIdx = expense.fiscal_month - 1;
@@ -516,6 +547,8 @@ router.get('/matrix/:year', async (req, res) => {
                     'SEO': 'SEO',
                     'MKT_AUTO_EMAIL': 'CRM',
                     'OTHER_HOURS': 'Otros servicios',
+                    'IMSALES_SETUP': 'Setup inicial (ims)',
+                    'IMSALES_CAPTACI_N': 'Captación',
                 };
 
                 const mbMap = {};

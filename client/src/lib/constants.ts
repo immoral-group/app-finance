@@ -1,4 +1,4 @@
-export type DepartmentCode = 'IMMED' | 'IMCONT' | 'IMMOR' | 'GEN';
+export type DepartmentCode = 'IMMED' | 'IMCONT' | 'IMMOR' | 'IMSALES' | 'GEN';
 
 type DepartmentColors = {
     bg: string;
@@ -31,6 +31,12 @@ export const DEPARTMENT_COLORS: Record<DepartmentCode, DepartmentColors> = {
         border: 'border-general-border',
         text: 'text-general-text',
         light: 'bg-general-light',
+    },
+    IMSALES: {
+        bg: 'bg-emerald-100',
+        border: 'border-emerald-300',
+        text: 'text-emerald-700',
+        light: 'bg-emerald-50',
     }
 };
 
@@ -39,6 +45,7 @@ export const DEPARTMENTS = [
     { id: '2', name: 'Immedia', code: 'IMMED' as DepartmentCode },
     { id: '3', name: 'Immoralia', code: 'IMMOR' as DepartmentCode },
     { id: '4', name: 'Immoral Admin', code: 'GEN' as DepartmentCode },
+    { id: '5', name: 'Imsales', code: 'IMSALES' as DepartmentCode },
 ];
 
 export type NavItem = {
@@ -62,6 +69,7 @@ export const ALL_MODULES = [
     { key: 'clients', label: 'Clients & Fees' },
     { key: 'settings', label: 'Settings' },
     { key: 'user_management', label: 'Gestión de Usuarios' },
+    { key: 'imsales_billing', label: 'Billing Imsales' },
     { key: 'developers', label: 'Developers' },
 ];
 
@@ -82,8 +90,10 @@ export const NAV_ITEMS: NavItem[] = [
             { label: 'Immedia', path: '/departamentos/immedia', deptCode: 'IMMED' },
             { label: 'Imcontent', path: '/departamentos/imcontent', deptCode: 'IMCONT' },
             { label: 'Immoralia', path: '/departamentos/immoralia', deptCode: 'IMMOR' },
+            { label: 'Imsales', path: '/departamentos/imsales', deptCode: 'IMSALES' },
         ]
     },
+    { label: 'Billing Imsales', path: '/imsales-billing', icon: 'ShoppingCart', requiredPermission: 'imsales_billing' },
     { label: 'Clients & Fees', path: '/clients', icon: 'Users', requiredPermission: 'clients' },
     { label: 'Settings', path: '/settings', icon: 'Settings', requiredPermission: 'settings', superadminOnly: true },
     { label: 'Gestión de Usuarios', path: '/users', icon: 'Shield', requiredPermission: 'user_management', superadminOnly: true },

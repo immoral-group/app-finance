@@ -33,9 +33,11 @@ const DEPT_ROUTE_MAP: Record<string, string> = {
     immedia: 'immedia',
     imcontent: 'imcontent',
     immoralia: 'immoralia',
+    imsales: 'imsales',
     IMMED: 'immedia',
     IMCONT: 'imcontent',
     IMMOR: 'immoralia',
+    IMSALES: 'imsales',
 };
 
 // ========== P&L STRUCTURE (same as DepartmentPL — single source of truth) ==========

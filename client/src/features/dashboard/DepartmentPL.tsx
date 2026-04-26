@@ -26,6 +26,7 @@ const DEPT_MAP: Record<string, { label: string; deptNames: string[] }> = {
     immedia: { label: 'Immedia', deptNames: ['Immedia'] },
     imcontent: { label: 'Imcontent', deptNames: ['Imcontent'] },
     immoralia: { label: 'Immoralia', deptNames: ['Immoralia'] },
+    imsales: { label: 'Imsales', deptNames: ['Imsales'] },
 };
 
 // Full revenue structure (same as PLMatrix)
@@ -37,7 +38,7 @@ const REVENUE_STRUCTURE = [
     { dept: 'Imseo', services: ['SEO', 'Comisiones'] },
     { dept: 'Immoral', services: ['Otros servicios', 'Otras comisiones'] },
     { dept: 'Imcontent', services: ['Budget Nutfruit'] },
-    { dept: 'Imsales', services: ['Captación'] },
+    { dept: 'Imsales', services: ['Setup inicial (ims)', 'Captación'] },
 ];
 
 // Full expense structure (same as PLMatrix)

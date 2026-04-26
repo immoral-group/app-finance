@@ -11,6 +11,7 @@ interface ClientModalProps {
     onSave: (data: CreateClientDTO) => Promise<void>;
     initialData?: Client;
     readOnly?: boolean;
+    defaultVerticalId?: string;
 }
 
 const DEFAULT_FEE_CONFIG: FeeConfig = {
@@ -25,7 +26,7 @@ const DEFAULT_FEE_CONFIG: FeeConfig = {
     use_platform_costs: true
 };
 
-export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSave, initialData, readOnly = false }) => {
+export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSave, initialData, readOnly = false, defaultVerticalId }) => {
     const [formData, setFormData] = useState<CreateClientDTO>({
         name: '',
         legal_name: '',
@@ -58,7 +59,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSav
                 legal_name: '',
                 tax_id: '',
                 email: '',
-                vertical_id: '',
+                vertical_id: defaultVerticalId || '',
                 fee_config: DEFAULT_FEE_CONFIG,
                 notes: ''
             });
@@ -152,15 +153,23 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSav
                             <div>
                                 <label className="text-sm font-medium mb-1 block">Vertical</label>
                                 <select
-                                    disabled={readOnly}
-                                    className="w-full border rounded-md p-2 text-sm bg-white focus:ring-2 focus:ring-offset-1 focus:outline-none"
+                                    disabled={readOnly || !!defaultVerticalId}
+                                    className="w-full border rounded-md p-2 text-sm bg-white focus:ring-2 focus:ring-offset-1 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500"
                                     value={formData.vertical_id || ''}
                                     onChange={e => setFormData({ ...formData, vertical_id: e.target.value })}
                                 >
-                                    <option value="">-- Seleccionar --</option>
-                                    {verticals.map(v => (
-                                        <option key={v.id} value={v.id}>{v.name}</option>
-                                    ))}
+                                    {defaultVerticalId ? (
+                                        verticals.filter(v => v.id === defaultVerticalId).map(v => (
+                                            <option key={v.id} value={v.id}>{v.name}</option>
+                                        ))
+                                    ) : (
+                                        <>
+                                            <option value="">-- Seleccionar --</option>
+                                            {verticals.map(v => (
+                                                <option key={v.id} value={v.id}>{v.name}</option>
+                                            ))}
+                                        </>
+                                    )}
                                 </select>
                             </div>
                             <div>
@@ -183,7 +192,8 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSav
                         </div>
                     </div>
 
-                    {/* Fee Configuration */}
+                    {/* Fee Configuration — hidden when opened from Imsales billing (not relevant for sales) */}
+                    {!defaultVerticalId && (
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold border-b pb-2 flex items-center justify-between">
                             Configuración de Billing
@@ -330,6 +340,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSav
                             </div>
                         </div>
                     </div>
+                    )}
 
                     <div className="pt-4 flex justify-end gap-3 sticky bottom-0 bg-white border-t mt-8 py-4">
                         <Button type="button" variant="outline" onClick={onClose}>

@@ -467,6 +467,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
     const imcontentSvcs = [getSvc('BRANDING'), getSvc('CONTENT_DESIGN'), getSvc('AI_CONTENT'), getSvc('SOCIAL_MEDIA_MGMT'), getSvc('DIGITAL_STRATEGY'), getSvc('INFLUENCER_UGC')].filter(Boolean);
     const immoraliaSvcs = [getSvc('IMMORALIA_SETUP'), getSvc('AGENCY_AUTO'), getSvc('CONSULTING_AUTO')].filter(Boolean);
     const immoralSvcs = [getSvc('SEO'), getSvc('WEB_DEV'), getSvc('MKT_AUTO_EMAIL')].filter(Boolean);
+    const imsalesSvcs = [getSvc('IMSALES_SETUP'), getSvc('IMSALES_CAPTACI_N')].filter(Boolean);
 
     // "Horas / Otros" column — look for it in DB columns first, otherwise use a virtual placeholder
     const horasOtrosSvc = getSvc('OTHER_HOURS');
@@ -475,7 +476,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
     const hasHorasInDB = !!horasOtrosSvc;
 
     // All service columns for rendering
-    const allServiceCols = [...immediaSvcs, ...imcontentSvcs, ...immoraliaSvcs, ...immoralSvcsWithHoras];
+    const allServiceCols = [...immediaSvcs, ...imcontentSvcs, ...immoraliaSvcs, ...immoralSvcsWithHoras, ...imsalesSvcs];
 
     const calculateRowTotal = (row: any) => {
         let sum = 0;
@@ -685,7 +686,8 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
         if (globalIdx < immediaSvcs.length) return 'focus:bg-blue-50/50';
         if (globalIdx < immediaSvcs.length + imcontentSvcs.length) return 'focus:bg-indigo-50/50';
         if (globalIdx < immediaSvcs.length + imcontentSvcs.length + immoraliaSvcs.length) return 'focus:bg-orange-50/50';
-        return 'focus:bg-purple-50/50';
+        if (globalIdx < immediaSvcs.length + imcontentSvcs.length + immoraliaSvcs.length + immoralSvcsWithHoras.length) return 'focus:bg-purple-50/50';
+        return 'focus:bg-emerald-50/50';
     };
 
     return (
@@ -711,6 +713,9 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                             <th className="p-2 border-r text-center font-bold text-indigo-700 bg-indigo-50 group cursor-pointer hover:bg-indigo-100" colSpan={imcontentSvcs.length}>Imcontent</th>
                             <th className="p-2 border-r text-center font-bold text-orange-700 bg-orange-50 group cursor-pointer hover:bg-orange-100" colSpan={immoraliaSvcs.length}>Immoralia</th>
                             <th className="p-2 border-r text-center font-bold text-purple-700 bg-purple-50 group cursor-pointer hover:bg-purple-100" colSpan={immoralSvcsWithHoras.length + (hasHorasInDB ? 0 : 1)}>Immoral</th>
+                            {imsalesSvcs.length > 0 && (
+                                <th className="p-2 border-r text-center font-bold text-emerald-700 bg-emerald-50 group cursor-pointer hover:bg-emerald-100" colSpan={imsalesSvcs.length}>Immoral</th>
+                            )}
                             <th className="p-2 text-center min-w-[100px] font-bold bg-slate-100" rowSpan={2}>TOTAL</th>
                         </tr>
                         <tr className="border-b bg-gray-50 text-xs text-center">

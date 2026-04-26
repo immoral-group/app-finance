@@ -26,8 +26,8 @@ export function Layout() {
                     </div>
                 </main>
             </div>
-            {/* ChatHub flotante — disponible en toda la app */}
-            {profile && profile.role !== 'partner' && (
+            {/* ChatHub flotante — disponible en toda la app excepto en el espacio imsales */}
+            {profile && profile.role !== 'partner' && !location.pathname.includes('imsales') && (
                 <AIChatWidget
                     userRole={profile.role}
                     deptCode={profile.department_code}

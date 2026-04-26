@@ -26,6 +26,7 @@ const DEPT_OPTIONS = [
     { code: 'IMMED', label: 'Immedia' },
     { code: 'IMCONT', label: 'Imcontent' },
     { code: 'IMMOR', label: 'Immoralia' },
+    { code: 'IMSALES', label: 'Imsales' },
 ];
 
 interface UserFormData {

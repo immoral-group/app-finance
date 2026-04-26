@@ -10,6 +10,7 @@ import { useEffect } from 'react';
 
 import BillingMatrix from '@/features/billing/BillingMatrix';
 import MediaTracker from '@/features/media-investment/MediaTracker';
+import ImsalesBilling from '@/features/imsales-billing/ImsalesBilling';
 import ExpensesList from '@/features/expenses/Expenses';
 import Payroll from '@/features/payroll/Payroll';
 import CommissionsIndex from '@/features/commissions/CommissionsIndex';
@@ -57,6 +58,7 @@ function App() {
                   <Route index element={<Dashboard />} />
                   <Route path="billing" element={<BillingMatrix />} />
                   <Route path="media-investment" element={<MediaTracker />} />
+                  <Route path="imsales-billing" element={<ImsalesBilling />} />
                   <Route path="expenses" element={<ExpensesList />} />
                   <Route path="payroll" element={<Payroll />} />
                   <Route path="commissions" element={<CommissionsIndex />} />

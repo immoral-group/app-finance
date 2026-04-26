@@ -381,3 +381,26 @@ ALTER TABLE clients ADD COLUMN IF NOT EXISTS hidden_from_yyyymm INT NULL;
 - El archivo `.env` NO está commiteado en git (está en `.gitignore`). Las credenciales se comparten por canal seguro.
 - La tabla `change_log` fue creada directamente en Supabase. Si se recrea la base de datos, ejecutar `database/change_log.sql`.
 - El commissions-service tiene su propia copia de `changeLogger.js` porque es un proceso Node.js independiente (puerto 3012) con su propio árbol de imports.
+
+---
+
+### 2026-04-25 — Integración Departamento Imsales
+
+**Objetivo:**
+Integrar "Imsales" como departamento completo con funcionalidad de facturación propia, equivalente a los departamentos existentes (Immedia, Imcontent, Immoralia).
+
+**Progreso de implementación:**
+- ✅ SQL en Supabase (vertical Imsales, servicio Setup Inicial IMS)
+- ✅ `MatrixGrid.tsx` (columnas Imsales + header emerald)
+- ✅ `ImsalesBilling.tsx` (módulo Billing Imsales completo)
+- ✅ `imsales.js` (backend - endpoints: services, billing, save, hide, unhide, hidden)
+- ✅ `imsales.ts` (API client)
+- ✅ `pl.js` (serviceMapping + P&L summary Imsales)
+- ✅ `constants.ts` (IMSALES type, colores, NAV_ITEMS, ALL_MODULES)
+- ✅ `DepartmentPL.tsx` (DEPT_MAP + REVENUE_STRUCTURE)
+- ✅ `Dashboard.tsx` (DEPT_ROUTE_MAP)
+- ✅ `UserManagement.tsx` (DEPT_OPTIONS)
+- ✅ `App.tsx` (ruta /imsales-billing)
+- ✅ `index.js` (backend - registrar ruta /imsales)
+- ✅ `Sidebar.tsx` (icono ShoppingCart para Billing Imsales)
+- ✅ Removido botón Export CSV de `ImsalesBilling.tsx`
