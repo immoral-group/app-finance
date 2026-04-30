@@ -547,6 +547,7 @@ router.get('/matrix/:year', async (req, res) => {
                     'SEO': 'SEO',
                     'MKT_AUTO_EMAIL': 'CRM',
                     'OTHER_HOURS': 'Otros servicios',
+                    'IMMORAL_COMMISSIONS': 'Otras comisiones',
                     'IMSALES_SETUP': 'Setup inicial (ims)',
                     'IMSALES_CAPTACI_N': 'Captación',
                 };

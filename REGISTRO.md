@@ -404,3 +404,43 @@ Integrar "Imsales" como departamento completo con funcionalidad de facturación 
 - ✅ `index.js` (backend - registrar ruta /imsales)
 - ✅ `Sidebar.tsx` (icono ShoppingCart para Billing Imsales)
 - ✅ Removido botón Export CSV de `ImsalesBilling.tsx`
+
+---
+
+### 2026-04-27 — Feature: Columna "Otras Comisiones" en Billing Matrix (Immoral) enlazada a P&L
+
+**Problema:**
+La fila `Inmoral → Otras comisiones` en P&L Matrix (sección INGRESOS) existía en la estructura pero siempre mostraba ceros porque no había ningún servicio de Billing Matrix mapeado a ella. Era imposible introducir datos.
+
+**Causa raíz:**
+El `serviceMapping` en `pl.js` no tenía ninguna entrada que apuntara a `'Otras comisiones'`. En Billing Matrix tampoco existía columna alguna para ese concepto en el bloque Immoral.
+
+**Solución implementada:**
+
+#### `database/migrations/add_immoral_commissions_service.sql` _(archivo nuevo)_
+- INSERT de nuevo servicio `IMMORAL_COMMISSIONS` ("Otras Comisiones") en dept IMMORAL con `display_order = 30`
+- INSERT en `service_year_assignments` para años 2025 y 2026 (`ON CONFLICT DO NOTHING` — idempotente)
+
+#### `client/src/features/billing/MatrixGrid.tsx`
+- Añadida variable `otrasComisionesSvc = getSvc('IMMORAL_COMMISSIONS')`
+- Incluida al final de `immoralSvcsWithHoras` (después de Horas/Otros, antes de Imsales)
+- El colSpan del header Immoral se actualiza solo (ya usaba `immoralSvcsWithHoras.length`)
+- Si el servicio no está en BD, no aparece la columna (seguro / zero-break)
+
+#### `services/admin-service/src/routes/pl.js`
+- Añadida entrada `'IMMORAL_COMMISSIONS': 'Otras comisiones'` en `serviceMapping` (línea 550)
+- Los `billing_details` con ese código de servicio ya se acumulan automáticamente en `revenueData['Otras comisiones']`
+
+#### `client/src/features/pl/PLMatrix.tsx`
+- Sin cambios — la fila `{ dept: 'Immoral', services: ['Otros servicios', 'Otras comisiones'] }` ya existía
+
+#### ⚠️ SQL a ejecutar en Supabase (una sola vez):
+```sql
+-- Ejecutar el contenido de: database/migrations/add_immoral_commissions_service.sql
+```
+
+**Flujo resultante:**
+1. Usuario escribe importe en columna "Otras Comisiones" de una fila Immoral en Billing Matrix
+2. Se guarda en `billing_details` con `service_id` del servicio `IMMORAL_COMMISSIONS`
+3. P&L Real lee `billing_details`, el mapping traduce el código a `'Otras comisiones'`
+4. La fila `Inmoral → Otras comisiones` en P&L muestra el valor acumulado por mes

@@ -471,8 +471,13 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
 
     // "Horas / Otros" column — look for it in DB columns first, otherwise use a virtual placeholder
     const horasOtrosSvc = getSvc('OTHER_HOURS');
-    // All Immoral columns including "Horas / Otros"
-    const immoralSvcsWithHoras = [...immoralSvcs, ...(horasOtrosSvc ? [horasOtrosSvc] : [])];
+    const otrasComisionesSvc = getSvc('IMMORAL_COMMISSIONS');
+    // All Immoral columns including "Horas / Otros" and "Otras Comisiones"
+    const immoralSvcsWithHoras = [
+        ...immoralSvcs,
+        ...(horasOtrosSvc ? [horasOtrosSvc] : []),
+        ...(otrasComisionesSvc ? [otrasComisionesSvc] : [])
+    ];
     const hasHorasInDB = !!horasOtrosSvc;
 
     // All service columns for rendering
