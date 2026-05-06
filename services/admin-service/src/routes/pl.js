@@ -540,6 +540,7 @@ router.get('/matrix/:year', async (req, res) => {
                     'SOCIAL_MEDIA_MGMT': 'RRSS',
                     'DIGITAL_STRATEGY': 'Estrategia Digital',
                     'INFLUENCER_UGC': 'Influencers',
+                    'BUDGET_INFLUENCER_PAID': 'Budget Nutfruit',
                     'IMMORALIA_SETUP': 'Setup inicial IA',
                     'AGENCY_AUTO': 'Automation',
                     'CONSULTING_AUTO': 'Consultoría',

@@ -444,3 +444,39 @@ El `serviceMapping` en `pl.js` no tenía ninguna entrada que apuntara a `'Otras 
 2. Se guarda en `billing_details` con `service_id` del servicio `IMMORAL_COMMISSIONS`
 3. P&L Real lee `billing_details`, el mapping traduce el código a `'Otras comisiones'`
 4. La fila `Inmoral → Otras comisiones` en P&L muestra el valor acumulado por mes
+
+---
+
+### 2026-04-27 — Feature: Columna "Budget Influencer y Paid" en Billing Matrix (Imcontent) enlazada a P&L "Budget Nutfruit"
+
+**Problema (idéntico al anterior, mismo patrón):**
+La fila `Imcontent → Budget Nutfruit` en P&L Matrix (sección INGRESOS) existía en la estructura pero siempre mostraba ceros porque no había ningún servicio de Billing Matrix mapeado a ella.
+
+**Solución implementada (mismo patrón que `IMMORAL_COMMISSIONS`):**
+
+#### `database/migrations/add_budget_influencer_paid_service.sql` _(archivo nuevo)_
+- INSERT de nuevo servicio `BUDGET_INFLUENCER_PAID` ("Budget Influencer y Paid") en dept IMCONT con `display_order = 55` (entre INFLUENCER_UGC=50 y CONTENT_SETUP=60)
+- INSERT en `service_year_assignments` para años 2025 y 2026 (idempotente)
+
+#### `client/src/features/billing/MatrixGrid.tsx`
+- Añadido `getSvc('BUDGET_INFLUENCER_PAID')` al array `imcontentSvcs`, justo después de `INFLUENCER_UGC`
+- El colSpan del header Imcontent se actualiza solo (ya usaba `imcontentSvcs.length`)
+- Si el servicio no está en BD, no aparece la columna (seguro / zero-break)
+
+#### `services/admin-service/src/routes/pl.js`
+- Añadida entrada `'BUDGET_INFLUENCER_PAID': 'Budget Nutfruit'` en `serviceMapping` (después de `INFLUENCER_UGC`)
+- `revenueData['Budget Nutfruit']` ya estaba inicializado (línea 490) — sin cambios adicionales
+
+#### `client/src/features/pl/PLMatrix.tsx`
+- Sin cambios — la fila `{ dept: 'Imcontent', services: ['Budget Nutfruit'] }` ya existía
+
+#### ⚠️ SQL a ejecutar en Supabase (una sola vez):
+```sql
+-- Ejecutar el contenido de: database/migrations/add_budget_influencer_paid_service.sql
+```
+
+**Flujo resultante:**
+1. Usuario escribe importe en columna "Budget Influencer y Paid" de una fila Imcontent en Billing Matrix
+2. Se guarda en `billing_details` con `service_id` del servicio `BUDGET_INFLUENCER_PAID`
+3. P&L Real lee `billing_details`, el mapping traduce el código a `'Budget Nutfruit'`
+4. La fila `Imcontent → Budget Nutfruit` en P&L muestra el valor acumulado por mes

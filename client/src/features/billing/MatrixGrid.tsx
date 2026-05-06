@@ -464,7 +464,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
     // --- COLUMN MAPPING HELPER ---
     const getSvc = (code: string) => data.columns.find(c => c.code === code);
     const immediaSvcs = [getSvc('PAID_MEDIA_STRATEGY'), getSvc('PAID_MEDIA_SETUP')].filter(Boolean);
-    const imcontentSvcs = [getSvc('BRANDING'), getSvc('CONTENT_DESIGN'), getSvc('AI_CONTENT'), getSvc('SOCIAL_MEDIA_MGMT'), getSvc('DIGITAL_STRATEGY'), getSvc('INFLUENCER_UGC')].filter(Boolean);
+    const imcontentSvcs = [getSvc('BRANDING'), getSvc('CONTENT_DESIGN'), getSvc('AI_CONTENT'), getSvc('SOCIAL_MEDIA_MGMT'), getSvc('DIGITAL_STRATEGY'), getSvc('INFLUENCER_UGC'), getSvc('BUDGET_INFLUENCER_PAID')].filter(Boolean);
     const immoraliaSvcs = [getSvc('IMMORALIA_SETUP'), getSvc('AGENCY_AUTO'), getSvc('CONSULTING_AUTO')].filter(Boolean);
     const immoralSvcs = [getSvc('SEO'), getSvc('WEB_DEV'), getSvc('MKT_AUTO_EMAIL')].filter(Boolean);
     const imsalesSvcs = [getSvc('IMSALES_SETUP'), getSvc('IMSALES_CAPTACI_N')].filter(Boolean);
