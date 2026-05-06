@@ -746,30 +746,40 @@ export default function DepartmentPL() {
         const budgetEbitda = budgetRevTotals.map((v, i) => fmtCurrency(v - budgetExpTotals[i]));
         const diffEbitda = realEbitda.map((v, i) => fmtCurrency(v - budgetEbitda[i]));
 
-        const renderCompRow = (label: string, realVals: number[], budgetVals: number[], diffVals: number[], bold: boolean = false, bgClass: string = '') => (
-            <>
-                <tr className={`${bgClass} ${bold ? 'font-bold' : ''}`}>
-                    <td rowSpan={3} className={`border border-gray-300 px-2 py-1 text-xs ${bold ? 'font-bold' : 'font-medium'} text-gray-800 align-middle`}>
-                        {label}
-                    </td>
-                    <td className="border border-gray-200 px-2 py-0.5 text-xs text-blue-700 font-medium">Real</td>
-                    {realVals.map((v, i) => <td key={i} className="border border-gray-200 px-1 py-0.5 text-right text-xs tabular-nums">{fmtDisplay(v)}</td>)}
-                    <td className="border border-gray-200 px-1 py-0.5 text-right text-xs font-medium bg-gray-50 tabular-nums">{fmtDisplay(fmtCurrency(realVals.reduce((a, b) => a + b, 0)))}</td>
-                </tr>
-                <tr className={bgClass}>
-                    <td className="border border-gray-200 px-2 py-0.5 text-xs text-green-700 font-medium">Presup.</td>
-                    {budgetVals.map((v, i) => <td key={i} className="border border-gray-200 px-1 py-0.5 text-right text-xs tabular-nums">{fmtDisplay(v)}</td>)}
-                    <td className="border border-gray-200 px-1 py-0.5 text-right text-xs font-medium bg-gray-50 tabular-nums">{fmtDisplay(fmtCurrency(budgetVals.reduce((a, b) => a + b, 0)))}</td>
-                </tr>
-                <tr className={bgClass}>
-                    <td className="border border-gray-200 px-2 py-0.5 text-xs text-red-700 font-medium">Dif.</td>
-                    {diffVals.map((v, i) => <td key={i} className={`border border-gray-200 px-1 py-0.5 text-right text-xs tabular-nums ${v > 0 ? 'text-green-700' : v < 0 ? 'text-red-600' : ''}`}>{fmtDisplay(v)}</td>)}
-                    <td className={`border border-gray-200 px-1 py-0.5 text-right text-xs font-medium bg-gray-50 tabular-nums ${fmtCurrency(diffVals.reduce((a, b) => a + b, 0)) >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                        {fmtDisplay(fmtCurrency(diffVals.reduce((a, b) => a + b, 0)))}
-                    </td>
-                </tr>
-            </>
-        );
+        // isExpense: para filas de gasto, real < budget = bueno (verde). Para ingresos/EBITDA: real > budget = bueno (verde).
+        const renderCompRow = (label: string, realVals: number[], budgetVals: number[], diffVals: number[], bold: boolean = false, bgClass: string = '', isExpense: boolean = false) => {
+            const colorFor = (v: number) => {
+                if (v === 0) return '';
+                const isGood = isExpense ? v < 0 : v > 0;
+                return isGood ? 'text-green-700' : 'text-red-600';
+            };
+            const totalDiff = fmtCurrency(diffVals.reduce((a, b) => a + b, 0));
+            const totalIsGood = isExpense ? totalDiff <= 0 : totalDiff >= 0;
+            return (
+                <>
+                    <tr className={`${bgClass} ${bold ? 'font-bold' : ''}`}>
+                        <td rowSpan={3} className={`border border-gray-300 px-2 py-1 text-xs ${bold ? 'font-bold' : 'font-medium'} text-gray-800 align-middle`}>
+                            {label}
+                        </td>
+                        <td className="border border-gray-200 px-2 py-0.5 text-xs text-blue-700 font-medium">Real</td>
+                        {realVals.map((v, i) => <td key={i} className="border border-gray-200 px-1 py-0.5 text-right text-xs tabular-nums">{fmtDisplay(v)}</td>)}
+                        <td className="border border-gray-200 px-1 py-0.5 text-right text-xs font-medium bg-gray-50 tabular-nums">{fmtDisplay(fmtCurrency(realVals.reduce((a, b) => a + b, 0)))}</td>
+                    </tr>
+                    <tr className={bgClass}>
+                        <td className="border border-gray-200 px-2 py-0.5 text-xs text-green-700 font-medium">Presup.</td>
+                        {budgetVals.map((v, i) => <td key={i} className="border border-gray-200 px-1 py-0.5 text-right text-xs tabular-nums">{fmtDisplay(v)}</td>)}
+                        <td className="border border-gray-200 px-1 py-0.5 text-right text-xs font-medium bg-gray-50 tabular-nums">{fmtDisplay(fmtCurrency(budgetVals.reduce((a, b) => a + b, 0)))}</td>
+                    </tr>
+                    <tr className={bgClass}>
+                        <td className="border border-gray-200 px-2 py-0.5 text-xs text-red-700 font-medium">Dif.</td>
+                        {diffVals.map((v, i) => <td key={i} className={`border border-gray-200 px-1 py-0.5 text-right text-xs tabular-nums ${colorFor(v)}`}>{fmtDisplay(v)}</td>)}
+                        <td className={`border border-gray-200 px-1 py-0.5 text-right text-xs font-medium bg-gray-50 tabular-nums ${totalIsGood ? 'text-green-700' : 'text-red-600'}`}>
+                            {fmtDisplay(totalDiff)}
+                        </td>
+                    </tr>
+                </>
+            );
+        };
 
         return (
             <div className="overflow-x-auto px-2">
@@ -794,12 +804,12 @@ export default function DepartmentPL() {
 
                         {!deptNames.includes('Immoral') && (
                             <>
-                                {renderCompRow('GROUP (Immoral %)', realGroupCost, budgetGroupCost, diffGroupCost, false, 'bg-red-50')}
+                                {renderCompRow('GROUP (Immoral %)', realGroupCost, budgetGroupCost, diffGroupCost, false, 'bg-red-50', true)}
                                 <tr><td colSpan={15} className="py-1 bg-white border-0"></td></tr>
                             </>
                         )}
 
-                        {renderCompRow('GASTOS TOTALES', realExpTotals.map(v => fmtCurrency(v)), budgetExpTotals.map(v => fmtCurrency(v)), diffExpTotals, true, 'bg-orange-50')}
+                        {renderCompRow('GASTOS TOTALES', realExpTotals.map(v => fmtCurrency(v)), budgetExpTotals.map(v => fmtCurrency(v)), diffExpTotals, true, 'bg-orange-50', true)}
                         <tr><td colSpan={15} className="py-1 bg-white border-0"></td></tr>
 
                         {renderCompRow('EBITDA', realEbitda, budgetEbitda, diffEbitda, true, 'bg-blue-50')}
@@ -851,6 +861,9 @@ export default function DepartmentPL() {
         const groupCostMonthly = groupPct.map((pct, i) =>
             isImmoral ? 0 : fmtCurrency(immoralExpensesMonthly[i] * (pct / 100))
         );
+        // Budget group cost — calculated symmetrically using compBudgetValues so the
+        // "Presupuesto" expense card and the budget net result include the same Immoral % share that Real does.
+        const budgetGroupCostMonthly = calculateGroupCost(compBudgetValues);
 
         // Calculate each expense category monthly
         const catMonthly: { label: string; totals: number[] }[] = [];
@@ -869,6 +882,7 @@ export default function DepartmentPL() {
 
         // Total expenses INCLUDING Group cost
         const totalExpWithGroup = totalExpMonthly.map((v, i) => fmtCurrency(v + groupCostMonthly[i]));
+        const budgetExpWithGroup = budgetExpMonthly.map((v, i) => fmtCurrency(v + budgetGroupCostMonthly[i]));
 
         const resultadoMonthly = revTotals.map((v, i) => fmtCurrency(v - totalExpWithGroup[i]));
         const resultadoAnual = fmtCurrency(revAnual - totalExpWithGroup.reduce((a, b) => a + b, 0));
@@ -904,7 +918,7 @@ export default function DepartmentPL() {
             totalHoursPerMonth[i] > 0 ? fmtCurrency(v / totalHoursPerMonth[i]) : 0
         );
 
-        const budgetResultadoMonthly = budgetRevTotals.map((v, i) => fmtCurrency(v - budgetExpMonthly[i]));
+        const budgetResultadoMonthly = budgetRevTotals.map((v, i) => fmtCurrency(v - budgetExpWithGroup[i]));
 
         // Current month index (0-indexed)
         const currentMonth = new Date().getMonth();
@@ -981,8 +995,8 @@ export default function DepartmentPL() {
             ? totalExpWithGroup[singleMonthIdx] || 0
             : totalExpWithGroup.slice(0, bannerEndMonth + 1).reduce((a, b) => a + b, 0);
         const ytdExpBudget = isSingleMonth
-            ? budgetExpMonthly[singleMonthIdx] || 0
-            : budgetExpMonthly.slice(0, bannerEndMonth + 1).reduce((a, b) => a + b, 0);
+            ? budgetExpWithGroup[singleMonthIdx] || 0
+            : budgetExpWithGroup.slice(0, bannerEndMonth + 1).reduce((a, b) => a + b, 0);
         const ytdExpDiff = fmtCurrency(ytdExpReal - ytdExpBudget);
         const ytdExpPct = ytdExpBudget !== 0 ? fmtCurrency((ytdExpDiff / Math.abs(ytdExpBudget)) * 100) : 0;
         const expOk = ytdExpDiff <= 0; // expenses below budget = good
