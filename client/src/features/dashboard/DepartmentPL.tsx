@@ -126,6 +126,9 @@ export default function DepartmentPL() {
     const config = DEPT_MAP[deptCode || ''];
     const deptNames = config?.deptNames || [deptCode || ''];
     const deptLabel = config?.label || deptCode || 'Departamento';
+    // Departamentos sin allocación de Group cost (Immoral %).
+    // 'Imsales' está temporalmente exento — para reactivarlo, quitar 'Imsales' de esta línea.
+    const isGroupCostExempt = deptNames.includes('Immoral') || deptNames.includes('Imsales');
 
     const [year, setYear] = useUrlState('year', new Date().getFullYear(), (v) => Number(v));
     const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Dashboard');
@@ -573,10 +576,9 @@ export default function DepartmentPL() {
             });
         });
 
-        // 5) Group Cost
-        const isImmoral = deptNames.includes('Immoral');
+        // 5) Group Cost — 0 for depts in isGroupCostExempt
         return groupPct.map((pct, i) =>
-            isImmoral ? 0 : fmtCurrency(immoralExpensesMonthly[i] * pct)
+            isGroupCostExempt ? 0 : fmtCurrency(immoralExpensesMonthly[i] * pct)
         );
     };
 
@@ -802,7 +804,7 @@ export default function DepartmentPL() {
                         {renderCompRow('INGRESOS', realRevTotals, budgetRevTotals, diffRevTotals, true, 'bg-purple-50')}
                         <tr><td colSpan={15} className="py-1 bg-white border-0"></td></tr>
 
-                        {!deptNames.includes('Immoral') && (
+                        {!isGroupCostExempt && (
                             <>
                                 {renderCompRow('GROUP (Immoral %)', realGroupCost, budgetGroupCost, diffGroupCost, false, 'bg-red-50', true)}
                                 <tr><td colSpan={15} className="py-1 bg-white border-0"></td></tr>
@@ -856,10 +858,9 @@ export default function DepartmentPL() {
             });
         });
 
-        // === Group cost = ALL Immoral expenses * Group% (per month) ===
-        const isImmoral = deptNames.includes('Immoral');
+        // === Group cost = ALL Immoral expenses * Group% (per month) — 0 for depts in isGroupCostExempt ===
         const groupCostMonthly = groupPct.map((pct, i) =>
-            isImmoral ? 0 : fmtCurrency(immoralExpensesMonthly[i] * (pct / 100))
+            isGroupCostExempt ? 0 : fmtCurrency(immoralExpensesMonthly[i] * (pct / 100))
         );
         // Budget group cost — calculated symmetrically using compBudgetValues so the
         // "Presupuesto" expense card and the budget net result include the same Immoral % share that Real does.
@@ -920,14 +921,33 @@ export default function DepartmentPL() {
 
         const budgetResultadoMonthly = budgetRevTotals.map((v, i) => fmtCurrency(v - budgetExpWithGroup[i]));
 
-        // Current month index (0-indexed)
-        const currentMonth = new Date().getMonth();
+        // Last CLOSED month index (0-indexed). We bill in arrears, so YTD must accumulate
+        // up to the previous month, not the current one — otherwise Budget includes the current
+        // month (already populated) but Real doesn't (not closed yet), creating a false negative.
+        // - Past year (selected < today's year): all 12 months closed → 11
+        // - Current year: previous month → today's month - 1 (can be -1 in January)
+        // - Future year: no month closed → -1
+        const today = new Date();
+        const todayYear = today.getFullYear();
+        const todayMonthIdx = today.getMonth();
+        const lastClosedMonth =
+            year < todayYear ? 11 :
+            year > todayYear ? -1 :
+            todayMonthIdx - 1;
+        const ytdHasClosedMonths = lastClosedMonth >= 0;
 
         // Determine the effective month range based on the banner month selector
-        const bannerEndMonth = bannerMonth === 'ytd' ? currentMonth : (bannerMonth as number);
+        const bannerEndMonth = bannerMonth === 'ytd' ? lastClosedMonth : (bannerMonth as number);
 
         // --- Chart Data ---
         const MONTH_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        // Dynamic YTD range label shown next to Real/Presupuesto when "Acumulado (YTD)" is selected
+        const ytdRangeLabel = !ytdHasClosedMonths
+            ? ''
+            : lastClosedMonth === 0
+                ? MONTH_SHORT[0]
+                : `de ${MONTH_SHORT[0]} a ${MONTH_SHORT[lastClosedMonth]}`;
+        const showYtdRange = bannerMonth === 'ytd' && !!ytdRangeLabel;
 
         // 1) Ventas vs Gastos bar chart data
         const salesVsExpenseData = MONTH_SHORT.map((m, i) => ({
@@ -957,10 +977,14 @@ export default function DepartmentPL() {
         const expColors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'];
 
         // 4) Budget alert: compare real vs budget for recent months
-        const alertMonths: { month: string; idx: number; realResult: number; budgetResult: number; diff: number; pct: number }[] = [];
+        // Show every month in the range, but flag months without Real data so the chip can be rendered in a neutral style.
+        // Keeping the chip preserves the visual continuity of the month sequence; the neutral style avoids the misleading "miss"
+        // that would appear if we calculated `0 - budget = -budget` for a month with no Real registered.
+        const alertMonths: { month: string; idx: number; realResult: number; budgetResult: number; diff: number; pct: number; hasRealData: boolean }[] = [];
         const alertStart = bannerMonth === 'ytd' ? 0 : (bannerMonth as number);
         const alertEnd = bannerEndMonth;
         for (let i = alertStart; i <= alertEnd; i++) {
+            const hasRealData = (revTotals[i] || 0) > 0 || (totalExpWithGroup[i] || 0) > 0;
             const realRes = resultadoMonthly[i];
             const budgetRes = budgetResultadoMonthly[i];
             const diff = fmtCurrency(realRes - budgetRes);
@@ -971,7 +995,8 @@ export default function DepartmentPL() {
                 realResult: realRes,
                 budgetResult: budgetRes,
                 diff,
-                pct
+                pct,
+                hasRealData
             });
         }
 
@@ -1042,7 +1067,13 @@ export default function DepartmentPL() {
                         </div>
                     </div>
 
-                    {/* 3-panel grid */}
+                    {/* YTD fallback: no closed months yet (January of current year, or future year) */}
+                    {bannerMonth === 'ytd' && !ytdHasClosedMonths ? (
+                        <div className="p-8 text-center text-sm text-gray-500">
+                            Sin meses cerrados aún
+                        </div>
+                    ) : (
+                    /* 3-panel grid */
                     <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-gray-100">
                         {/* Ingresos vs Presupuesto */}
                         <div className={`p-4 ${revOk ? 'bg-emerald-50/50' : 'bg-red-50/40'}`}>
@@ -1052,11 +1083,17 @@ export default function DepartmentPL() {
                             </div>
                             <div className="space-y-1">
                                 <div className="flex justify-between text-xs">
-                                    <span className="text-gray-500">Real</span>
+                                    <span className="text-gray-500">
+                                        Real
+                                        {showYtdRange && <span className="ml-1 text-[10px] text-gray-400 font-normal">({ytdRangeLabel})</span>}
+                                    </span>
                                     <span className="font-bold text-gray-900">{fmtDisplay(ytdRevReal)} €</span>
                                 </div>
                                 <div className="flex justify-between text-xs">
-                                    <span className="text-gray-500">Presupuesto</span>
+                                    <span className="text-gray-500">
+                                        Presupuesto
+                                        {showYtdRange && <span className="ml-1 text-[10px] text-gray-400 font-normal">({ytdRangeLabel})</span>}
+                                    </span>
                                     <span className="font-medium text-gray-600">{fmtDisplay(ytdRevBudget)} €</span>
                                 </div>
                                 <div className={`flex justify-between text-xs pt-1 border-t ${revOk ? 'border-emerald-200' : 'border-red-200'}`}>
@@ -1078,11 +1115,17 @@ export default function DepartmentPL() {
                             </div>
                             <div className="space-y-1">
                                 <div className="flex justify-between text-xs">
-                                    <span className="text-gray-500">Real</span>
+                                    <span className="text-gray-500">
+                                        Real
+                                        {showYtdRange && <span className="ml-1 text-[10px] text-gray-400 font-normal">({ytdRangeLabel})</span>}
+                                    </span>
                                     <span className="font-bold text-gray-900">{fmtDisplay(ytdExpReal)} €</span>
                                 </div>
                                 <div className="flex justify-between text-xs">
-                                    <span className="text-gray-500">Presupuesto</span>
+                                    <span className="text-gray-500">
+                                        Presupuesto
+                                        {showYtdRange && <span className="ml-1 text-[10px] text-gray-400 font-normal">({ytdRangeLabel})</span>}
+                                    </span>
                                     <span className="font-medium text-gray-600">{fmtDisplay(ytdExpBudget)} €</span>
                                 </div>
                                 <div className={`flex justify-between text-xs pt-1 border-t ${expOk ? 'border-emerald-200' : 'border-red-200'}`}>
@@ -1104,11 +1147,17 @@ export default function DepartmentPL() {
                             </div>
                             <div className="space-y-1">
                                 <div className="flex justify-between text-xs">
-                                    <span className="text-gray-500">Real</span>
+                                    <span className="text-gray-500">
+                                        Real
+                                        {showYtdRange && <span className="ml-1 text-[10px] text-gray-400 font-normal">({ytdRangeLabel})</span>}
+                                    </span>
                                     <span className={`font-bold ${ytdResultReal >= 0 ? 'text-green-700' : 'text-red-700'}`}>{fmtDisplay(ytdResultReal)} €</span>
                                 </div>
                                 <div className="flex justify-between text-xs">
-                                    <span className="text-gray-500">Presupuesto</span>
+                                    <span className="text-gray-500">
+                                        Presupuesto
+                                        {showYtdRange && <span className="ml-1 text-[10px] text-gray-400 font-normal">({ytdRangeLabel})</span>}
+                                    </span>
                                     <span className="font-medium text-gray-600">{fmtDisplay(ytdResultBudget)} €</span>
                                 </div>
                                 <div className={`flex justify-between text-xs pt-1 border-t ${resultOk ? 'border-emerald-200' : 'border-red-200'}`}>
@@ -1122,12 +1171,26 @@ export default function DepartmentPL() {
                             </div>
                         </div>
                     </div>
+                    )}
 
-                    {/* Monthly chips */}
+                    {/* Monthly chips — hidden when there's no closed month to chart */}
+                    {alertMonths.length > 0 && (
                     <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50">
                         <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-2">Detalle por mes (resultado neto vs presupuesto)</p>
                         <div className="flex gap-1.5 flex-wrap">
                             {alertMonths.map(am => {
+                                if (!am.hasRealData) {
+                                    return (
+                                        <div
+                                            key={am.idx}
+                                            className="px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 bg-gray-100 text-gray-500 border border-gray-200"
+                                            title="Sin Real registrado en este mes"
+                                        >
+                                            {am.month.slice(0, 3)}
+                                            <span className="font-normal italic text-[10px]">sin actividad</span>
+                                        </div>
+                                    );
+                                }
                                 const ok = am.diff >= 0;
                                 return (
                                     <div
@@ -1146,6 +1209,7 @@ export default function DepartmentPL() {
                             })}
                         </div>
                     </div>
+                    )}
                 </div>
 
                 {/* === SUMMARY TABLE (FIRST) === */}
@@ -1735,7 +1799,7 @@ export default function DepartmentPL() {
                         {renderExpenseCategory('Gastos Operativos', deptGastosOp, 'gastosOp')}
 
                         {/* GROUP COST (Integration into Gastos) */}
-                        {!deptNames.includes('Immoral') && (
+                        {!isGroupCostExempt && (
                             <tr className="bg-red-50 hover:bg-red-100 transition-colors">
                                 <td className="border border-red-200 px-2 py-1.5 text-xs font-semibold text-red-800"></td>
                                 <td className="border border-red-200 px-2 py-1.5 text-xs font-semibold text-red-800">

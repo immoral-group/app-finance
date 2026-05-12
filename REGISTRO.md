@@ -554,6 +554,143 @@ La pestaña "Comparación" ya hacía bien el cálculo simétrico usando el helpe
 
 ---
 
+### 2026-05-08 — Fix: Acumulado YTD del Dashboard de deptos cuenta hasta mes cerrado (no mes actual)
+
+**Problema reportado:**
+En el Dashboard de cada departamento, el filtro "Acumulado (YTD)" sumaba desde enero hasta el mes en curso. Como se factura a mes vencido (en mayo se cierra abril), el Real solo tiene datos hasta abril mientras que el Presupuesto cubre todos los meses. Resultado: el YTD comparaba 4 meses de Real contra 5 meses de Presupuesto, marcando siempre desviación negativa falsa en Ingresos, Gastos y Resultado Neto.
+
+**Causa raíz:**
+En `client/src/features/dashboard/DepartmentPL.tsx → renderDashboardTab()`:
+```js
+const currentMonth = new Date().getMonth();   // En mayo = 4
+const bannerEndMonth = bannerMonth === 'ytd' ? currentMonth : (bannerMonth as number);
+```
+Y todas las sumas YTD usan `slice(0, bannerEndMonth + 1)` → en mayo acumulaba meses 0..4 (Ene-May), incluyendo el mes en curso sin datos reales.
+
+**Solución implementada:**
+
+#### `client/src/features/dashboard/DepartmentPL.tsx → renderDashboardTab()`
+- Sustituido `currentMonth` por `lastClosedMonth` con lógica year-aware:
+  - Año pasado (selectedYear < todayYear): `lastClosedMonth = 11` → todo cerrado
+  - Año actual: `lastClosedMonth = todayMonthIdx - 1` → mes anterior
+  - Año futuro: `lastClosedMonth = -1` → nada cerrado
+- `bannerEndMonth = bannerMonth === 'ytd' ? lastClosedMonth : (bannerMonth as number)` — el selector manual por mes (Ene-Dic) no se ve afectado
+- Variable derivada `ytdHasClosedMonths = lastClosedMonth >= 0`
+
+**Fallback UI cuando no hay meses cerrados (enero del año actual o año futuro):**
+- Las 3 tarjetas de "Rendimiento vs Presupuesto" se ocultan y aparece el texto **"Sin meses cerrados aún"**
+- Los chips mensuales también se ocultan cuando `alertMonths.length === 0`
+- El selector mes-a-mes sigue disponible (el usuario puede elegir un mes específico igual)
+
+**Lo que NO cambia:**
+- El label del selector sigue siendo "Acumulado (YTD)" — sin texto dinámico extra
+- El selector manual por mes (Ene, Feb, …, Dic) funciona idéntico
+- Las pestañas Real / Presupuesto / Comparación no se tocan — esas muestran los 12 meses siempre
+- Los gráficos (Ventas vs Gastos, evolución, etc.) siguen mostrando los 12 meses
+- Para años pasados YTD sigue acumulando los 12 meses como antes
+- `Dashboard.tsx` (dashboard general) NO se tocó — no compara budget vs real, no tiene el bug
+
+**Resultado:**
+- En mayo el YTD acumula Ene-Abr (4 meses cerrados) tanto en Real como en Presupuesto → comparación justa
+- En junio acumulará Ene-May (5 meses) automáticamente, etc.
+
+---
+
+### 2026-05-08 — UX: Etiqueta dinámica de rango en cards YTD del Dashboard de deptos
+
+**Objetivo:**
+Cuando el selector está en "Acumulado (YTD)", mostrar al lado de los labels "Real" y "Presupuesto" de cada card el rango que se está acumulando — p.ej. `(de Ene a Abr)` en mayo. Cuando el usuario elige un mes específico (Ene, Feb, …, Dic) la descripción desaparece porque ya no aporta nada.
+
+#### `client/src/features/dashboard/DepartmentPL.tsx`
+- Nuevas variables tras `MONTH_SHORT`:
+  ```js
+  const ytdRangeLabel = !ytdHasClosedMonths ? ''
+      : lastClosedMonth === 0 ? MONTH_SHORT[0]
+      : `de ${MONTH_SHORT[0]} a ${MONTH_SHORT[lastClosedMonth]}`;
+  const showYtdRange = bannerMonth === 'ytd' && !!ytdRangeLabel;
+  ```
+- En los 3 cards (Ingresos, Gastos, Resultado Neto), las etiquetas `Real` y `Presupuesto` envuelven una `<span>` adicional, condicional a `showYtdRange`, con estilo `text-[10px] text-gray-400 font-normal` para que sea sutil.
+
+**Comportamiento:**
+- En mayo 2026 (mes actual) con YTD seleccionado → `Real (de Ene a Abr)`, `Presupuesto (de Ene a Abr)`
+- Si solo hay un mes cerrado (p.ej. febrero) → muestra `(Ene)` sin "de ... a ..."
+- Al seleccionar un mes individual → desaparece la descripción
+- Para año pasado completo → `(de Ene a Dic)` automáticamente
+- Para año futuro o enero del año actual → no se muestra nada porque ya está activo el placeholder "Sin meses cerrados aún"
+
+**Lo que NO cambia:**
+- Cálculos, colores, totales: ninguno se toca
+- El selector "Acumulado (YTD)" sigue con la misma etiqueta
+- El módulo Dashboard general no se ve afectado
+
+---
+
+### 2026-05-08 — Config: Imsales exento de allocación Group cost (temporal)
+
+**Objetivo:**
+Desactivar temporalmente la allocación de Group cost (Immoral %) para el departamento Imsales en `DepartmentPL.tsx`. La intención es reactivarla en el futuro, así que se mantiene la estructura de filas en el código.
+
+**Cambio en `client/src/features/dashboard/DepartmentPL.tsx`:**
+- Nueva constante `isGroupCostExempt` justo después de definir `deptNames`:
+  ```js
+  // Departamentos sin allocación de Group cost (Immoral %).
+  // 'Imsales' está temporalmente exento — para reactivarlo, quitar 'Imsales' de esta línea.
+  const isGroupCostExempt = deptNames.includes('Immoral') || deptNames.includes('Imsales');
+  ```
+- 4 ocurrencias previas de `isImmoral` / `deptNames.includes('Immoral')` reemplazadas por `isGroupCostExempt`:
+  - Helper `calculateGroupCost` (línea ~575)
+  - `groupCostMonthly` en `renderDashboardTab` (línea ~858)
+  - Condicional fila "GROUP" en pestaña Comparación (línea ~803)
+  - Condicional fila "Group (Immoral %)" en pestañas Real/Presupuesto (línea ~1798)
+
+**Resultado en la vista de Imsales:**
+- Pestaña Dashboard: la fila "Gastos Generales (Group)" se ve con 0 € (la fila Group % sigue visible mostrando la % real del depto)
+- Pestaña Comparación: la fila GROUP se oculta entera (como ya ocurría con Immoral)
+- Pestañas Real / Presupuesto: la fila Group (Immoral %) se oculta entera
+- Los totales de Gastos y EBITDA ya no incluyen la cuota Immoral % para Imsales
+
+**Reactivar Imsales en el futuro:** quitar `|| deptNames.includes('Imsales')` de la línea 131 — ningún otro cambio necesario.
+
+**Pendiente de decisión:**
+`Dashboard.tsx` (dashboard general) tiene lógica de Group cost equivalente en las tarjetas de depto (líneas 528-529, 850-851, 892). NO se ha tocado aún — esperar confirmación del usuario para extender allí también la exención de Imsales.
+
+---
+
+### 2026-05-08 — Fix + UX: Chips "Detalle por mes" — meses sin Real se muestran en estilo neutral
+
+**Problema reportado:**
+En la sección "Detalle por mes (resultado neto vs presupuesto)" del Dashboard de cada depto, las chips aparecían en rojo para meses sin Real registrado, mostrando una "desviación" engañosa (`0 - Presupuesto = -Presupuesto`). Iteración inicial: ocultar las chips de esos meses → se perdía continuidad visual (saltos en la secuencia de meses). Iteración final: mostrar **todas** las chips del rango, pero los meses sin Real en estilo neutral con etiqueta "sin actividad".
+
+**Causa raíz:**
+El loop que construye `alertMonths` no diferenciaba meses con datos Real de meses sin ellos. Para un mes sin datos, calculaba `diff = -budgetRes` (siempre negativo, siempre rojo).
+
+**Solución final:**
+
+#### `client/src/features/dashboard/DepartmentPL.tsx`
+1. Cada `alertMonth` ahora incluye un flag `hasRealData: boolean`:
+   ```js
+   const hasRealData = (revTotals[i] || 0) > 0 || (totalExpWithGroup[i] || 0) > 0;
+   ```
+2. El render de las chips bifurca según `hasRealData`:
+   - **Con Real** → chip verde/roja existente con icono, mes y diff
+   - **Sin Real** → chip gris neutral con solo el mes y el texto "sin actividad" en cursiva (sin icono ni valor numérico)
+3. Tooltip de chips neutrales: "Sin Real registrado en este mes"
+
+**Comportamiento resultante:**
+- Se ve la secuencia completa del rango YTD (p.ej. Ene-Abr en mayo) sin huecos
+- Los meses con Real registrado se ven en verde o rojo según comparación con presupuesto
+- Los meses sin Real se ven en gris con "sin actividad" — claramente diferenciados, no confunden con desviación negativa
+- Si todos los meses están sin datos → la sección entera se sigue ocultando (gracias al `alertMonths.length > 0 && (...)`)
+
+**Criterio "con Real registrado":** ingresos reales > 0 **o** gastos reales > 0. Cubre tanto depts que facturan como los que solo tienen costes.
+
+**Lo que NO cambia:**
+- Cálculos de las 3 tarjetas grandes (Rendimiento vs Presupuesto): se mantienen
+- Lógica del YTD (acumulado hasta mes cerrado): se mantiene
+- Pestañas Real / Presupuesto / Comparación: no se ven afectadas
+
+---
+
 ## Resumen sesión 2026-04-27
 
 | # | Tipo | Cambio | Archivos | SQL pendiente |
