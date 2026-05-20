@@ -1,8 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
-import { Download } from 'lucide-react';
+import { Download, FileText, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
@@ -13,11 +13,13 @@ const MONTHS_FULL = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 const fmt = (val: number) =>
     val ? Math.round(val).toLocaleString('de-DE') : '—';
 
-const fmtCsv = (val: number) => Math.round(val).toString();
+const fmtNum = (val: number) => Math.round(val).toString();
 
 export default function ClientBillingReport() {
     const currentYear = new Date().getFullYear();
     const [year, setYear] = useState(currentYear);
+    const [search, setSearch] = useState('');
+    const [activeVerticals, setActiveVerticals] = useState<string[]>([]);
 
     const { data, isLoading, isError } = useQuery({
         queryKey: ['annual-client-summary', year],
@@ -25,30 +27,51 @@ export default function ClientBillingReport() {
         staleTime: 2 * 60_000,
     });
 
-    const clients = data?.clients ?? [];
+    const allClients = data?.clients ?? [];
 
-    // Column totals (sum per month across all clients)
-    const columnTotals = Array.from({ length: 12 }, (_, i) =>
-        clients.reduce((sum, c) => sum + c.months[i], 0)
+    const verticals = useMemo(() =>
+        [...new Set(allClients.map(c => c.vertical || 'Sin vertical'))].sort(),
+        [allClients]
     );
+
+    const toggleVertical = (v: string) => {
+        setActiveVerticals(prev =>
+            prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]
+        );
+    };
+
+    const filtered = useMemo(() => {
+        let list = allClients;
+        if (search.trim()) {
+            const q = search.trim().toLowerCase();
+            list = list.filter(c => c.client_name.toLowerCase().includes(q));
+        }
+        if (activeVerticals.length > 0) {
+            list = list.filter(c => activeVerticals.includes(c.vertical || 'Sin vertical'));
+        }
+        return list;
+    }, [allClients, search, activeVerticals]);
+
+    const columnTotals = useMemo(() =>
+        Array.from({ length: 12 }, (_, i) =>
+            filtered.reduce((sum, c) => sum + c.months[i], 0)
+        ), [filtered]
+    );
+
     const grandTotal = columnTotals.reduce((s, v) => s + v, 0);
 
-    // Group clients by vertical for optional visual grouping
-    const verticals = [...new Set(clients.map(c => c.vertical || 'Sin vertical'))];
-
+    // ── CSV Export ────────────────────────────────────────────────────────────
     const handleExportCSV = useCallback(() => {
-        if (!clients.length) return;
-
+        if (!filtered.length) return;
         const BOM = '﻿';
         const headers = ['Vertical', 'Cliente', ...MONTHS_FULL, 'Total Anual'];
-        const rows = clients.map(c => [
+        const rows = filtered.map(c => [
             c.vertical || '',
             c.client_name,
-            ...c.months.map(fmtCsv),
-            fmtCsv(c.annual),
+            ...c.months.map(fmtNum),
+            fmtNum(c.annual),
         ]);
-        const totalsRow = ['', 'TOTALES', ...columnTotals.map(fmtCsv), fmtCsv(grandTotal)];
-
+        const totalsRow = ['', 'TOTALES', ...columnTotals.map(fmtNum), fmtNum(grandTotal)];
         const csv = BOM + [
             headers.join(';'),
             ...rows.map(r => r.map(cell => {
@@ -57,7 +80,6 @@ export default function ClientBillingReport() {
             }).join(';')),
             totalsRow.join(';'),
         ].join('\n');
-
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -69,10 +91,83 @@ export default function ClientBillingReport() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         toast.success(`Exportado: Facturacion_Clientes_${year}.csv`);
-    }, [clients, columnTotals, grandTotal, year]);
+    }, [filtered, columnTotals, grandTotal, year]);
+
+    // ── PDF Export (print) ────────────────────────────────────────────────────
+    const handleExportPDF = useCallback(() => {
+        if (!filtered.length) return;
+
+        const monthHeaders = MONTHS_SHORT.map(m => `<th>${m}</th>`).join('');
+        const clientRows = filtered.map((c, idx) => {
+            const cells = c.months.map(v =>
+                `<td class="num ${v === 0 ? 'zero' : ''}">${v ? Math.round(v).toLocaleString('de-DE') : '—'}</td>`
+            ).join('');
+            return `
+                <tr class="${idx % 2 === 0 ? '' : 'alt'}">
+                    <td class="vert">${c.vertical || '—'}</td>
+                    <td class="name">${c.client_name}</td>
+                    ${cells}
+                    <td class="num total">${Math.round(c.annual).toLocaleString('de-DE')}</td>
+                </tr>`;
+        }).join('');
+        const totalCells = columnTotals.map(v =>
+            `<td class="num footer-num">${Math.round(v).toLocaleString('de-DE')}</td>`
+        ).join('');
+
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Facturación por Cliente ${year}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; font-size: 8px; color: #111; padding: 12px; }
+  h1 { font-size: 13px; margin-bottom: 4px; }
+  p.sub { font-size: 9px; color: #666; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: 3px 5px; white-space: nowrap; }
+  th { background: #1e293b; color: #fff; text-align: right; font-size: 8px; }
+  th:first-child, th:nth-child(2) { text-align: left; }
+  td.vert { color: #555; max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
+  td.name { font-weight: 600; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+  td.num { text-align: right; }
+  td.zero { color: #bbb; }
+  td.total { font-weight: 700; background: #f0f4ff; }
+  tr.alt td { background: #f8fafc; }
+  tr.alt td.total { background: #e8eeff; }
+  tfoot td { background: #1e293b !important; color: #fff; font-weight: 700; }
+  tfoot td.footer-num { text-align: right; }
+  @page { size: A3 landscape; margin: 10mm; }
+  @media print { body { padding: 0; } }
+</style></head><body>
+<h1>Facturación por Cliente — ${year}</h1>
+<p class="sub">Generado el ${new Date().toLocaleDateString('es-ES', { day:'2-digit', month:'long', year:'numeric' })} · ${filtered.length} clientes</p>
+<table>
+  <thead><tr>
+    <th style="text-align:left">Vertical</th>
+    <th style="text-align:left">Cliente</th>
+    ${monthHeaders}
+    <th style="background:#2563eb">Total</th>
+  </tr></thead>
+  <tbody>${clientRows}</tbody>
+  <tfoot><tr>
+    <td></td><td>TOTALES</td>
+    ${totalCells}
+    <td class="footer-num">${Math.round(grandTotal).toLocaleString('de-DE')}</td>
+  </tr></tfoot>
+</table>
+</body></html>`;
+
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
+        document.body.appendChild(iframe);
+        iframe.contentDocument!.open();
+        iframe.contentDocument!.write(html);
+        iframe.contentDocument!.close();
+        iframe.contentWindow!.onafterprint = () => document.body.removeChild(iframe);
+        setTimeout(() => iframe.contentWindow!.print(), 300);
+        toast.success('Abriendo diálogo de impresión / PDF...');
+    }, [filtered, columnTotals, grandTotal, year]);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-5">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
@@ -80,48 +175,84 @@ export default function ClientBillingReport() {
                         Facturación por Cliente {year}
                     </h1>
                     <p className="text-muted-foreground mt-1 text-sm">
-                        Total facturado mensual y anual por cliente. Incluye todos los clientes del año.
+                        Total facturado mensual y anual. Incluye todos los clientes del año, independientemente de su visibilidad en Billing Matrix.
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setYear(y => y - 1)}>
-                        ← {year - 1}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <Button variant="outline" size="sm" onClick={() => setYear(y => y - 1)}>← {year - 1}</Button>
+                    <Button variant="outline" size="sm" onClick={() => setYear(y => y + 1)}>{year + 1} →</Button>
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExportCSV} disabled={!filtered.length}>
+                        <Download size={14} /> CSV
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => setYear(y => y + 1)}>
-                        {year + 1} →
-                    </Button>
-                    <Button
-                        variant="outline"
-                        className="gap-2 text-xs md:text-sm"
-                        onClick={handleExportCSV}
-                        disabled={!clients.length}
-                    >
-                        <Download size={16} />
-                        Export CSV
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExportPDF} disabled={!filtered.length}>
+                        <FileText size={14} /> PDF
                     </Button>
                 </div>
             </div>
 
-            {/* KPIs rápidos */}
-            {!isLoading && !isError && clients.length > 0 && (
+            {/* KPIs */}
+            {!isLoading && !isError && allClients.length > 0 && (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="bg-card border rounded-lg px-4 py-3">
-                        <p className="text-xs text-muted-foreground">Clientes activos</p>
-                        <p className="text-2xl font-bold">{clients.length}</p>
+                    {[
+                        { label: 'Clientes', value: String(filtered.length) + (filtered.length !== allClients.length ? ` / ${allClients.length}` : '') },
+                        { label: 'Total anual', value: Math.round(grandTotal).toLocaleString('de-DE') + ' €' },
+                        { label: 'Media mensual', value: Math.round(grandTotal / 12).toLocaleString('de-DE') + ' €' },
+                        { label: 'Verticales', value: String(verticals.length) },
+                    ].map(k => (
+                        <div key={k.label} className="bg-card border rounded-lg px-4 py-3">
+                            <p className="text-xs text-muted-foreground">{k.label}</p>
+                            <p className="text-xl font-bold mt-0.5">{k.value}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Filtros */}
+            {!isLoading && !isError && allClients.length > 0 && (
+                <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+                    {/* Buscador */}
+                    <div className="relative">
+                        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                        <input
+                            type="text"
+                            placeholder="Buscar cliente..."
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            className="pl-7 pr-7 py-1.5 text-xs border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 w-48"
+                        />
+                        {search && (
+                            <button
+                                onClick={() => setSearch('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                            >
+                                <X size={12} />
+                            </button>
+                        )}
                     </div>
-                    <div className="bg-card border rounded-lg px-4 py-3">
-                        <p className="text-xs text-muted-foreground">Total anual</p>
-                        <p className="text-2xl font-bold">{Math.round(grandTotal).toLocaleString('de-DE')} €</p>
-                    </div>
-                    <div className="bg-card border rounded-lg px-4 py-3">
-                        <p className="text-xs text-muted-foreground">Media mensual</p>
-                        <p className="text-2xl font-bold">
-                            {Math.round(grandTotal / 12).toLocaleString('de-DE')} €
-                        </p>
-                    </div>
-                    <div className="bg-card border rounded-lg px-4 py-3">
-                        <p className="text-xs text-muted-foreground">Verticales</p>
-                        <p className="text-2xl font-bold">{verticals.length}</p>
+
+                    {/* Filtro de verticales */}
+                    <div className="flex gap-1 flex-wrap">
+                        {verticals.map(v => (
+                            <button
+                                key={v}
+                                onClick={() => toggleVertical(v)}
+                                className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                                    activeVerticals.includes(v)
+                                        ? 'bg-primary text-primary-foreground border-primary'
+                                        : 'bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground'
+                                }`}
+                            >
+                                {v}
+                            </button>
+                        ))}
+                        {activeVerticals.length > 0 && (
+                            <button
+                                onClick={() => setActiveVerticals([])}
+                                className="px-2.5 py-1 rounded-full text-xs border border-border text-muted-foreground hover:text-foreground flex items-center gap-1"
+                            >
+                                <X size={10} /> Limpiar
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
@@ -134,57 +265,58 @@ export default function ClientBillingReport() {
                         <p className="text-muted-foreground text-sm">Cargando datos...</p>
                     </div>
                 ) : isError ? (
-                    <div className="p-8 text-center text-red-500 bg-red-50">
+                    <div className="p-8 text-center text-red-500 bg-red-50 text-sm">
                         Error al cargar los datos. Comprueba la conexión.
                     </div>
-                ) : clients.length === 0 ? (
-                    <div className="p-12 text-center text-muted-foreground">
+                ) : allClients.length === 0 ? (
+                    <div className="p-12 text-center text-muted-foreground text-sm">
                         No hay clientes asignados para {year}.
+                    </div>
+                ) : filtered.length === 0 ? (
+                    <div className="p-8 text-center text-muted-foreground text-sm">
+                        Ningún cliente coincide con el filtro.
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="w-full text-xs border-collapse">
                             <thead>
-                                <tr className="bg-muted/60">
-                                    <th className="border border-border px-3 py-2 text-left font-semibold text-foreground sticky left-0 bg-muted/60 z-10 min-w-[120px]">
+                                <tr className="bg-muted/70">
+                                    <th className="border border-border px-2 py-2 text-left font-semibold sticky left-0 bg-muted/70 z-10 w-[72px] max-w-[72px]">
                                         Vertical
                                     </th>
-                                    <th className="border border-border px-3 py-2 text-left font-semibold text-foreground sticky left-[120px] bg-muted/60 z-10 min-w-[160px]">
+                                    <th className="border border-border px-2 py-2 text-left font-semibold sticky left-[72px] bg-muted/70 z-10 min-w-[150px] max-w-[200px]">
                                         Cliente
                                     </th>
                                     {MONTHS_SHORT.map(m => (
-                                        <th key={m} className="border border-border px-2 py-2 text-right font-semibold text-foreground min-w-[72px]">
+                                        <th key={m} className="border border-border px-1.5 py-2 text-right font-semibold w-[68px]">
                                             {m}
                                         </th>
                                     ))}
-                                    <th className="border border-border px-3 py-2 text-right font-bold text-foreground bg-primary/5 min-w-[90px]">
+                                    <th className="border border-border px-2 py-2 text-right font-bold bg-blue-50 dark:bg-blue-950/30 w-[85px]">
                                         Total
                                     </th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {clients.map((client, idx) => {
+                                {filtered.map((client, idx) => {
                                     const isEven = idx % 2 === 0;
+                                    const bg = isEven ? 'bg-background' : 'bg-muted/20';
                                     return (
-                                        <tr
-                                            key={client.client_id}
-                                            className={`hover:bg-primary/5 transition-colors ${isEven ? 'bg-background' : 'bg-muted/20'}`}
-                                        >
-                                            <td className={`border border-border px-3 py-1.5 text-muted-foreground sticky left-0 z-10 ${isEven ? 'bg-background' : 'bg-muted/20'}`}>
+                                        <tr key={client.client_id} className={`hover:bg-primary/5 transition-colors ${bg}`}>
+                                            <td className={`border border-border px-2 py-1.5 text-muted-foreground truncate sticky left-0 z-10 w-[72px] max-w-[72px] ${bg}`}
+                                                title={client.vertical || undefined}>
                                                 {client.vertical || '—'}
                                             </td>
-                                            <td className={`border border-border px-3 py-1.5 font-medium text-foreground sticky left-[120px] z-10 ${isEven ? 'bg-background' : 'bg-muted/20'}`}>
+                                            <td className={`border border-border px-2 py-1.5 font-medium sticky left-[72px] z-10 min-w-[150px] max-w-[200px] truncate ${bg}`}
+                                                title={client.client_name}>
                                                 {client.client_name}
                                             </td>
                                             {client.months.map((val, mi) => (
-                                                <td
-                                                    key={mi}
-                                                    className={`border border-border px-2 py-1.5 text-right tabular-nums ${val === 0 ? 'text-muted-foreground/40' : 'text-foreground'}`}
-                                                >
+                                                <td key={mi} className={`border border-border px-1.5 py-1.5 text-right tabular-nums w-[68px] ${val === 0 ? 'text-muted-foreground/35' : ''}`}>
                                                     {fmt(val)}
                                                 </td>
                                             ))}
-                                            <td className="border border-border px-3 py-1.5 text-right font-semibold tabular-nums bg-primary/5 text-foreground">
+                                            <td className="border border-border px-2 py-1.5 text-right font-semibold tabular-nums bg-blue-50/60 dark:bg-blue-950/20 w-[85px]">
                                                 {fmt(client.annual)}
                                             </td>
                                         </tr>
@@ -192,17 +324,17 @@ export default function ClientBillingReport() {
                                 })}
                             </tbody>
                             <tfoot>
-                                <tr className="bg-muted font-bold">
-                                    <td className="border border-border px-3 py-2 sticky left-0 bg-muted z-10" />
-                                    <td className="border border-border px-3 py-2 text-sm sticky left-[120px] bg-muted z-10">
+                                <tr className="bg-slate-800 text-white text-xs font-bold">
+                                    <td className="border border-slate-600 px-2 py-2 sticky left-0 bg-slate-800 z-10 w-[72px]" />
+                                    <td className="border border-slate-600 px-2 py-2 sticky left-[72px] bg-slate-800 z-10">
                                         TOTALES
                                     </td>
                                     {columnTotals.map((val, mi) => (
-                                        <td key={mi} className="border border-border px-2 py-2 text-right tabular-nums text-foreground">
+                                        <td key={mi} className="border border-slate-600 px-1.5 py-2 text-right tabular-nums w-[68px]">
                                             {fmt(val)}
                                         </td>
                                     ))}
-                                    <td className="border border-border px-3 py-2 text-right tabular-nums font-bold bg-primary/10 text-foreground">
+                                    <td className="border border-blue-400 px-2 py-2 text-right tabular-nums bg-blue-700 w-[85px]">
                                         {fmt(grandTotal)}
                                     </td>
                                 </tr>
