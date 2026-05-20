@@ -1261,6 +1261,82 @@ router.delete('/details/:id', async (req, res) => {
 });
 
 /**
+ * GET /client-month-detail?year=YYYY&month=MM&client_id=UUID
+ * Service breakdown for a single client in a single month (for the detail modal).
+ */
+router.get('/client-month-detail', async (req, res) => {
+    try {
+        const { year, month, client_id } = req.query;
+        if (!year || !month || !client_id) {
+            return res.status(400).json({ error: 'year, month and client_id required' });
+        }
+
+        const { data: billing } = await supabase
+            .from('monthly_billing')
+            .select('id, fee_paid, total_actual_investment, applied_fee_percentage, platform_count, platform_costs')
+            .eq('client_id', client_id)
+            .eq('fiscal_year', parseInt(year))
+            .eq('fiscal_month', parseInt(month))
+            .maybeSingle();
+
+        if (!billing) return res.json({ services: [], fee_paid: 0, total: 0 });
+
+        // Fetch PAID_MEDIA_STRATEGY id to exclude from details
+        const { data: stratSvc } = await supabase
+            .from('services')
+            .select('id')
+            .eq('code', 'PAID_MEDIA_STRATEGY')
+            .maybeSingle();
+        const stratSvcId = stratSvc?.id || null;
+
+        // All billing_details except the auto-calculated fee (we use fee_paid instead)
+        let q = supabase
+            .from('billing_details')
+            .select('amount, service_id, service_name, department_id')
+            .eq('monthly_billing_id', billing.id)
+            .gt('amount', 0);
+        if (stratSvcId) q = q.neq('service_id', stratSvcId);
+        const { data: details } = await q;
+
+        // Enrich with department name
+        const deptIds = [...new Set((details || []).map(d => d.department_id).filter(Boolean))];
+        let deptMap = {};
+        if (deptIds.length > 0) {
+            const { data: depts } = await supabase
+                .from('departments')
+                .select('id, name, code')
+                .in('id', deptIds);
+            (depts || []).forEach(d => { deptMap[d.id] = { name: d.name, code: d.code }; });
+        }
+
+        const feePaid = Number(billing.fee_paid || 0);
+
+        const services = (details || [])
+            .map(d => ({
+                service_name: d.service_name,
+                department: deptMap[d.department_id]?.name || '',
+                department_code: deptMap[d.department_id]?.code || '',
+                amount: Number(d.amount || 0),
+            }))
+            .sort((a, b) => b.amount - a.amount);
+
+        const otherTotal = services.reduce((s, d) => s + d.amount, 0);
+        const total = otherTotal + feePaid;
+
+        res.json({
+            fee_paid: feePaid,
+            investment: Number(billing.total_actual_investment || 0),
+            fee_pct: Number(billing.applied_fee_percentage || 0),
+            services,
+            total,
+        });
+    } catch (err) {
+        console.error('Error in client-month-detail:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
  * GET /annual-client-summary?year=YYYY
  * Returns all clients with their grand_total per month for the full year.
  * Does NOT filter hidden clients — shows everyone regardless of visibility settings.

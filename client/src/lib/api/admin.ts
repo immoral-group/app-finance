@@ -421,6 +421,16 @@ export const adminApi = {
         treasury_balance?: number;
     }>('/integrations/holded/summary'),
 
+    // Desglose de servicios para un cliente en un mes (modal de detalle)
+    getClientMonthDetail: (year: number, month: number, client_id: string) =>
+        fetchApi<{
+            fee_paid: number;
+            investment: number;
+            fee_pct: number;
+            services: { service_name: string; department: string; department_code: string; amount: number }[];
+            total: number;
+        }>(`/billing/client-month-detail?year=${year}&month=${month}&client_id=${client_id}`),
+
     // Annual Client Billing Summary (nuevo módulo — sin filtro de ocultos)
     getAnnualClientSummary: (year: number) =>
         fetchApi<{

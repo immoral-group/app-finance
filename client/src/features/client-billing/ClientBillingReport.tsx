@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
-import { Download, FileText, Search, X } from 'lucide-react';
+import { Download, FileText, Search, X, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 
 const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
@@ -12,14 +12,158 @@ const MONTHS_FULL = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 
 const fmt = (val: number) =>
     val ? Math.round(val).toLocaleString('de-DE') : '—';
-
 const fmtNum = (val: number) => Math.round(val).toString();
 
+// ─── Colores por departamento ────────────────────────────────────────────────
+const DEPT_COLORS: Record<string, string> = {
+    Immedia:   'bg-blue-500',
+    Imcontent: 'bg-purple-500',
+    Immoralia: 'bg-emerald-500',
+    Imloyal:   'bg-orange-500',
+    Imseo:     'bg-yellow-500',
+    Immoral:   'bg-slate-500',
+    Imsales:   'bg-pink-500',
+};
+const deptColor = (dept: string) => DEPT_COLORS[dept] || 'bg-gray-400';
+
+// ─── Modal de desglose ────────────────────────────────────────────────────────
+interface DetailModalProps {
+    clientId: string;
+    clientName: string;
+    year: number;
+    month: number;
+    onClose: () => void;
+}
+
+function DetailModal({ clientId, clientName, year, month, onClose }: DetailModalProps) {
+    const { data, isLoading } = useQuery({
+        queryKey: ['client-month-detail', clientId, year, month],
+        queryFn: () => adminApi.getClientMonthDetail(year, month, clientId),
+        staleTime: 0,
+    });
+
+    const total = data?.total ?? 0;
+    const feePaid = data?.fee_paid ?? 0;
+    const services = data?.services ?? [];
+
+    const allLines = useMemo(() => {
+        const lines = [...services];
+        if (feePaid > 0) {
+            lines.push({ service_name: 'Fee / Paid Media Strategy', department: 'Immedia', department_code: 'IMMED', amount: feePaid });
+        }
+        return lines.sort((a, b) => b.amount - a.amount);
+    }, [services, feePaid]);
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={onClose}
+        >
+            <div
+                className="bg-card border rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="px-5 pt-5 pb-4 border-b flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-0.5">
+                            Desglose de facturación
+                        </p>
+                        <h2 className="text-base font-bold text-foreground truncate">{clientName}</h2>
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                            {MONTHS_FULL[month - 1]} {year}
+                        </p>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="flex-shrink-0 p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                    >
+                        <X size={16} />
+                    </button>
+                </div>
+
+                {/* Total destacado */}
+                <div className="px-5 py-4 bg-primary/5 border-b">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <TrendingUp size={15} />
+                            Total facturado
+                        </div>
+                        <span className="text-2xl font-bold text-foreground tabular-nums">
+                            {fmt(total)} €
+                        </span>
+                    </div>
+                    {data?.investment && data.investment > 0 ? (
+                        <p className="text-xs text-muted-foreground mt-1.5">
+                            Inversión publicitaria: <span className="font-medium text-foreground">{fmt(data.investment)} €</span>
+                            {data.fee_pct > 0 && <span className="ml-1">· Fee {data.fee_pct}%</span>}
+                        </p>
+                    ) : null}
+                </div>
+
+                {/* Servicios */}
+                <div className="flex-1 overflow-y-auto px-5 py-4">
+                    {isLoading ? (
+                        <div className="flex items-center justify-center py-10">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+                        </div>
+                    ) : allLines.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                            No hay servicios registrados para este mes.
+                        </p>
+                    ) : (
+                        <div className="space-y-3">
+                            {allLines.map((svc, i) => {
+                                const pct = total > 0 ? (svc.amount / total) * 100 : 0;
+                                return (
+                                    <div key={i}>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <span className={`h-2 w-2 rounded-full flex-shrink-0 ${deptColor(svc.department)}`} />
+                                                <div className="min-w-0">
+                                                    <span className="text-xs font-medium text-foreground truncate block">
+                                                        {svc.service_name}
+                                                    </span>
+                                                    {svc.department && (
+                                                        <span className="text-[10px] text-muted-foreground">{svc.department}</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="flex-shrink-0 text-right ml-3">
+                                                <span className="text-xs font-semibold tabular-nums">{fmt(svc.amount)} €</span>
+                                                <span className="text-[10px] text-muted-foreground ml-1.5">{Math.round(pct)}%</span>
+                                            </div>
+                                        </div>
+                                        {/* Barra de progreso */}
+                                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-500 ${deptColor(svc.department)}`}
+                                                style={{ width: `${Math.max(pct, 1)}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-5 py-3 border-t flex justify-end">
+                    <Button size="sm" variant="outline" onClick={onClose}>Cerrar</Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
 export default function ClientBillingReport() {
     const currentYear = new Date().getFullYear();
     const [year, setYear] = useState(currentYear);
     const [search, setSearch] = useState('');
     const [activeVerticals, setActiveVerticals] = useState<string[]>([]);
+    const [modal, setModal] = useState<{ clientId: string; clientName: string; month: number } | null>(null);
 
     const { data, isLoading, isError } = useQuery({
         queryKey: ['annual-client-summary', year],
@@ -93,68 +237,58 @@ export default function ClientBillingReport() {
         toast.success(`Exportado: Facturacion_Clientes_${year}.csv`);
     }, [filtered, columnTotals, grandTotal, year]);
 
-    // ── PDF Export (print) ────────────────────────────────────────────────────
+    // ── PDF Export ────────────────────────────────────────────────────────────
     const handleExportPDF = useCallback(() => {
         if (!filtered.length) return;
-
         const monthHeaders = MONTHS_SHORT.map(m => `<th>${m}</th>`).join('');
         const clientRows = filtered.map((c, idx) => {
             const cells = c.months.map(v =>
                 `<td class="num ${v === 0 ? 'zero' : ''}">${v ? Math.round(v).toLocaleString('de-DE') : '—'}</td>`
             ).join('');
-            return `
-                <tr class="${idx % 2 === 0 ? '' : 'alt'}">
-                    <td class="vert">${c.vertical || '—'}</td>
-                    <td class="name">${c.client_name}</td>
-                    ${cells}
-                    <td class="num total">${Math.round(c.annual).toLocaleString('de-DE')}</td>
-                </tr>`;
+            return `<tr class="${idx % 2 === 0 ? '' : 'alt'}">
+                <td class="vert">${c.vertical || '—'}</td>
+                <td class="name">${c.client_name}</td>
+                ${cells}
+                <td class="num total">${Math.round(c.annual).toLocaleString('de-DE')}</td>
+            </tr>`;
         }).join('');
         const totalCells = columnTotals.map(v =>
             `<td class="num footer-num">${Math.round(v).toLocaleString('de-DE')}</td>`
         ).join('');
-
         const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Facturación por Cliente ${year}</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: Arial, sans-serif; font-size: 8px; color: #111; padding: 12px; }
-  h1 { font-size: 13px; margin-bottom: 4px; }
-  p.sub { font-size: 9px; color: #666; margin-bottom: 10px; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { border: 1px solid #ccc; padding: 3px 5px; white-space: nowrap; }
-  th { background: #1e293b; color: #fff; text-align: right; font-size: 8px; }
-  th:first-child, th:nth-child(2) { text-align: left; }
-  td.vert { color: #555; max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
-  td.name { font-weight: 600; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
-  td.num { text-align: right; }
-  td.zero { color: #bbb; }
-  td.total { font-weight: 700; background: #f0f4ff; }
-  tr.alt td { background: #f8fafc; }
-  tr.alt td.total { background: #e8eeff; }
-  tfoot td { background: #1e293b !important; color: #fff; font-weight: 700; }
-  tfoot td.footer-num { text-align: right; }
-  @page { size: A3 landscape; margin: 10mm; }
-  @media print { body { padding: 0; } }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Arial,sans-serif;font-size:8px;color:#111;padding:12px}
+  h1{font-size:13px;margin-bottom:4px}
+  p.sub{font-size:9px;color:#666;margin-bottom:10px}
+  table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid #ccc;padding:3px 5px;white-space:nowrap}
+  th{background:#1e293b;color:#fff;text-align:right;font-size:8px}
+  th:first-child,th:nth-child(2){text-align:left}
+  td.vert{color:#555;max-width:70px;overflow:hidden;text-overflow:ellipsis}
+  td.name{font-weight:600;max-width:130px;overflow:hidden;text-overflow:ellipsis}
+  td.num{text-align:right}
+  td.zero{color:#bbb}
+  td.total{font-weight:700;background:#f0f4ff}
+  tr.alt td{background:#f8fafc}
+  tr.alt td.total{background:#e8eeff}
+  tfoot td{background:#1e293b!important;color:#fff;font-weight:700}
+  tfoot td.footer-num{text-align:right}
+  @page{size:A3 landscape;margin:10mm}
 </style></head><body>
 <h1>Facturación por Cliente — ${year}</h1>
 <p class="sub">Generado el ${new Date().toLocaleDateString('es-ES', { day:'2-digit', month:'long', year:'numeric' })} · ${filtered.length} clientes</p>
 <table>
   <thead><tr>
-    <th style="text-align:left">Vertical</th>
-    <th style="text-align:left">Cliente</th>
-    ${monthHeaders}
-    <th style="background:#2563eb">Total</th>
+    <th style="text-align:left">Vertical</th><th style="text-align:left">Cliente</th>
+    ${monthHeaders}<th style="background:#2563eb">Total</th>
   </tr></thead>
   <tbody>${clientRows}</tbody>
-  <tfoot><tr>
-    <td></td><td>TOTALES</td>
-    ${totalCells}
+  <tfoot><tr><td></td><td>TOTALES</td>${totalCells}
     <td class="footer-num">${Math.round(grandTotal).toLocaleString('de-DE')}</td>
   </tr></tfoot>
-</table>
-</body></html>`;
-
+</table></body></html>`;
         const iframe = document.createElement('iframe');
         iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
         document.body.appendChild(iframe);
@@ -175,7 +309,8 @@ export default function ClientBillingReport() {
                         Facturación por Cliente {year}
                     </h1>
                     <p className="text-muted-foreground mt-1 text-sm">
-                        Total facturado mensual y anual. Incluye todos los clientes del año, independientemente de su visibilidad en Billing Matrix.
+                        Total facturado mensual y anual. Incluye todos los clientes del año.
+                        <span className="ml-1 text-primary/70">Haz clic en una celda para ver el desglose de servicios.</span>
                     </p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -210,7 +345,6 @@ export default function ClientBillingReport() {
             {/* Filtros */}
             {!isLoading && !isError && allClients.length > 0 && (
                 <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
-                    {/* Buscador */}
                     <div className="relative">
                         <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                         <input
@@ -221,16 +355,11 @@ export default function ClientBillingReport() {
                             className="pl-7 pr-7 py-1.5 text-xs border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 w-48"
                         />
                         {search && (
-                            <button
-                                onClick={() => setSearch('')}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                            >
+                            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                                 <X size={12} />
                             </button>
                         )}
                     </div>
-
-                    {/* Filtro de verticales */}
                     <div className="flex gap-1 flex-wrap">
                         {verticals.map(v => (
                             <button
@@ -302,17 +431,29 @@ export default function ClientBillingReport() {
                                     const isEven = idx % 2 === 0;
                                     const bg = isEven ? 'bg-background' : 'bg-muted/20';
                                     return (
-                                        <tr key={client.client_id} className={`hover:bg-primary/5 transition-colors ${bg}`}>
-                                            <td className={`border border-border px-2 py-1.5 text-muted-foreground truncate sticky left-0 z-10 w-[72px] max-w-[72px] ${bg}`}
-                                                title={client.vertical || undefined}>
+                                        <tr key={client.client_id} className={`${bg}`}>
+                                            <td
+                                                className={`border border-border px-2 py-1.5 text-muted-foreground truncate sticky left-0 z-10 w-[72px] max-w-[72px] ${bg}`}
+                                                title={client.vertical || undefined}
+                                            >
                                                 {client.vertical || '—'}
                                             </td>
-                                            <td className={`border border-border px-2 py-1.5 font-medium sticky left-[72px] z-10 min-w-[150px] max-w-[200px] truncate ${bg}`}
-                                                title={client.client_name}>
+                                            <td
+                                                className={`border border-border px-2 py-1.5 font-medium sticky left-[72px] z-10 min-w-[150px] max-w-[200px] truncate ${bg}`}
+                                                title={client.client_name}
+                                            >
                                                 {client.client_name}
                                             </td>
                                             {client.months.map((val, mi) => (
-                                                <td key={mi} className={`border border-border px-1.5 py-1.5 text-right tabular-nums w-[68px] ${val === 0 ? 'text-muted-foreground/35' : ''}`}>
+                                                <td
+                                                    key={mi}
+                                                    onClick={() => val > 0 && setModal({ clientId: client.client_id, clientName: client.client_name, month: mi + 1 })}
+                                                    className={`border border-border px-1.5 py-1.5 text-right tabular-nums w-[68px] transition-colors
+                                                        ${val === 0
+                                                            ? 'text-muted-foreground/35'
+                                                            : 'cursor-pointer hover:bg-primary/10 hover:text-primary font-medium'
+                                                        }`}
+                                                >
                                                     {fmt(val)}
                                                 </td>
                                             ))}
@@ -326,9 +467,7 @@ export default function ClientBillingReport() {
                             <tfoot>
                                 <tr className="bg-slate-800 text-white text-xs font-bold">
                                     <td className="border border-slate-600 px-2 py-2 sticky left-0 bg-slate-800 z-10 w-[72px]" />
-                                    <td className="border border-slate-600 px-2 py-2 sticky left-[72px] bg-slate-800 z-10">
-                                        TOTALES
-                                    </td>
+                                    <td className="border border-slate-600 px-2 py-2 sticky left-[72px] bg-slate-800 z-10">TOTALES</td>
                                     {columnTotals.map((val, mi) => (
                                         <td key={mi} className="border border-slate-600 px-1.5 py-2 text-right tabular-nums w-[68px]">
                                             {fmt(val)}
@@ -343,6 +482,17 @@ export default function ClientBillingReport() {
                     </div>
                 )}
             </div>
+
+            {/* Modal de desglose */}
+            {modal && (
+                <DetailModal
+                    clientId={modal.clientId}
+                    clientName={modal.clientName}
+                    year={year}
+                    month={modal.month}
+                    onClose={() => setModal(null)}
+                />
+            )}
         </div>
     );
 }
