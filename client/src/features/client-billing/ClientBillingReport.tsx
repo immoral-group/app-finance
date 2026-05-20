@@ -4,6 +4,8 @@ import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
 import { Download, FileText, Search, X, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
     'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -118,15 +120,15 @@ function DetailModal({ clientId, clientName, year, month, onClose }: DetailModal
                                 return (
                                     <div key={i}>
                                         <div className="flex items-center justify-between mb-1">
-                                            <div className="flex items-center gap-2 min-w-0">
+                                                            <div className="flex items-center gap-2 min-w-0">
                                                 <span className={`h-2 w-2 rounded-full flex-shrink-0 ${deptColor(svc.department)}`} />
                                                 <div className="min-w-0">
-                                                    <span className="text-xs font-medium text-foreground truncate block">
+                                                    <span className="text-xs font-bold text-foreground truncate block">
+                                                        {svc.department || 'General'}
+                                                    </span>
+                                                    <span className="text-[10px] text-muted-foreground truncate block">
                                                         {svc.service_name}
                                                     </span>
-                                                    {svc.department && (
-                                                        <span className="text-[10px] text-muted-foreground">{svc.department}</span>
-                                                    )}
                                                 </div>
                                             </div>
                                             <div className="flex-shrink-0 text-right ml-3">
@@ -237,67 +239,66 @@ export default function ClientBillingReport() {
         toast.success(`Exportado: Facturacion_Clientes_${year}.csv`);
     }, [filtered, columnTotals, grandTotal, year]);
 
-    // ── PDF Export ────────────────────────────────────────────────────────────
+    // ── PDF Export (descarga directa) ─────────────────────────────────────────
     const handleExportPDF = useCallback(() => {
         if (!filtered.length) return;
-        const monthHeaders = MONTHS_SHORT.map(m => `<th>${m}</th>`).join('');
-        const clientRows = filtered.map((c, idx) => {
-            const cells = c.months.map(v =>
-                `<td class="num ${v === 0 ? 'zero' : ''}">${v ? Math.round(v).toLocaleString('de-DE') : '—'}</td>`
-            ).join('');
-            return `<tr class="${idx % 2 === 0 ? '' : 'alt'}">
-                <td class="vert">${c.vertical || '—'}</td>
-                <td class="name">${c.client_name}</td>
-                ${cells}
-                <td class="num total">${Math.round(c.annual).toLocaleString('de-DE')}</td>
-            </tr>`;
-        }).join('');
-        const totalCells = columnTotals.map(v =>
-            `<td class="num footer-num">${Math.round(v).toLocaleString('de-DE')}</td>`
-        ).join('');
-        const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Facturación por Cliente ${year}</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Arial,sans-serif;font-size:8px;color:#111;padding:12px}
-  h1{font-size:13px;margin-bottom:4px}
-  p.sub{font-size:9px;color:#666;margin-bottom:10px}
-  table{width:100%;border-collapse:collapse}
-  th,td{border:1px solid #ccc;padding:3px 5px;white-space:nowrap}
-  th{background:#1e293b;color:#fff;text-align:right;font-size:8px}
-  th:first-child,th:nth-child(2){text-align:left}
-  td.vert{color:#555;max-width:70px;overflow:hidden;text-overflow:ellipsis}
-  td.name{font-weight:600;max-width:130px;overflow:hidden;text-overflow:ellipsis}
-  td.num{text-align:right}
-  td.zero{color:#bbb}
-  td.total{font-weight:700;background:#f0f4ff}
-  tr.alt td{background:#f8fafc}
-  tr.alt td.total{background:#e8eeff}
-  tfoot td{background:#1e293b!important;color:#fff;font-weight:700}
-  tfoot td.footer-num{text-align:right}
-  @page{size:A3 landscape;margin:10mm}
-</style></head><body>
-<h1>Facturación por Cliente — ${year}</h1>
-<p class="sub">Generado el ${new Date().toLocaleDateString('es-ES', { day:'2-digit', month:'long', year:'numeric' })} · ${filtered.length} clientes</p>
-<table>
-  <thead><tr>
-    <th style="text-align:left">Vertical</th><th style="text-align:left">Cliente</th>
-    ${monthHeaders}<th style="background:#2563eb">Total</th>
-  </tr></thead>
-  <tbody>${clientRows}</tbody>
-  <tfoot><tr><td></td><td>TOTALES</td>${totalCells}
-    <td class="footer-num">${Math.round(grandTotal).toLocaleString('de-DE')}</td>
-  </tr></tfoot>
-</table></body></html>`;
-        const iframe = document.createElement('iframe');
-        iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
-        document.body.appendChild(iframe);
-        iframe.contentDocument!.open();
-        iframe.contentDocument!.write(html);
-        iframe.contentDocument!.close();
-        iframe.contentWindow!.onafterprint = () => document.body.removeChild(iframe);
-        setTimeout(() => iframe.contentWindow!.print(), 300);
-        toast.success('Abriendo diálogo de impresión / PDF...');
+
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+
+        // Título
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Facturación por Cliente — ${year}`, 14, 16);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(120);
+        doc.text(
+            `Generado el ${new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })} · ${filtered.length} clientes`,
+            14, 22
+        );
+        doc.setTextColor(0);
+
+        const head = [['Vertical', 'Cliente', ...MONTHS_SHORT, 'Total']];
+        const body = filtered.map(c => [
+            c.vertical || '—',
+            c.client_name,
+            ...c.months.map(v => v ? Math.round(v).toLocaleString('de-DE') : '—'),
+            Math.round(c.annual).toLocaleString('de-DE'),
+        ]);
+        const foot = [['', 'TOTALES', ...columnTotals.map(v => Math.round(v).toLocaleString('de-DE')), Math.round(grandTotal).toLocaleString('de-DE')]];
+
+        autoTable(doc, {
+            startY: 26,
+            head,
+            body,
+            foot,
+            theme: 'grid',
+            styles: { fontSize: 7, cellPadding: 2, halign: 'right' },
+            headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold', halign: 'right' },
+            footStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold', halign: 'right' },
+            columnStyles: {
+                0: { halign: 'left', cellWidth: 20 },
+                1: { halign: 'left', cellWidth: 35 },
+                14: { fillColor: [239, 246, 255], fontStyle: 'bold' }, // Total col
+            },
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            didParseCell: (data) => {
+                // Cabecera Vertical y Cliente alineados a izquierda
+                if (data.section === 'head' && (data.column.index === 0 || data.column.index === 1)) {
+                    data.cell.styles.halign = 'left';
+                }
+                if (data.section === 'foot' && (data.column.index === 0 || data.column.index === 1)) {
+                    data.cell.styles.halign = 'left';
+                }
+                // Columna Total en azul
+                if (data.column.index === 14 && data.section === 'head') {
+                    data.cell.styles.fillColor = [37, 99, 235];
+                }
+            },
+        });
+
+        doc.save(`Facturacion_Clientes_${year}.pdf`);
+        toast.success(`Descargado: Facturacion_Clientes_${year}.pdf`);
     }, [filtered, columnTotals, grandTotal, year]);
 
     return (
