@@ -1293,38 +1293,54 @@ router.get('/annual-client-summary', async (req, res) => {
 
         if (clientError) throw clientError;
 
-        // All monthly_billing rows for this year (all months)
+        // Fetch PAID_MEDIA_STRATEGY service id (fee column managed by auto-sync).
+        // Its billing_details entry can be stale between syncs, so we use
+        // monthly_billing.fee_paid as the authoritative value instead.
+        const { data: stratSvc } = await supabase
+            .from('services')
+            .select('id')
+            .eq('code', 'PAID_MEDIA_STRATEGY')
+            .maybeSingle();
+        const stratSvcId = stratSvc?.id || null;
+
+        // All monthly_billing rows for this year — includes fee_paid (always up-to-date)
         const { data: billingRows, error: billingError } = await supabase
             .from('monthly_billing')
-            .select('id, client_id, fiscal_month')
+            .select('id, client_id, fiscal_month, fee_paid')
             .eq('fiscal_year', yearInt)
             .in('client_id', assignedClientIds);
 
         if (billingError) throw billingError;
 
-        // Sum billing_details.amount per monthly_billing_id for real totals
+        // Sum billing_details.amount per monthly_billing_id,
+        // excluding PAID_MEDIA_STRATEGY (we use fee_paid from monthly_billing instead)
         const billingIds = (billingRows || []).map(r => r.id);
         let details = [];
         if (billingIds.length > 0) {
-            const { data: d, error: dErr } = await supabase
+            let q = supabase
                 .from('billing_details')
                 .select('monthly_billing_id, amount')
                 .in('monthly_billing_id', billingIds);
+            if (stratSvcId) q = q.neq('service_id', stratSvcId);
+            const { data: d, error: dErr } = await q;
             if (dErr) throw dErr;
             details = d || [];
         }
 
-        // Sum details per billing record
+        // Sum non-strategy details per billing record
         const detailTotals = {};
         details.forEach(d => {
             detailTotals[d.monthly_billing_id] = (detailTotals[d.monthly_billing_id] || 0) + Number(d.amount || 0);
         });
 
-        // Build a map: client_id -> month (1-12) -> total
+        // Build map: client_id -> month (1-12) -> total
+        // total = other services + fee_paid (authoritative fee, same as Billing Matrix shows)
         const billingMap = {};
         (billingRows || []).forEach(r => {
             if (!billingMap[r.client_id]) billingMap[r.client_id] = {};
-            billingMap[r.client_id][r.fiscal_month] = detailTotals[r.id] || 0;
+            const otherServices = detailTotals[r.id] || 0;
+            const fee = Number(r.fee_paid || 0);
+            billingMap[r.client_id][r.fiscal_month] = otherServices + fee;
         });
 
         const result = (clients || []).map(c => {

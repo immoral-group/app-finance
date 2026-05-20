@@ -24,7 +24,7 @@ export default function ClientBillingReport() {
     const { data, isLoading, isError } = useQuery({
         queryKey: ['annual-client-summary', year],
         queryFn: () => adminApi.getAnnualClientSummary(year),
-        staleTime: 2 * 60_000,
+        staleTime: 0,
     });
 
     const allClients = data?.clients ?? [];
