@@ -1296,17 +1296,35 @@ router.get('/annual-client-summary', async (req, res) => {
         // All monthly_billing rows for this year (all months)
         const { data: billingRows, error: billingError } = await supabase
             .from('monthly_billing')
-            .select('client_id, fiscal_month, grand_total')
+            .select('id, client_id, fiscal_month')
             .eq('fiscal_year', yearInt)
             .in('client_id', assignedClientIds);
 
         if (billingError) throw billingError;
 
-        // Build a map: client_id -> month (1-12) -> grand_total
+        // Sum billing_details.amount per monthly_billing_id for real totals
+        const billingIds = (billingRows || []).map(r => r.id);
+        let details = [];
+        if (billingIds.length > 0) {
+            const { data: d, error: dErr } = await supabase
+                .from('billing_details')
+                .select('monthly_billing_id, amount')
+                .in('monthly_billing_id', billingIds);
+            if (dErr) throw dErr;
+            details = d || [];
+        }
+
+        // Sum details per billing record
+        const detailTotals = {};
+        details.forEach(d => {
+            detailTotals[d.monthly_billing_id] = (detailTotals[d.monthly_billing_id] || 0) + Number(d.amount || 0);
+        });
+
+        // Build a map: client_id -> month (1-12) -> total
         const billingMap = {};
         (billingRows || []).forEach(r => {
             if (!billingMap[r.client_id]) billingMap[r.client_id] = {};
-            billingMap[r.client_id][r.fiscal_month] = Number(r.grand_total || 0);
+            billingMap[r.client_id][r.fiscal_month] = detailTotals[r.id] || 0;
         });
 
         const result = (clients || []).map(c => {
