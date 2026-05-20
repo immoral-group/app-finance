@@ -421,6 +421,19 @@ export const adminApi = {
         treasury_balance?: number;
     }>('/integrations/holded/summary'),
 
+    // Annual Client Billing Summary (nuevo módulo — sin filtro de ocultos)
+    getAnnualClientSummary: (year: number) =>
+        fetchApi<{
+            year: number;
+            clients: {
+                client_id: string;
+                client_name: string;
+                vertical: string;
+                months: number[];
+                annual: number;
+            }[];
+        }>(`/billing/annual-client-summary?year=${year}`),
+
     // Ocultar / reactivar filas de clientes en Billing Matrix
     getHiddenClients: (year: number, month: number) =>
         fetchApi<{ hidden: Array<{ id: string; name: string; hidden_from_yyyymm: number }> }>(

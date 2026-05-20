@@ -1260,4 +1260,72 @@ router.delete('/details/:id', async (req, res) => {
     }
 });
 
+/**
+ * GET /annual-client-summary?year=YYYY
+ * Returns all clients with their grand_total per month for the full year.
+ * Does NOT filter hidden clients — shows everyone regardless of visibility settings.
+ */
+router.get('/annual-client-summary', async (req, res) => {
+    try {
+        const { year } = req.query;
+        if (!year) return res.status(400).json({ error: 'Year required' });
+
+        const yearInt = parseInt(year);
+
+        // All clients assigned to this year (no hidden filter)
+        const { data: clientAssignments } = await supabase
+            .from('client_year_assignments')
+            .select('client_id')
+            .eq('fiscal_year', yearInt)
+            .eq('is_active', true);
+
+        const assignedClientIds = (clientAssignments || []).map(a => a.client_id);
+        if (assignedClientIds.length === 0) {
+            return res.json({ year: yearInt, clients: [] });
+        }
+
+        const { data: clients, error: clientError } = await supabase
+            .from('clients')
+            .select('id, name, vertical:verticals(code, name)')
+            .in('id', assignedClientIds)
+            .eq('is_active', true)
+            .order('name');
+
+        if (clientError) throw clientError;
+
+        // All monthly_billing rows for this year (all months)
+        const { data: billingRows, error: billingError } = await supabase
+            .from('monthly_billing')
+            .select('client_id, fiscal_month, grand_total')
+            .eq('fiscal_year', yearInt)
+            .in('client_id', assignedClientIds);
+
+        if (billingError) throw billingError;
+
+        // Build a map: client_id -> month (1-12) -> grand_total
+        const billingMap = {};
+        (billingRows || []).forEach(r => {
+            if (!billingMap[r.client_id]) billingMap[r.client_id] = {};
+            billingMap[r.client_id][r.fiscal_month] = Number(r.grand_total || 0);
+        });
+
+        const result = (clients || []).map(c => {
+            const months = Array.from({ length: 12 }, (_, i) => billingMap[c.id]?.[i + 1] || 0);
+            const annual = months.reduce((s, v) => s + v, 0);
+            return {
+                client_id: c.id,
+                client_name: c.name,
+                vertical: c.vertical?.name || c.vertical?.code || '',
+                months,
+                annual,
+            };
+        });
+
+        res.json({ year: yearInt, clients: result });
+    } catch (err) {
+        console.error('Error fetching annual client summary:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 export default router;

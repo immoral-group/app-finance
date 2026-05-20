@@ -9,6 +9,7 @@ import ResetPassword from '@/features/auth/ResetPassword';
 import { useEffect } from 'react';
 
 import BillingMatrix from '@/features/billing/BillingMatrix';
+import ClientBillingReport from '@/features/client-billing/ClientBillingReport';
 import MediaTracker from '@/features/media-investment/MediaTracker';
 import ImsalesBilling from '@/features/imsales-billing/ImsalesBilling';
 import ExpensesList from '@/features/expenses/Expenses';
@@ -67,6 +68,7 @@ function App() {
                   <Route path="fees" element={<FeeConfiguration />} />
                   <Route path="payments" element={<Payments />} />
                   <Route path="clients" element={<ClientsPage />} />
+                  <Route path="client-billing" element={<ClientBillingReport />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="users" element={<UserManagement />} />
                   <Route path="developers" element={<Developers />} />
