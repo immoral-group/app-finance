@@ -96,7 +96,7 @@ export const NAV_ITEMS: NavItem[] = [
     },
     { label: 'Billing Imsales', path: '/imsales-billing', icon: 'ShoppingCart', requiredPermission: 'imsales_billing' },
     { label: 'Clients & Fees', path: '/clients', icon: 'Users', requiredPermission: 'clients' },
-    { label: 'Facturación Clientes', path: '/client-billing', icon: 'PieChart', requiredPermission: 'client_billing' },
+    { label: 'Client Billing', path: '/client-billing', icon: 'PieChart', requiredPermission: 'client_billing' },
     { label: 'Settings', path: '/settings', icon: 'Settings', requiredPermission: 'settings', superadminOnly: true },
     { label: 'Gestión de Usuarios', path: '/users', icon: 'Shield', requiredPermission: 'user_management', superadminOnly: true },
     { label: 'Developers', path: '/developers', icon: 'Activity', requiredPermission: 'developers', superadminOnly: true },
