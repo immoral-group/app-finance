@@ -22,6 +22,15 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.33-client-billing-report',
+        date: '2026-05-21',
+        title: 'Nuevo Módulo: Facturación por Cliente',
+        description: 'Vista anual con todos los clientes en filas y los 12 meses en columnas. Haz clic en cualquier cifra para ver el desglose por departamento y servicio. Descarga en Excel o PDF con un clic.',
+        type: 'new_module',
+        moduleKey: 'client_billing',
+        icon: 'PieChart',
+    },
+    {
         id: 'v1.32-imsales-billing-module',
         date: '2026-04-26',
         title: 'Módulo Nativo: Billing Imsales',

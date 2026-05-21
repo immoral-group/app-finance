@@ -4,13 +4,13 @@ import { useTheme } from '@/context/ThemeContext';
 import {
     Sparkles, X, CheckCheck,
     Handshake, Shield, LayoutDashboard, Building2, Moon, LogIn, UserCog,
-    Rocket, Wrench, Bug, Gift
+    Rocket, Wrench, Bug, Gift, PieChart
 } from 'lucide-react';
 import { CHANGELOG, ChangelogEntry, getSeenIds, markAllSeen } from '@/lib/changelog';
 
 // ── Icon map ─────────────────────────────────────────────
 const ICON_MAP: Record<string, React.ElementType> = {
-    Handshake, Shield, LayoutDashboard, Building2, Moon, LogIn, UserCog, Rocket, Gift,
+    Handshake, Shield, LayoutDashboard, Building2, Moon, LogIn, UserCog, Rocket, Gift, PieChart,
 };
 
 // ── Type config ──────────────────────────────────────────

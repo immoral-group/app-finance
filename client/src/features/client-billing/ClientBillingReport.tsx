@@ -1,11 +1,77 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
-import { Download, FileText, Search, X, TrendingUp } from 'lucide-react';
+import { Download, FileText, Search, X, TrendingUp, MousePointerClick, TableProperties } from 'lucide-react';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+const ONBOARDING_KEY = 'fi_client_billing_onboarded';
+
+function OnboardingSplash({ onDismiss }: { onDismiss: () => void }) {
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={onDismiss}
+        >
+            <div
+                className="bg-card border rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in slide-in-from-bottom-4 duration-300"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="px-6 pt-6 pb-4 flex items-start justify-between gap-3">
+                    <div>
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-semibold uppercase tracking-widest text-primary">Nuevo módulo</span>
+                        </div>
+                        <h2 className="text-lg font-bold text-foreground leading-tight">
+                            Facturación por Cliente
+                        </h2>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            Vista anual de lo que factura cada cliente, mes a mes.
+                        </p>
+                    </div>
+                    <button
+                        onClick={onDismiss}
+                        className="flex-shrink-0 p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors mt-0.5"
+                    >
+                        <X size={15} />
+                    </button>
+                </div>
+
+                {/* Tips */}
+                <div className="px-6 pb-4 space-y-3">
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-primary/5 border border-primary/10">
+                        <MousePointerClick size={18} className="text-primary flex-shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-xs font-semibold text-foreground">Clic en cualquier cifra</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                Ver el desglose por departamento y servicio de ese cliente en ese mes.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3 rounded-xl bg-muted/60 border border-border">
+                        <TableProperties size={18} className="text-muted-foreground flex-shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-xs font-semibold text-foreground">Descarga en Excel o PDF</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                Botones CSV y PDF arriba a la derecha. El PDF se descarga directamente.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 pb-5">
+                    <Button className="w-full" onClick={onDismiss}>
+                        Entendido
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
     'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -166,6 +232,16 @@ export default function ClientBillingReport() {
     const [search, setSearch] = useState('');
     const [activeVerticals, setActiveVerticals] = useState<string[]>([]);
     const [modal, setModal] = useState<{ clientId: string; clientName: string; month: number } | null>(null);
+    const [showOnboarding, setShowOnboarding] = useState(false);
+
+    useEffect(() => {
+        if (!localStorage.getItem(ONBOARDING_KEY)) setShowOnboarding(true);
+    }, []);
+
+    const dismissOnboarding = () => {
+        localStorage.setItem(ONBOARDING_KEY, '1');
+        setShowOnboarding(false);
+    };
 
     const { data, isLoading, isError } = useQuery({
         queryKey: ['annual-client-summary', year],
@@ -494,6 +570,9 @@ export default function ClientBillingReport() {
                     onClose={() => setModal(null)}
                 />
             )}
+
+            {/* Onboarding splash — solo primera visita */}
+            {showOnboarding && <OnboardingSplash onDismiss={dismissOnboarding} />}
         </div>
     );
 }
