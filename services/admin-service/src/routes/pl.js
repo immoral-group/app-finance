@@ -139,14 +139,28 @@ router.get('/summary/:year', async (req, res) => {
 
         if (budgetError) throw budgetError;
 
-        // 2. Fetch Actual Income (Billing)
-        // We need to sum specific columns from monthly_billing based on departments
-        const { data: billingData, error: billingError } = await supabase
-            .from('monthly_billing')
-            .select('*')
-            .eq('fiscal_year', year);
+        // 2. Fetch Actual Income
+        // For past years: read from actual_revenue (manually entered). For current/future: read from monthly_billing.
+        const currentYearSummary = new Date().getFullYear();
+        const isPastYearSummary = parseInt(year) < currentYearSummary;
 
-        if (billingError) throw billingError;
+        let billingData = [];
+        let actualRevenueData = [];
+
+        if (isPastYearSummary) {
+            const { data: arData } = await supabase
+                .from('actual_revenue')
+                .select('amount, fiscal_month, department_id, departments(name, code)')
+                .eq('fiscal_year', year);
+            actualRevenueData = arData || [];
+        } else {
+            const { data: bData, error: billingError } = await supabase
+                .from('monthly_billing')
+                .select('*')
+                .eq('fiscal_year', year);
+            if (billingError) throw billingError;
+            billingData = bData || [];
+        }
 
         // 3. Fetch Actual Expenses
         const { data: expenseData, error: expenseError } = await supabase
@@ -199,7 +213,26 @@ router.get('/summary/:year', async (req, res) => {
             });
         });
 
-        // B. Process Real Income (Billing)
+        // B0. Process Real Income for past years (from actual_revenue)
+        if (isPastYearSummary) {
+            const deptMapSummary = {};
+            departments?.forEach(d => { deptMapSummary[d.id] = d.name; });
+            actualRevenueData.forEach(rev => {
+                const deptName = rev.departments?.name || deptMapSummary[rev.department_id] || 'Otros';
+                const monthIdx = rev.fiscal_month - 1;
+                const val = Number(rev.amount || 0);
+                summary.income.real[monthIdx] += val;
+                if (!summary.departments[deptName]) {
+                    summary.departments[deptName] = {
+                        income: { budget: Array(12).fill(0), real: Array(12).fill(0) },
+                        expenses: { budget: Array(12).fill(0), real: Array(12).fill(0) }
+                    };
+                }
+                summary.departments[deptName].income.real[monthIdx] += val;
+            });
+        }
+
+        // B. Process Real Income (Billing) — current/future years only
         // Map billing columns to departments: immedia_total -> Immedia, imcontent_total -> Imcontent, etc.
         billingData.forEach(record => {
             const monthIdx = record.fiscal_month - 1;
@@ -507,7 +540,9 @@ router.get('/matrix/:year', async (req, res) => {
                 departments?.forEach(d => deptMap[d.id] = d.name);
 
                 manualRevenue?.forEach(rev => {
-                    const serviceName = rev.service?.name || rev.description || 'Otros';
+                    // Prefer description (P&L display name saved at write time) over service table name
+                    // (service.name is the long DB name e.g. "Gestión de RRSS" which won't match revenueData key "RRSS")
+                    const serviceName = rev.description || rev.service?.name || 'Otros';
                     const monthIdx = rev.fiscal_month - 1;
                     const val = Number(rev.amount || 0);
                     if (revenueData[serviceName] !== undefined) {
