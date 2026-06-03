@@ -1268,7 +1268,7 @@ router.get('/cost-per-hour/:year/:dept', async (req, res) => {
     const PERSONAL_ITEMS = {
         Immedia: ['Alba', 'Andrés', 'Leidy'],
         Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'],
-        Immoralia: ['David', 'Manel'],
+        Immoralia: ['David', 'Manel', 'Julian'],
     };
 
     // Expense section keys to aggregate for total department expenses

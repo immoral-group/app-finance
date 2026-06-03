@@ -34,7 +34,7 @@ const EXPENSE_STRUCTURE = {
     personalItems: [
         { dept: 'Immedia', items: ['Alba', 'Andrés', 'Leidy'] },
         { dept: 'Imcontent', items: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'] },
-        { dept: 'Immoralia', items: ['David', 'Manel'] },
+        { dept: 'Immoralia', items: ['David', 'Manel', 'Julian'] },
         { dept: 'Immoral', items: ['Daniel', 'Mery', 'Yure', 'Marco', 'Externos puntuales'] },
         { dept: 'Immedia', items: ['Externos'] },
         { dept: 'Imcontent', items: ['Externos'] },
