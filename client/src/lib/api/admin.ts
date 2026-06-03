@@ -453,4 +453,46 @@ export const adminApi = {
         fetchApi('/billing/hide-client', { method: 'POST', body: JSON.stringify(data) }),
     unhideClient: (data: { client_id: string; fiscal_year: number; fiscal_month: number }) =>
         fetchApi('/billing/unhide-client', { method: 'POST', body: JSON.stringify(data) }),
+
+    // ── Budget Requests ───────────────────────────────────────────────────────
+    getBudgetRequests: (params: { year?: number; dept?: string; status?: string }) => {
+        const q = new URLSearchParams();
+        if (params.year) q.set('year', String(params.year));
+        if (params.dept) q.set('dept', params.dept);
+        if (params.status) q.set('status', params.status);
+        return fetchApi<{ requests: BudgetRequest[] }>(`/budget-requests?${q}`);
+    },
+    createBudgetRequest: (data: Omit<BudgetRequest, 'id' | 'status' | 'created_at' | 'updated_at'>) =>
+        fetchApi<{ request: BudgetRequest }>('/budget-requests', { method: 'POST', body: JSON.stringify(data) }),
+    createBudgetRequestsBulk: (data: { requests: Partial<BudgetRequest>[]; requested_by?: string; requested_by_email?: string }) =>
+        fetchApi<{ requests: BudgetRequest[]; count: number }>('/budget-requests/bulk', { method: 'POST', body: JSON.stringify(data) }),
+    approveBudgetRequest: (id: string, data: { reviewed_by?: string; reviewed_by_email?: string; review_notes?: string }) =>
+        fetchApi(`/budget-requests/${id}/approve`, { method: 'PATCH', body: JSON.stringify(data) }),
+    rejectBudgetRequest: (id: string, data: { reviewed_by?: string; reviewed_by_email?: string; review_notes?: string }) =>
+        fetchApi(`/budget-requests/${id}/reject`, { method: 'PATCH', body: JSON.stringify(data) }),
+    approveDeptBudgetRequests: (data: { fiscal_year: number; dept: string; reviewed_by?: string; reviewed_by_email?: string }) =>
+        fetchApi<{ ok: boolean; approved: number }>('/budget-requests/approve-dept', { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteBudgetRequest: (id: string) =>
+        fetchApi(`/budget-requests/${id}`, { method: 'DELETE' }),
 };
+
+export interface BudgetRequest {
+    id: string;
+    fiscal_year: number;
+    dept: string;
+    section: string;
+    category: string;
+    item: string;
+    month_idx: number;
+    current_value: number;
+    requested_value: number;
+    reason?: string;
+    status: 'pending' | 'approved' | 'rejected';
+    requested_by?: string;
+    requested_by_email?: string;
+    reviewed_by?: string;
+    reviewed_by_email?: string;
+    review_notes?: string;
+    created_at: string;
+    updated_at: string;
+}

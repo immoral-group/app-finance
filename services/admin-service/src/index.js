@@ -28,6 +28,7 @@ import apiGateway from './routes/api-gateway.js';
 import integrationsRoutes from './routes/integrations.js';
 import changelogRoutes from './routes/changelog.js';
 import imsalesRoutes from './routes/imsales.js';
+import budgetRequestsRoutes from './routes/budget-requests.js';
 
 dotenv.config();
 
@@ -66,6 +67,7 @@ app.use('/changelog', changelogRoutes);
 
 // Imsales billing
 app.use('/imsales', imsalesRoutes);
+app.use('/budget-requests', budgetRequestsRoutes);
 
 
 // Health Check

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi } from '@/lib/api/admin';
+import { adminApi, BudgetRequest } from '@/lib/api/admin';
+import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
-import { Download, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, MessageSquare, Calendar } from 'lucide-react';
+import { Download, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, MessageSquare, Calendar, Send, Check, X, Trash2, ClipboardList } from 'lucide-react';
 import {
     BarChart, Bar, LineChart, Line, AreaChart, Area,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -12,7 +13,7 @@ import {
 import { CommentModal } from '@/features/pl/PLMatrix';
 import { useUrlState } from '@/hooks/useUrlState';
 
-const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación'] as const;
+const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Solicitudes'] as const;
 type TabType = typeof TABS[number];
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -130,12 +131,21 @@ export default function DepartmentPL() {
     // 'Imsales' está temporalmente exento — para reactivarlo, quitar 'Imsales' de esta línea.
     const isGroupCostExempt = deptNames.includes('Immoral') || deptNames.includes('Imsales');
 
+    const { profile, isSuperAdmin } = useAuth();
     const [year, setYear] = useUrlState('year', new Date().getFullYear(), (v) => Number(v));
     const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Dashboard');
     const [bannerMonth, setBannerMonth] = useState<number | 'ytd'>('ytd');
     const [cellValues, setCellValues] = useState<Record<string, number>>({});
     const queryClient = useQueryClient();
     const hoverTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+
+    // ── Budget Requests state ─────────────────────────────────────────────────
+    // draftEdits: key = `${section}-${dept}-${item}-${monthIdx}` → requested value
+    const [draftEdits, setDraftEdits] = useState<Record<string, number>>({});
+    const [requestReason, setRequestReason] = useState('');
+    const [rejectNoteId, setRejectNoteId] = useState<string | null>(null);
+    const [rejectNote, setRejectNote] = useState('');
+    const [submitSuccess, setSubmitSuccess] = useState(false);
 
     const typeParam = activeTab === 'Presupuesto' ? 'budget' : 'real';
 
@@ -209,6 +219,71 @@ export default function DepartmentPL() {
             queryClient.invalidateQueries({ queryKey: ['pl-notes', year] });
         },
         onError: () => { console.error('Error updating note status'); }
+    });
+
+    // ── Budget Request queries & mutations ────────────────────────────────────
+    const { data: budgetRequestsData, isLoading: budgetRequestsLoading } = useQuery({
+        queryKey: ['budget-requests', year, deptLabel],
+        queryFn: () => adminApi.getBudgetRequests({ year, dept: deptLabel }),
+        enabled: activeTab === 'Solicitudes',
+        staleTime: 30000,
+    });
+    const budgetRequests: BudgetRequest[] = budgetRequestsData?.requests || [];
+    const pendingRequests = budgetRequests.filter(r => r.status === 'pending');
+
+    const submitBudgetRequestsMutation = useMutation({
+        mutationFn: (requests: Partial<BudgetRequest>[]) =>
+            adminApi.createBudgetRequestsBulk({
+                requests,
+                requested_by: profile?.id,
+                requested_by_email: profile?.email || undefined,
+            }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['budget-requests', year, deptLabel] });
+            setDraftEdits({});
+            setRequestReason('');
+            setSubmitSuccess(true);
+            setTimeout(() => setSubmitSuccess(false), 3000);
+        },
+    });
+
+    const approveMutation = useMutation({
+        mutationFn: (id: string) => adminApi.approveBudgetRequest(id, {
+            reviewed_by: profile?.id,
+            reviewed_by_email: profile?.email || undefined,
+        }),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['budget-requests', year, deptLabel] }),
+    });
+
+    const rejectMutation = useMutation({
+        mutationFn: ({ id, notes }: { id: string; notes: string }) => adminApi.rejectBudgetRequest(id, {
+            reviewed_by: profile?.id,
+            reviewed_by_email: profile?.email || undefined,
+            review_notes: notes,
+        }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['budget-requests', year, deptLabel] });
+            setRejectNoteId(null);
+            setRejectNote('');
+        },
+    });
+
+    const approveDeptMutation = useMutation({
+        mutationFn: () => adminApi.approveDeptBudgetRequests({
+            fiscal_year: year,
+            dept: deptLabel,
+            reviewed_by: profile?.id,
+            reviewed_by_email: profile?.email || undefined,
+        }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['budget-requests', year, deptLabel] });
+            queryClient.invalidateQueries({ queryKey: ['pl-matrix', year] });
+        },
+    });
+
+    const deleteMutation = useMutation({
+        mutationFn: (id: string) => adminApi.deleteBudgetRequest(id),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['budget-requests', year, deptLabel] }),
     });
 
     const handleContextMenu = (e: React.MouseEvent, section: string, dept: string, item: string, monthIdx: number) => {
@@ -1614,7 +1689,7 @@ export default function DepartmentPL() {
                 <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year + 1)}>
                     {year + 1} →
                 </Button>
-                {activeTab !== 'Dashboard' && (
+                {activeTab !== 'Dashboard' && activeTab !== 'Solicitudes' && (
                     <Button size="sm" className="gap-1 ml-2 h-7 text-xs">
                         <Download size={12} />
                         Exportar
@@ -1701,6 +1776,307 @@ export default function DepartmentPL() {
         </>
     );
 
+    // ── Budget Request helpers ────────────────────────────────────────────────
+    const draftKey = (section: string, dept: string, item: string, monthIdx: number) =>
+        `${section}|||${dept}|||${item}|||${monthIdx}`;
+
+    const getBudgetCellValue = (section: string, dept: string, item: string, monthIdx: number) => {
+        const key = `${section}-${dept}-${item}-${monthIdx}-budget`;
+        return cellValues[key] ?? 0;
+    };
+
+    const getDraftValue = (section: string, dept: string, item: string, monthIdx: number) => {
+        const k = draftKey(section, dept, item, monthIdx);
+        return k in draftEdits ? draftEdits[k] : getBudgetCellValue(section, dept, item, monthIdx);
+    };
+
+    const setDraftValue = (section: string, dept: string, item: string, monthIdx: number, val: number) => {
+        setDraftEdits(prev => ({ ...prev, [draftKey(section, dept, item, monthIdx)]: val }));
+    };
+
+    const clearDraft = (section: string, dept: string, item: string, monthIdx: number) => {
+        setDraftEdits(prev => {
+            const next = { ...prev };
+            delete next[draftKey(section, dept, item, monthIdx)];
+            return next;
+        });
+    };
+
+    const handleSubmitRequests = () => {
+        const requests: Partial<BudgetRequest>[] = Object.entries(draftEdits).map(([k, requested_value]) => {
+            const [section, dept, item, monthIdxStr] = k.split('|||');
+            const month_idx = parseInt(monthIdxStr);
+            const current_value = getBudgetCellValue(section, dept, item, month_idx);
+            return {
+                fiscal_year: year,
+                dept: deptLabel,
+                section,
+                category: section === 'revenue' ? 'Ingresos' : section,
+                item,
+                month_idx,
+                current_value,
+                requested_value,
+                reason: requestReason || undefined,
+            };
+        }).filter(r => r.requested_value !== r.current_value);
+
+        if (requests.length === 0) return;
+        submitBudgetRequestsMutation.mutate(requests);
+    };
+
+    // ── Solicitudes Tab Render ────────────────────────────────────────────────
+    const renderSolicitudesTab = () => {
+        const fmtEur = (v: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v ?? 0);
+
+        const statusBadge = (status: string) => {
+            if (status === 'approved') return <span className="px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700 font-medium">Aprobado</span>;
+            if (status === 'rejected') return <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 font-medium">Rechazado</span>;
+            return <span className="px-2 py-0.5 rounded-full text-xs bg-yellow-100 text-yellow-700 font-medium">Pendiente</span>;
+        };
+
+        const isAdmin = isSuperAdmin();
+        const draftCount = Object.keys(draftEdits).length;
+
+        // Build rows: dept revenue + expense categories
+        const solicitudRows: { section: string; category: string; dept: string; item: string }[] = [];
+
+        deptRevenue.forEach(group => {
+            (group.services || []).forEach((item: string) => {
+                solicitudRows.push({ section: 'revenue', category: 'Ingresos', dept: group.dept, item });
+            });
+        });
+
+        expCats.forEach(cat => {
+            cat.items.forEach((group: { dept: string; items: string[] }) => {
+                group.items.forEach((item: string) => {
+                    solicitudRows.push({ section: cat.key, category: cat.label, dept: group.dept, item });
+                });
+            });
+        });
+
+        return (
+            <div className="px-4 pb-8 space-y-6">
+                {/* ── Admin review panel ── */}
+                {isAdmin && budgetRequests.length > 0 && (
+                    <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+                        <div className="px-5 py-3 border-b bg-gray-50 flex items-center justify-between">
+                            <h2 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+                                <ClipboardList size={15} />
+                                Solicitudes de {deptLabel} — {year}
+                                {pendingRequests.length > 0 && (
+                                    <span className="ml-1 px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 text-xs font-medium">
+                                        {pendingRequests.length} pendiente(s)
+                                    </span>
+                                )}
+                            </h2>
+                            {pendingRequests.length > 0 && (
+                                <Button
+                                    size="sm"
+                                    className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
+                                    onClick={() => approveDeptMutation.mutate()}
+                                    disabled={approveDeptMutation.isPending}
+                                >
+                                    <Check size={12} />
+                                    Aprobar todos ({pendingRequests.length})
+                                </Button>
+                            )}
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                                <thead className="bg-gray-50">
+                                    <tr>
+                                        <th className="px-3 py-2 text-left font-medium text-gray-600">Categoría</th>
+                                        <th className="px-3 py-2 text-left font-medium text-gray-600">Item</th>
+                                        <th className="px-3 py-2 text-center font-medium text-gray-600">Mes</th>
+                                        <th className="px-3 py-2 text-right font-medium text-gray-600">Actual</th>
+                                        <th className="px-3 py-2 text-right font-medium text-gray-600">Solicitado</th>
+                                        <th className="px-3 py-2 text-left font-medium text-gray-600">Motivo</th>
+                                        <th className="px-3 py-2 text-center font-medium text-gray-600">Estado</th>
+                                        <th className="px-3 py-2 text-center font-medium text-gray-600">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {budgetRequests.map(req => (
+                                        <tr key={req.id} className="border-t hover:bg-gray-50">
+                                            <td className="px-3 py-2 text-gray-700">{req.category}</td>
+                                            <td className="px-3 py-2 font-medium text-gray-900">{req.item}</td>
+                                            <td className="px-3 py-2 text-center text-gray-600">{MONTHS[req.month_idx]}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums text-gray-500">{fmtEur(req.current_value)}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums font-semibold text-indigo-700">{fmtEur(req.requested_value)}</td>
+                                            <td className="px-3 py-2 text-gray-500 max-w-[200px] truncate">{req.reason || '—'}</td>
+                                            <td className="px-3 py-2 text-center">{statusBadge(req.status)}</td>
+                                            <td className="px-3 py-2">
+                                                {req.status === 'pending' && (
+                                                    <div className="flex items-center justify-center gap-1">
+                                                        <button
+                                                            className="p-1 rounded hover:bg-green-50 text-green-600"
+                                                            title="Aprobar"
+                                                            onClick={() => approveMutation.mutate(req.id)}
+                                                            disabled={approveMutation.isPending}
+                                                        >
+                                                            <Check size={14} />
+                                                        </button>
+                                                        {rejectNoteId === req.id ? (
+                                                            <div className="flex items-center gap-1">
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Motivo..."
+                                                                    value={rejectNote}
+                                                                    onChange={e => setRejectNote(e.target.value)}
+                                                                    className="text-xs border rounded px-1 py-0.5 w-24"
+                                                                    autoFocus
+                                                                />
+                                                                <button
+                                                                    className="p-1 rounded hover:bg-red-50 text-red-600"
+                                                                    onClick={() => rejectMutation.mutate({ id: req.id, notes: rejectNote })}
+                                                                >
+                                                                    <Check size={12} />
+                                                                </button>
+                                                                <button
+                                                                    className="p-1 rounded hover:bg-gray-100 text-gray-500"
+                                                                    onClick={() => setRejectNoteId(null)}
+                                                                >
+                                                                    <X size={12} />
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                className="p-1 rounded hover:bg-red-50 text-red-600"
+                                                                title="Rechazar"
+                                                                onClick={() => setRejectNoteId(req.id)}
+                                                            >
+                                                                <X size={14} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {req.status !== 'pending' && (
+                                                    <span className="text-gray-400 text-[10px]">{req.review_notes || ''}</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+
+                {budgetRequestsLoading && (
+                    <div className="text-center text-gray-400 py-8 text-sm">Cargando solicitudes...</div>
+                )}
+
+                {/* ── Draft editor for dept heads (and admins) ── */}
+                <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+                    <div className="px-5 py-3 border-b bg-gray-50 flex items-center justify-between">
+                        <h2 className="font-semibold text-gray-800 text-sm">
+                            Solicitar cambios de presupuesto — {deptLabel} {year}
+                        </h2>
+                        <div className="flex items-center gap-2">
+                            {draftCount > 0 && (
+                                <span className="text-xs text-indigo-600 font-medium">
+                                    {draftCount} cambio(s) pendiente(s) de envío
+                                </span>
+                            )}
+                            {submitSuccess && (
+                                <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                                    <Check size={12} /> Enviado
+                                </span>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="p-4 space-y-3">
+                        <p className="text-xs text-gray-500">
+                            Edita los valores de presupuesto que deseas solicitar. Los cambios no se aplicarán hasta que un administrador los apruebe.
+                        </p>
+
+                        <div className="overflow-x-auto">
+                            <table className="w-full border-collapse text-xs" style={{ minWidth: '1100px' }}>
+                                <thead>
+                                    <tr className="bg-gray-50">
+                                        <th className="border border-gray-200 px-2 py-1.5 text-left font-medium text-gray-600" style={{ width: '100px' }}>Categoría</th>
+                                        <th className="border border-gray-200 px-2 py-1.5 text-left font-medium text-gray-600" style={{ width: '150px' }}>Item</th>
+                                        {MONTHS.map((m, i) => (
+                                            <th key={i} className="border border-gray-200 px-1 py-1.5 text-center font-medium text-gray-600" style={{ minWidth: '70px' }}>
+                                                {m.substring(0, 3)}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {solicitudRows.map((row, rowIdx) => (
+                                        <tr key={rowIdx} className="hover:bg-indigo-50/30">
+                                            <td className="border border-gray-100 px-2 py-1 text-gray-500">{row.category}</td>
+                                            <td className="border border-gray-100 px-2 py-1 font-medium text-gray-800">{row.item}</td>
+                                            {MONTHS.map((_, mIdx) => {
+                                                const current = getBudgetCellValue(row.section, row.dept, row.item, mIdx);
+                                                const k = draftKey(row.section, row.dept, row.item, mIdx);
+                                                const isDirty = k in draftEdits && draftEdits[k] !== current;
+                                                return (
+                                                    <td key={mIdx} className={`border px-0.5 py-0.5 ${isDirty ? 'border-indigo-400 bg-indigo-50' : 'border-gray-100'}`}>
+                                                        <input
+                                                            type="number"
+                                                            value={getDraftValue(row.section, row.dept, row.item, mIdx) || ''}
+                                                            onChange={e => {
+                                                                const v = parseFloat(e.target.value) || 0;
+                                                                setDraftValue(row.section, row.dept, row.item, mIdx, v);
+                                                            }}
+                                                            onBlur={e => {
+                                                                const v = parseFloat(e.target.value) || 0;
+                                                                if (v === current) clearDraft(row.section, row.dept, row.item, mIdx);
+                                                            }}
+                                                            className="w-full text-right px-1 py-0.5 text-xs bg-transparent focus:outline-none focus:bg-white rounded tabular-nums"
+                                                            placeholder="0"
+                                                        />
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {draftCount > 0 && (
+                            <div className="flex items-end gap-3 pt-2 border-t">
+                                <div className="flex-1">
+                                    <label className="text-xs font-medium text-gray-700 mb-1 block">Motivo de la solicitud (opcional)</label>
+                                    <textarea
+                                        value={requestReason}
+                                        onChange={e => setRequestReason(e.target.value)}
+                                        placeholder="Explica brevemente el motivo de los cambios..."
+                                        className="w-full text-xs border rounded px-2 py-1.5 h-16 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                    <Button
+                                        size="sm"
+                                        className="h-8 text-xs bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
+                                        onClick={handleSubmitRequests}
+                                        disabled={submitBudgetRequestsMutation.isPending}
+                                    >
+                                        <Send size={12} />
+                                        Enviar solicitud ({draftCount} cambio{draftCount !== 1 ? 's' : ''})
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 text-xs text-gray-500 gap-1"
+                                        onClick={() => setDraftEdits({})}
+                                    >
+                                        <Trash2 size={11} />
+                                        Limpiar
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     // --- DASHBOARD TAB ---
     if (activeTab === 'Dashboard') {
         return (
@@ -1712,6 +2088,17 @@ export default function DepartmentPL() {
                         <div className="bg-white rounded-lg shadow-lg p-4">Cargando...</div>
                     </div>
                 )}
+                {renderOverlays()}
+            </div>
+        );
+    }
+
+    // --- SOLICITUDES TAB ---
+    if (activeTab === 'Solicitudes') {
+        return (
+            <div className="space-y-4 -mx-6 -mt-6">
+                {renderHeader(`SOLICITUDES PRESUPUESTO — ${deptLabel.toUpperCase()} ${year}`)}
+                {renderSolicitudesTab()}
                 {renderOverlays()}
             </div>
         );
