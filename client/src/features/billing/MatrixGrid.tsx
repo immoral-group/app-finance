@@ -750,27 +750,27 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                 <table ref={tableRef} className="w-full text-sm text-left border-collapse">
                     <thead className="sticky top-0 z-40 bg-white shadow-sm">
                         <tr className="border-b bg-muted/20">
-                            <th className="p-2 border-r min-w-[200px] md:min-w-[350px] md:sticky md:left-0 bg-white md:z-50 font-bold text-center" rowSpan={2} colSpan={3}>Cliente</th>
-                            <th className="p-2 border-r text-center font-bold text-blue-700 bg-blue-50 group cursor-pointer hover:bg-blue-100" colSpan={4 + immediaSvcs.length}>Immedia</th>
-                            <th className="p-2 border-r text-center font-bold text-indigo-700 bg-indigo-50 group cursor-pointer hover:bg-indigo-100" colSpan={imcontentSvcs.length}>Imcontent</th>
-                            <th className="p-2 border-r text-center font-bold text-orange-700 bg-orange-50 group cursor-pointer hover:bg-orange-100" colSpan={immoraliaSvcs.length}>Immoralia</th>
-                            <th className="p-2 border-r text-center font-bold text-purple-700 bg-purple-50 group cursor-pointer hover:bg-purple-100" colSpan={immoralSvcsWithHoras.length + (hasHorasInDB ? 0 : 1)}>Immoral</th>
+                            <th className="px-2 py-1 border-r min-w-[200px] md:min-w-[320px] md:sticky md:left-0 bg-white md:z-50 font-bold text-center" rowSpan={2} colSpan={3}>Cliente</th>
+                            <th className="px-2 py-1 border-r text-center font-bold text-blue-700 bg-blue-50 group cursor-pointer hover:bg-blue-100" colSpan={4 + immediaSvcs.length}>Immedia</th>
+                            <th className="px-2 py-1 border-r text-center font-bold text-indigo-700 bg-indigo-50 group cursor-pointer hover:bg-indigo-100" colSpan={imcontentSvcs.length}>Imcontent</th>
+                            <th className="px-2 py-1 border-r text-center font-bold text-orange-700 bg-orange-50 group cursor-pointer hover:bg-orange-100" colSpan={immoraliaSvcs.length}>Immoralia</th>
+                            <th className="px-2 py-1 border-r text-center font-bold text-purple-700 bg-purple-50 group cursor-pointer hover:bg-purple-100" colSpan={immoralSvcsWithHoras.length + (hasHorasInDB ? 0 : 1)}>Immoral</th>
                             {imsalesSvcs.length > 0 && (
-                                <th className="p-2 border-r text-center font-bold text-emerald-700 bg-emerald-50 group cursor-pointer hover:bg-emerald-100" colSpan={imsalesSvcs.length}>Immoral</th>
+                                <th className="px-2 py-1 border-r text-center font-bold text-emerald-700 bg-emerald-50 group cursor-pointer hover:bg-emerald-100" colSpan={imsalesSvcs.length}>Immoral</th>
                             )}
-                            <th className="p-2 text-center min-w-[100px] font-bold bg-slate-100" rowSpan={2}>TOTAL</th>
+                            <th className="px-2 py-1 text-center min-w-[80px] font-bold bg-slate-100" rowSpan={2}>TOTAL</th>
                         </tr>
                         <tr className="border-b bg-gray-50 text-xs text-center">
-                            <th className="p-2 border-r min-w-[100px]">Inversión</th>
-                            <th className="p-2 border-r min-w-[70px]">% Fee</th>
-                            <th className="p-2 border-r min-w-[50px]">Nº Plat</th>
-                            <th className="p-2 border-r min-w-[100px]">Fee Mínimo</th>
+                            <th className="px-2 py-1 border-r min-w-[80px]">Inversión</th>
+                            <th className="px-2 py-1 border-r min-w-[60px]">% Fee</th>
+                            <th className="px-2 py-1 border-r min-w-[45px]">Nº Plat</th>
+                            <th className="px-2 py-1 border-r min-w-[80px]">Fee Mínimo</th>
                             {allServiceCols.map((c: any) => (
-                                <th key={c.id} className="p-2 border-r min-w-[120px] font-medium text-muted-foreground whitespace-normal h-16 align-bottom pb-2">{c.name}</th>
+                                <th key={c.id} className="px-1.5 py-1 border-r min-w-[90px] font-medium text-muted-foreground whitespace-normal h-12 align-bottom pb-1.5">{c.name}</th>
                             ))}
                             {/* Virtual Horas/Otros header when not in DB */}
                             {!hasHorasInDB && (
-                                <th className="p-2 border-r min-w-[120px] font-medium text-muted-foreground whitespace-normal h-16 align-bottom pb-2">Horas / Otros</th>
+                                <th className="px-1.5 py-1 border-r min-w-[90px] font-medium text-muted-foreground whitespace-normal h-12 align-bottom pb-1.5">Horas / Otros</th>
                             )}
                         </tr>
                     </thead>
@@ -805,7 +805,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                                     <td className="p-0 border-r md:sticky md:left-[60px] bg-white group-hover:bg-slate-50 md:z-30 w-[80px]">
                                         {renderCell(rIndex, 'vertical', row.vertical, undefined, "h-full w-full border-none rounded-none text-center bg-transparent focus:ring-0 focus:bg-slate-100 px-1 text-xs font-bold text-blue-600")}
                                     </td>
-                                    <td className="p-2 border-r md:sticky md:left-[140px] bg-white group-hover:bg-slate-50 md:z-30 min-w-[200px] font-medium truncate">{row.client_name}</td>
+                                    <td className="px-2 py-1.5 border-r md:sticky md:left-[140px] bg-white group-hover:bg-slate-50 md:z-30 min-w-[160px] font-medium truncate">{row.client_name}</td>
 
                                     <td className="p-0 border-r">{renderCell(rIndex, 'investment', row.metadata.investment)}</td>
                                     <td className="p-0 border-r min-w-[70px]">{renderCell(rIndex, 'fee_pct', row.metadata.fee_pct, undefined, "h-full w-full border-none rounded-none text-right bg-transparent focus:ring-0 focus:bg-blue-50/50 px-2")}</td>
@@ -857,7 +857,7 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                                         </td>
                                     )}
 
-                                    <td className="p-2 text-right font-bold bg-slate-100 md:sticky md:right-0 min-w-[100px]">
+                                    <td className="px-2 py-1.5 text-right font-bold bg-slate-100 md:sticky md:right-0 min-w-[80px]">
                                         {formatNumber(Math.round(rowTotal))}
                                     </td>
                                 </tr>
@@ -879,19 +879,19 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                     </tbody>
                     <tfoot className="sticky bottom-0 z-40 bg-slate-900 text-white font-bold shadow-lg">
                         <tr>
-                            <td className="p-3 border-r md:sticky md:left-0 bg-slate-900 md:z-50 text-right text-white" colSpan={3}>TOTALES</td>
-                            <td className="p-2 border-r text-right bg-slate-800">{formatNumber(Math.round(totals.investment))}</td>
-                            <td className="p-2 border-r bg-slate-800"></td>
-                            <td className="p-2 border-r bg-slate-800"></td>
-                            <td className="p-2 border-r bg-slate-800"></td>
+                            <td className="px-2 py-2 border-r md:sticky md:left-0 bg-slate-900 md:z-50 text-right text-white" colSpan={3}>TOTALES</td>
+                            <td className="px-2 py-1.5 border-r text-right bg-slate-800">{formatNumber(Math.round(totals.investment))}</td>
+                            <td className="px-2 py-1.5 border-r bg-slate-800"></td>
+                            <td className="px-2 py-1.5 border-r bg-slate-800"></td>
+                            <td className="px-2 py-1.5 border-r bg-slate-800"></td>
                             {allServiceCols.map((c: any) => (
-                                <td key={c.id} className="p-2 border-r text-right text-xs">{totals.services[c.id] ? formatNumber(Math.round(totals.services[c.id])) : '-'}</td>
+                                <td key={c.id} className="px-2 py-1.5 border-r text-right text-xs">{totals.services[c.id] ? formatNumber(Math.round(totals.services[c.id])) : '-'}</td>
                             ))}
                             {/* Virtual Horas/Otros total */}
                             {!hasHorasInDB && (
-                                <td className="p-2 border-r text-right text-xs">{totals.horas_otros ? formatNumber(Math.round(totals.horas_otros)) : '-'}</td>
+                                <td className="px-2 py-1.5 border-r text-right text-xs">{totals.horas_otros ? formatNumber(Math.round(totals.horas_otros)) : '-'}</td>
                             )}
-                            <td className="p-2 text-right bg-slate-950 md:sticky md:right-0 text-white font-bold">{formatNumber(Math.round(totals.grand_grand))}</td>
+                            <td className="px-2 py-1.5 text-right bg-slate-950 md:sticky md:right-0 text-white font-bold">{formatNumber(Math.round(totals.grand_grand))}</td>
                         </tr>
                     </tfoot>
                 </table>
