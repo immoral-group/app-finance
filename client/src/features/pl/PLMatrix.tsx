@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
-import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil } from 'lucide-react';
+import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil, FileSpreadsheet, FileText } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
@@ -855,6 +857,79 @@ export default function PLMatrix() {
 
     const isPastYear = year < new Date().getFullYear();
 
+    const [exportMenuOpen, setExportMenuOpen] = useState(false);
+
+    // ── Export helpers ───────────────────────────────────────────────────────
+    const buildExportRows = () => {
+        const rows: { label: string; values: number[]; isHeader?: boolean }[] = [];
+        const addSection = (title: string, structure: typeof mergedRevenueStructure | typeof mergedExpenseStructure.personalItems, section: string) => {
+            rows.push({ label: title, values: Array(12).fill(0), isHeader: true });
+            (structure as any[]).forEach((group: any) => {
+                const items = group.services || group.items || [];
+                items.forEach((item: string) => {
+                    const vals = Array.from({ length: 12 }, (_, i) => getCellValue(section, group.dept, item, i).value);
+                    rows.push({ label: `  ${group.dept} · ${item}`, values: vals });
+                });
+            });
+        };
+        addSection('INGRESOS', mergedRevenueStructure, 'revenue');
+        const expSections: [string, any[], string][] = [
+            ['Personal', mergedExpenseStructure.personalItems, 'personal'],
+            ['Comisiones', mergedExpenseStructure.comisionesItems, 'comisiones'],
+            ['Marketing', mergedExpenseStructure.marketingItems, 'marketing'],
+            ['Formación', mergedExpenseStructure.formacionItems, 'formacion'],
+            ['Software', mergedExpenseStructure.softwareItems, 'software'],
+            ['Gastos Operativos', mergedExpenseStructure.gastosOpItems, 'gastosOp'],
+            ['Ad Spend', mergedExpenseStructure.adspentItems, 'adspent'],
+        ];
+        expSections.forEach(([title, struct, key]) => addSection(title, struct, key));
+        return rows;
+    };
+
+    const handleExportCSV = () => {
+        const exportRows = buildExportRows();
+        const BOM = '﻿';
+        const headers = ['Concepto', ...MONTHS_FULL, 'TOTAL ANUAL'];
+        const lines = exportRows.map(r => {
+            const total = r.values.reduce((a, b) => a + b, 0);
+            const cells = [r.label, ...r.values.map(v => String(v)), String(total)];
+            return cells.map(c => (c.includes(';') || c.includes('"') ? `"${c.replace(/"/g, '""')}"` : c)).join(';');
+        });
+        const csv = BOM + [headers.join(';'), ...lines].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `PL_Matrix_${activeTab}_${year}.csv`;
+        a.click(); URL.revokeObjectURL(url);
+        setExportMenuOpen(false);
+    };
+
+    const handleExportPDF = () => {
+        const exportRows = buildExportRows();
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+        doc.setFontSize(14);
+        doc.text(`P&L Matrix — ${activeTab} ${year}`, 14, 15);
+        const head = [['Concepto', ...MONTHS, 'TOTAL']];
+        const body = exportRows.map(r => {
+            const total = r.values.reduce((a, b) => a + b, 0);
+            return [r.label, ...r.values.map(v => v ? v.toLocaleString('es-ES') : '-'), total ? total.toLocaleString('es-ES') : '-'];
+        });
+        autoTable(doc, {
+            head, body, startY: 20,
+            styles: { fontSize: 6.5, cellPadding: 1.5 },
+            headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold' },
+            didParseCell: (data) => {
+                if (data.section === 'body' && exportRows[data.row.index]?.isHeader) {
+                    data.cell.styles.fillColor = [241, 245, 249];
+                    data.cell.styles.fontStyle = 'bold';
+                    data.cell.styles.textColor = [30, 41, 59];
+                }
+            }
+        });
+        doc.save(`PL_Matrix_${activeTab}_${year}.pdf`);
+        setExportMenuOpen(false);
+    };
+
     // ── Render Helpers ───────────────────────────────────────────────────────
     const renderEditableCell = (section: string, dept: string, item: string, monthIdx: number) => {
         const cell = getCellValue(section, dept, item, monthIdx);
@@ -1163,7 +1238,24 @@ export default function PLMatrix() {
                 <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year - 1)}>← {year - 1}</Button>
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year + 1)}>{year + 1} →</Button>
-                    <Button size="sm" className="gap-1 ml-2 h-7 text-xs"><Download size={12} /> Exportar</Button>
+                    <div className="relative ml-2">
+                        <Button size="sm" className="gap-1 h-7 text-xs" onClick={() => setExportMenuOpen(o => !o)}>
+                            <Download size={12} /> Exportar
+                        </Button>
+                        {exportMenuOpen && (
+                            <>
+                                <div className="fixed inset-0 z-40" onClick={() => setExportMenuOpen(false)} />
+                                <div className="absolute right-0 mt-1 z-50 bg-white border rounded-lg shadow-lg w-44 py-1 animate-in fade-in zoom-in duration-150">
+                                    <button onClick={handleExportCSV} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50 transition-colors">
+                                        <FileSpreadsheet size={15} className="text-green-600" /> Excel (.csv)
+                                    </button>
+                                    <button onClick={handleExportPDF} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50 transition-colors">
+                                        <FileText size={15} className="text-red-500" /> PDF
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
 
