@@ -19,7 +19,7 @@ const MONTHS_FULL = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 // Revenue structure matching the user's Excel exactly
 const REVENUE_STRUCTURE = [
     { dept: 'Immedia', services: ['Paid General', 'Paid imfilms', 'Setup inicial'] },
-    { dept: 'Imcontent', services: ['Branding', 'Diseño', 'Contenido con IA', 'RRSS', 'Estrategia Digital', 'Influencers'] },
+    { dept: 'Imcontent', services: ['Branding', 'Diseño', 'Contenido con IA', 'RRSS', 'Estrategia Digital', 'Influencers', 'Diseño de Landing'] },
     { dept: 'Immoralia', services: ['Setup inicial IA', 'Automation', 'Consultoría'] },
     { dept: 'Imloyal', services: ['Web dev', 'CRM', 'Comisiones'] },
     { dept: 'Imseo', services: ['SEO', 'Comisiones'] },

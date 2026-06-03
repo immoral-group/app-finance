@@ -478,6 +478,7 @@ router.get('/matrix/:year', async (req, res) => {
                 'RRSS': Array(12).fill(0),
                 'Estrategia Digital': Array(12).fill(0),
                 'Influencers': Array(12).fill(0),
+                'Diseño de Landing': Array(12).fill(0),
                 'Setup inicial IA': Array(12).fill(0),
                 'Automation': Array(12).fill(0),
                 'Consultoría': Array(12).fill(0),
@@ -540,6 +541,7 @@ router.get('/matrix/:year', async (req, res) => {
                     'SOCIAL_MEDIA_MGMT': 'RRSS',
                     'DIGITAL_STRATEGY': 'Estrategia Digital',
                     'INFLUENCER_UGC': 'Influencers',
+                    'DISENO_LANDING': 'Diseño de Landing',
                     'BUDGET_INFLUENCER_PAID': 'Budget Nutfruit',
                     'IMMORALIA_SETUP': 'Setup inicial IA',
                     'AGENCY_AUTO': 'Automation',
@@ -603,7 +605,7 @@ router.get('/matrix/:year', async (req, res) => {
 
             const allRows = [
                 ...buildDeptRows('Immedia', ['Paid General', 'Paid imfilms', 'Setup inicial']),
-                ...buildDeptRows('Imcontent', ['Branding', 'Diseño', 'Contenido con IA', 'RRSS', 'Estrategia Digital', 'Influencers']),
+                ...buildDeptRows('Imcontent', ['Branding', 'Diseño', 'Contenido con IA', 'RRSS', 'Estrategia Digital', 'Influencers', 'Diseño de Landing']),
                 ...buildDeptRows('Immoralia', ['Setup inicial IA', 'Automation', 'Consultoría']),
                 ...buildDeptRows('Imloyal', ['Web dev', 'CRM', 'Comisiones']),
                 ...buildDeptRows('Imseo', ['SEO', 'Comisiones']),
@@ -1387,7 +1389,7 @@ router.get('/cost-per-hour/:year/:dept', async (req, res) => {
             // (simplified — uses same service-to-dept mapping as frontend)
             const deptServiceMapping = {
                 Immedia: ['Paid General', 'Paid imfilms', 'Setup inicial'],
-                Imcontent: ['Branding', 'Diseño', 'Contenido con IA', 'RRSS', 'Estrategia Digital', 'Influencers', 'Budget Nutfruit'],
+                Imcontent: ['Branding', 'Diseño', 'Contenido con IA', 'RRSS', 'Estrategia Digital', 'Influencers', 'Diseño de Landing', 'Budget Nutfruit'],
                 Immoralia: ['Setup inicial IA', 'Automation', 'Consultoría'],
             };
 
@@ -1411,6 +1413,7 @@ router.get('/cost-per-hour/:year/:dept', async (req, res) => {
                 'BRANDING': 'Imcontent', 'CONTENT_DESIGN': 'Imcontent',
                 'AI_CONTENT': 'Imcontent', 'SOCIAL_MEDIA_MGMT': 'Imcontent',
                 'DIGITAL_STRATEGY': 'Imcontent', 'INFLUENCER_UGC': 'Imcontent',
+                'DISENO_LANDING': 'Imcontent',
                 'IMMORALIA_SETUP': 'Immoralia', 'AGENCY_AUTO': 'Immoralia',
                 'CONSULTING_AUTO': 'Immoralia', 'PAID_MEDIA_SETUP': 'Immedia',
                 'WEB_DEV': 'Imloyal', 'SEO': 'Imseo', 'MKT_AUTO_EMAIL': 'Imloyal',
