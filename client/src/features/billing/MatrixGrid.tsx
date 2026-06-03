@@ -226,6 +226,31 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
 
     const [hoveredCell, setHoveredCell] = useState<HoverState | null>(null);
     const hoverTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const topScrollRef = useRef<HTMLDivElement>(null);
+    const tableRef = useRef<HTMLTableElement>(null);
+    const [tableScrollWidth, setTableScrollWidth] = useState(0);
+
+    useEffect(() => {
+        const updateWidth = () => {
+            if (tableRef.current) setTableScrollWidth(tableRef.current.scrollWidth);
+        };
+        updateWidth();
+        const ro = new ResizeObserver(updateWidth);
+        if (tableRef.current) ro.observe(tableRef.current);
+        return () => ro.disconnect();
+    }, []);
+
+    const syncFromTop = () => {
+        if (scrollRef.current && topScrollRef.current) {
+            scrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+        }
+    };
+    const syncFromBottom = () => {
+        if (scrollRef.current && topScrollRef.current) {
+            topScrollRef.current.scrollLeft = scrollRef.current.scrollLeft;
+        }
+    };
 
     // Add Row modal
     const [showAddRow, setShowAddRow] = useState(false);
@@ -704,13 +729,25 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                 .matrix-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
                 .matrix-scroll::-webkit-scrollbar-corner { background: #f1f5f9; }
             `}</style>
-            <div className="matrix-scroll relative w-full h-full overflow-auto max-h-[80vh] border rounded-lg shadow-sm bg-white"
+            {/* Top mirror scrollbar */}
+            <div
+                ref={topScrollRef}
+                onScroll={syncFromTop}
+                className="matrix-scroll w-full overflow-x-auto overflow-y-hidden border-x border-t rounded-t-lg bg-slate-50"
+                style={{ height: 12, scrollbarWidth: 'auto', scrollbarColor: '#94a3b8 #f1f5f9' }}
+            >
+                <div style={{ width: tableScrollWidth, height: 1 }} />
+            </div>
+            <div
+                ref={scrollRef}
+                onScroll={syncFromBottom}
+                className="matrix-scroll relative w-full h-full overflow-auto max-h-[80vh] border rounded-b-lg shadow-sm bg-white"
                 style={{
                     scrollbarWidth: 'auto',
                     scrollbarColor: '#94a3b8 #f1f5f9'
                 }}
             >
-                <table className="w-full text-sm text-left border-collapse">
+                <table ref={tableRef} className="w-full text-sm text-left border-collapse">
                     <thead className="sticky top-0 z-40 bg-white shadow-sm">
                         <tr className="border-b bg-muted/20">
                             <th className="p-2 border-r min-w-[200px] md:min-w-[350px] md:sticky md:left-0 bg-white md:z-50 font-bold text-center" rowSpan={2} colSpan={3}>Cliente</th>
