@@ -281,10 +281,6 @@ export default function DepartmentPL() {
         },
     });
 
-    const deleteMutation = useMutation({
-        mutationFn: (id: string) => adminApi.deleteBudgetRequest(id),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['budget-requests', year, deptLabel] }),
-    });
 
     const handleContextMenu = (e: React.MouseEvent, section: string, dept: string, item: string, monthIdx: number) => {
         e.preventDefault();
