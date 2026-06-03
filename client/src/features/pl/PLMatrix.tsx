@@ -860,19 +860,22 @@ export default function PLMatrix() {
     const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
     // ── Export helpers ───────────────────────────────────────────────────────
-    const buildExportRows = () => {
-        const rows: { label: string; values: number[]; isHeader?: boolean }[] = [];
-        const addSection = (title: string, structure: typeof mergedRevenueStructure | typeof mergedExpenseStructure.personalItems, section: string) => {
-            rows.push({ label: title, values: Array(12).fill(0), isHeader: true });
-            (structure as any[]).forEach((group: any) => {
-                const items = group.services || group.items || [];
-                items.forEach((item: string) => {
-                    const vals = Array.from({ length: 12 }, (_, i) => getCellValue(section, group.dept, item, i).value);
-                    rows.push({ label: `  ${group.dept} · ${item}`, values: vals });
-                });
+    type ExportRow = { label: string; values: number[]; isHeader?: boolean; isTotal?: boolean; isEbitda?: boolean };
+
+    const buildExportRows = (): ExportRow[] => {
+        const rows: ExportRow[] = [];
+
+        // INGRESOS
+        rows.push({ label: 'INGRESOS', values: Array(12).fill(0), isHeader: true });
+        mergedRevenueStructure.forEach((group: any) => {
+            (group.services || []).forEach((item: string) => {
+                const vals = Array.from({ length: 12 }, (_, i) => getCellValue('revenue', group.dept, item, i).value);
+                rows.push({ label: `  ${group.dept} · ${item}`, values: vals });
             });
-        };
-        addSection('INGRESOS', mergedRevenueStructure, 'revenue');
+        });
+        rows.push({ label: 'TOTAL INGRESOS', values: ingresosTotals, isTotal: true });
+
+        // GASTOS — cada categoría con su subtotal
         const expSections: [string, any[], string][] = [
             ['Personal', mergedExpenseStructure.personalItems, 'personal'],
             ['Comisiones', mergedExpenseStructure.comisionesItems, 'comisiones'],
@@ -882,7 +885,23 @@ export default function PLMatrix() {
             ['Gastos Operativos', mergedExpenseStructure.gastosOpItems, 'gastosOp'],
             ['Ad Spend', mergedExpenseStructure.adspentItems, 'adspent'],
         ];
-        expSections.forEach(([title, struct, key]) => addSection(title, struct, key));
+        expSections.forEach(([title, struct, key]) => {
+            rows.push({ label: title, values: Array(12).fill(0), isHeader: true });
+            (struct as any[]).forEach((group: any) => {
+                (group.items || []).forEach((item: string) => {
+                    const vals = Array.from({ length: 12 }, (_, i) => getCellValue(key, group.dept, item, i).value);
+                    rows.push({ label: `  ${group.dept} · ${item}`, values: vals });
+                });
+            });
+            rows.push({ label: `Total ${title}`, values: expenseCategoryTotals[key] || Array(12).fill(0), isTotal: true });
+        });
+
+        // TOTAL GASTOS
+        rows.push({ label: 'TOTAL GASTOS', values: gastosTotals, isTotal: true });
+
+        // EBITDA
+        rows.push({ label: 'EBITDA', values: ebitdaTotals, isEbitda: true });
+
         return rows;
     };
 
@@ -906,23 +925,34 @@ export default function PLMatrix() {
 
     const handleExportPDF = () => {
         const exportRows = buildExportRows();
-        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
-        doc.setFontSize(14);
-        doc.text(`P&L Matrix — ${activeTab} ${year}`, 14, 15);
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        doc.setFontSize(11);
+        doc.text(`P&L Matrix — ${activeTab} ${year}`, 14, 13);
         const head = [['Concepto', ...MONTHS, 'TOTAL']];
         const body = exportRows.map(r => {
             const total = r.values.reduce((a, b) => a + b, 0);
             return [r.label, ...r.values.map(v => v ? v.toLocaleString('es-ES') : '-'), total ? total.toLocaleString('es-ES') : '-'];
         });
         autoTable(doc, {
-            head, body, startY: 20,
-            styles: { fontSize: 6.5, cellPadding: 1.5 },
-            headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold' },
+            head, body, startY: 18,
+            styles: { fontSize: 5, cellPadding: 1 },
+            headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold', fontSize: 5 },
+            columnStyles: { 0: { cellWidth: 42 } },
             didParseCell: (data) => {
-                if (data.section === 'body' && exportRows[data.row.index]?.isHeader) {
-                    data.cell.styles.fillColor = [241, 245, 249];
+                if (data.section !== 'body') return;
+                const row = exportRows[data.row.index];
+                if (row?.isHeader) {
+                    data.cell.styles.fillColor = [226, 232, 240];
                     data.cell.styles.fontStyle = 'bold';
                     data.cell.styles.textColor = [30, 41, 59];
+                } else if (row?.isTotal) {
+                    data.cell.styles.fillColor = [241, 245, 249];
+                    data.cell.styles.fontStyle = 'bold';
+                    data.cell.styles.textColor = [15, 23, 42];
+                } else if (row?.isEbitda) {
+                    data.cell.styles.fillColor = [30, 41, 59];
+                    data.cell.styles.fontStyle = 'bold';
+                    data.cell.styles.textColor = [255, 255, 255];
                 }
             }
         });
