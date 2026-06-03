@@ -959,7 +959,7 @@ function DashboardContent() {
                         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-700">
                             <div className="flex items-center gap-3">
                                 <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white font-bold text-[10px]">H</div>
-                                <h2 className="text-lg font-bold text-foreground">Holded SL</h2>
+                                <h2 className="text-lg font-bold text-foreground">Holded Immoral</h2>
                                 <span className="text-xs text-muted-foreground">Facturación y Tesorería</span>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -28,7 +28,7 @@ const BENEFICIARY_TYPES = [
 
 const PAYMENT_TYPES = BENEFICIARY_TYPES;
 
-const ISSUING_BANKS = ['BBVA', 'Wise', 'Mercury Business', 'Mercury Nutfruit Budget'];
+const ISSUING_BANKS = ['BBVA', 'BBVA IVA', 'Wise', 'Mercury Business', 'Mercury Nutfruit Budget', 'Mercury Checking', 'Stripe'];
 const PAYMENT_METHODS = [...ISSUING_BANKS, 'PayPal', 'Payoneer'];
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {

@@ -117,7 +117,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     {
         id: 'v1.22-dashboard-holded-cards',
         date: '2026-03-26',
-        title: 'Dashboard: Indicadores Holded SL',
+        title: 'Dashboard: Indicadores Holded Immoral',
         description: 'Nuevas tarjetas en tiempo real debajo de los departamentos: Facturas Pendientes (aún no vencidas), Facturas Vencidas, Estimado por Recibir y Saldo en Caja desde Holded.',
         type: 'new_module',
         moduleKey: 'dashboard',
