@@ -569,15 +569,16 @@ export default function PLMatrix() {
         if (prevMatrixRef.current === currentKey) return;
         prevMatrixRef.current = currentKey;
         const newValues = parseMatrixData(matrixData, typeParam as 'real' | 'budget');
-        setCellValues(prev => ({ ...prev, ...newValues }));
+        // Replace entirely when year or type changes to avoid stale values bleeding across years
+        setCellValues(newValues);
     }, [matrixData, typeParam, year]);
 
-    // Remove cache on unmount so that on next visit there is no stale entry.
+    // Clear cellValues and cache when year changes to prevent stale data bleeding across years
     useEffect(() => {
-        return () => {
-            queryClient.removeQueries({ queryKey: ['pl-matrix', year] });
-        };
-    }, [year, queryClient]);
+        setCellValues({});
+        prevMatrixRef.current = null;
+        queryClient.removeQueries({ queryKey: ['pl-matrix', year] });
+    }, [year]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // When switching tabs, clear the TARGET tab's cache and reset prevMatrixRef.
     // Without this, React Query returns stale cache immediately, prevMatrixRef
