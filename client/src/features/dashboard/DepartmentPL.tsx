@@ -2006,8 +2006,8 @@ export default function DepartmentPL() {
                             <div>
                                 <h2 className="font-semibold text-slate-800 text-sm">Nueva solicitud de cambio — {deptLabel} {year}</h2>
                                 <p className="text-xs text-slate-400 mt-0.5">
-                                    Modifica los valores deseados. Los meses pasados están bloqueados.
-                                    {isPastYear && <span className="ml-1 text-amber-500 font-medium">Año pasado — solo lectura.</span>}
+                                    Los valores mostrados son el <strong className="text-slate-500">presupuesto aprobado actual</strong>. Edita las celdas que quieras cambiar y envía la solicitud.
+                                    {isPastYear && <span className="ml-1 text-amber-500 font-medium">· Año pasado — solo lectura.</span>}
                                 </p>
                             </div>
                         </div>
@@ -2092,8 +2092,8 @@ export default function DepartmentPL() {
                                                                             if (v === current) clearDraft(row.section, row.dept, row.item, mIdx);
                                                                         }}
                                                                         className={`w-full text-right px-1.5 py-1 text-xs focus:outline-none focus:bg-white rounded tabular-nums transition-colors
-                                                                            ${isDirty ? 'bg-indigo-50 font-semibold text-indigo-800' : 'bg-transparent text-slate-600 hover:bg-slate-50'}`}
-                                                                        placeholder={current > 0 ? String(current) : '0'}
+                                                                            ${isDirty ? 'bg-indigo-50 font-semibold text-indigo-800' : 'bg-transparent text-slate-500 hover:bg-slate-50'}`}
+                                                                        placeholder={current > 0 ? new Intl.NumberFormat('es-ES').format(current) : '—'}
                                                                     />
                                                                 </div>
                                                             </td>

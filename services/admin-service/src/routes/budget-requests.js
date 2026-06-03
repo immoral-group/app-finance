@@ -26,27 +26,30 @@ function emailBase(title, content) {
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; margin: 0; padding: 24px; }
         .card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; max-width: 600px; margin: 0 auto; overflow: hidden; }
-        .header { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 24px 28px; }
-        .header h1 { color: white; margin: 0; font-size: 18px; font-weight: 700; }
-        .header p { color: #c7d2fe; margin: 4px 0 0; font-size: 13px; }
+        .header { background-color: #4f46e5; padding: 24px 28px; }
+        .header h1 { color: #ffffff; margin: 0; font-size: 18px; font-weight: 700; }
+        .header p { color: #e0e7ff; margin: 6px 0 0; font-size: 13px; }
         .body { padding: 24px 28px; }
-        .kv { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
-        .kv:last-child { border-bottom: none; }
+        .kv { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+        .kv:last-of-type { border-bottom: none; }
         .kv .label { color: #64748b; }
-        .kv .value { font-weight: 600; color: #1e293b; }
-        .diff-up { color: #16a34a; }
-        .diff-down { color: #dc2626; }
+        .kv .value { font-weight: 600; color: #1e293b; text-align: right; }
+        .diff-up { color: #16a34a !important; }
+        .diff-down { color: #dc2626 !important; }
         table.changes { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 16px; }
         table.changes th { background: #f8fafc; padding: 8px 10px; text-align: left; font-weight: 600; color: #475569; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; }
-        table.changes td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+        table.changes td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; vertical-align: middle; }
         table.changes tr:last-child td { border-bottom: none; }
-        .btn { display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 11px 22px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-top: 20px; }
+        .btn { display: inline-block; background-color: #4f46e5; color: #ffffff !important; text-decoration: none; padding: 11px 22px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-top: 20px; }
         .footer { padding: 16px 28px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
     </style></head><body>
     <div class="card">
-        <div class="header"><h1>${title}</h1>${content.subtitle ? `<p>${content.subtitle}</p>` : ''}</div>
+        <div class="header">
+            <h1>${title}</h1>
+            ${content.subtitle ? `<p>${content.subtitle}</p>` : ''}
+        </div>
         <div class="body">${content.body}</div>
-        <div class="footer">App Finance · Immoral Marketing Group</div>
+        <div class="footer">App Finance &middot; Immoral Marketing Group</div>
     </div></body></html>`;
 }
 
@@ -165,7 +168,7 @@ router.post('/', async (req, res) => {
         const link = solicitudesUrl(deptCodeFromLabel(dept));
         await sendEmail({
             to: ADMIN_EMAIL,
-            subject: `[Solicitud Presupuesto] ${dept} — ${item} (${MONTHS[month_idx]} ${fiscal_year})`,
+            subject: `Solicitud de presupuesto · ${dept} · ${item} (${MONTHS[month_idx]} ${fiscal_year})`,
             html: emailBase(`Solicitud de cambio de presupuesto`, {
                 subtitle: `${dept} · ${fiscal_year}`,
                 body: `
@@ -173,7 +176,7 @@ router.post('/', async (req, res) => {
                     <div class="kv"><span class="label">Categoría</span><span class="value">${category}</span></div>
                     <div class="kv"><span class="label">Item</span><span class="value">${item}</span></div>
                     <div class="kv"><span class="label">Mes</span><span class="value">${MONTHS[month_idx]} ${fiscal_year}</span></div>
-                    <div class="kv"><span class="label">Presupuesto actual</span><span class="value">${fmtEur(current_value)}</span></div>
+                    <div class="kv"><span class="label">Presupuesto actual</span><span class="value">${current_value > 0 ? fmtEur(current_value) : '<span style="color:#94a3b8">Sin presupuesto asignado</span>'}</span></div>
                     <div class="kv"><span class="label">Valor solicitado</span><span class="value">${fmtEur(requested_value)}</span></div>
                     <div class="kv"><span class="label">Diferencia</span><span class="value ${diff >= 0 ? 'diff-up' : 'diff-down'}">${diffStr}</span></div>
                     ${reason ? `<div class="kv"><span class="label">Motivo</span><span class="value">${reason}</span></div>` : ''}
@@ -254,7 +257,7 @@ router.post('/bulk', async (req, res) => {
                 <td>${r.category}</td>
                 <td><strong>${r.item}</strong></td>
                 <td>${MONTHS[r.month_idx]}</td>
-                <td style="text-align:right;color:#94a3b8">${fmtEur(r.current_value)}</td>
+                <td style="text-align:right;color:#94a3b8">${r.current_value > 0 ? fmtEur(r.current_value) : '—'}</td>
                 <td style="text-align:right;font-weight:700;color:#4f46e5">${fmtEur(r.requested_value)}</td>
                 <td style="text-align:right;color:${d >= 0 ? '#16a34a' : '#dc2626'};font-weight:600">${d > 0 ? '+' : ''}${fmtEur(d)}</td>
                 <td style="color:#64748b;font-style:italic">${r.reason ? `"${r.reason}"` : '—'}</td>
@@ -263,7 +266,7 @@ router.post('/bulk', async (req, res) => {
 
         await sendEmail({
             to: ADMIN_EMAIL,
-            subject: `[Solicitud Presupuesto] ${dept} — ${rows.length} cambio(s) · ${fiscal_year}`,
+            subject: `Solicitud de presupuesto · ${dept} · ${rows.length} cambio${rows.length !== 1 ? 's' : ''} (${fiscal_year})`,
             html: emailBase(`${rows.length} solicitud${rows.length !== 1 ? 'es' : ''} de cambio de presupuesto`, {
                 subtitle: `${dept} · ${fiscal_year} · Solicitado por ${requested_by_email || 'N/A'}`,
                 body: `
