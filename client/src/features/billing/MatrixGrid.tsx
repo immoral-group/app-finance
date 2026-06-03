@@ -761,16 +761,16 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                             <th className="px-2 py-1 text-center min-w-[80px] font-bold bg-slate-100" rowSpan={2}>TOTAL</th>
                         </tr>
                         <tr className="border-b bg-gray-50 text-xs text-center">
-                            <th className="px-2 py-1 border-r min-w-[80px]">Inversión</th>
-                            <th className="px-2 py-1 border-r min-w-[60px]">% Fee</th>
-                            <th className="px-2 py-1 border-r min-w-[45px]">Nº Plat</th>
-                            <th className="px-2 py-1 border-r min-w-[80px]">Fee Mínimo</th>
+                            <th className="px-2 py-1 border-r min-w-[80px] text-center">Inversión</th>
+                            <th className="px-2 py-1 border-r min-w-[60px] text-center">% Fee</th>
+                            <th className="px-2 py-1 border-r min-w-[45px] text-center">Nº Plat</th>
+                            <th className="px-2 py-1 border-r min-w-[80px] text-center">Fee Mínimo</th>
                             {allServiceCols.map((c: any) => (
-                                <th key={c.id} className="px-1.5 py-1 border-r min-w-[90px] font-medium text-muted-foreground whitespace-normal h-12 align-bottom pb-1.5">{c.name}</th>
+                                <th key={c.id} className="px-1.5 py-1 border-r min-w-[90px] font-medium text-muted-foreground whitespace-normal h-12 align-bottom pb-1.5 text-center">{c.name}</th>
                             ))}
                             {/* Virtual Horas/Otros header when not in DB */}
                             {!hasHorasInDB && (
-                                <th className="px-1.5 py-1 border-r min-w-[90px] font-medium text-muted-foreground whitespace-normal h-12 align-bottom pb-1.5">Horas / Otros</th>
+                                <th className="px-1.5 py-1 border-r min-w-[90px] font-medium text-muted-foreground whitespace-normal h-12 align-bottom pb-1.5 text-center">Horas / Otros</th>
                             )}
                         </tr>
                     </thead>
