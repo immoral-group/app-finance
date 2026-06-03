@@ -9,6 +9,46 @@ const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'administracion@immoral.es';
+const APP_URL = process.env.APP_URL || 'https://app-finance.vercel.app';
+
+function solicitudesUrl(deptCode) {
+    return `${APP_URL}/departamentos/${deptCode}?tab=Solicitudes`;
+}
+
+function deptCodeFromLabel(dept) {
+    const map = { Immedia: 'immedia', Imcontent: 'imcontent', Immoralia: 'immoralia', Imsales: 'imsales' };
+    return map[dept] || dept.toLowerCase();
+}
+
+function emailBase(title, content) {
+    return `
+    <!DOCTYPE html><html><head><meta charset="UTF-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; margin: 0; padding: 24px; }
+        .card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; max-width: 600px; margin: 0 auto; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 24px 28px; }
+        .header h1 { color: white; margin: 0; font-size: 18px; font-weight: 700; }
+        .header p { color: #c7d2fe; margin: 4px 0 0; font-size: 13px; }
+        .body { padding: 24px 28px; }
+        .kv { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+        .kv:last-child { border-bottom: none; }
+        .kv .label { color: #64748b; }
+        .kv .value { font-weight: 600; color: #1e293b; }
+        .diff-up { color: #16a34a; }
+        .diff-down { color: #dc2626; }
+        table.changes { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 16px; }
+        table.changes th { background: #f8fafc; padding: 8px 10px; text-align: left; font-weight: 600; color: #475569; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; }
+        table.changes td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+        table.changes tr:last-child td { border-bottom: none; }
+        .btn { display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 11px 22px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-top: 20px; }
+        .footer { padding: 16px 28px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
+    </style></head><body>
+    <div class="card">
+        <div class="header"><h1>${title}</h1>${content.subtitle ? `<p>${content.subtitle}</p>` : ''}</div>
+        <div class="body">${content.body}</div>
+        <div class="footer">App Finance · Immoral Marketing Group</div>
+    </div></body></html>`;
+}
 
 // ── Email ─────────────────────────────────────────────────────────────────────
 
@@ -120,19 +160,27 @@ router.post('/', async (req, res) => {
         }
 
         // Email to admin
+        const diff = requested_value - (current_value ?? 0);
+        const diffStr = `${diff > 0 ? '+' : ''}${fmtEur(diff)}`;
+        const link = solicitudesUrl(deptCodeFromLabel(dept));
         await sendEmail({
             to: ADMIN_EMAIL,
-            subject: `[Solicitud Presupuesto] ${dept} — ${item}`,
-            html: `
-                <p><strong>Departamento:</strong> ${dept}</p>
-                <p><strong>Categoría:</strong> ${category}</p>
-                <p><strong>Item:</strong> ${item}</p>
-                <p><strong>Mes:</strong> ${MONTHS[month_idx]} ${fiscal_year}</p>
-                <p><strong>Valor actual:</strong> ${fmtEur(current_value)}</p>
-                <p><strong>Valor solicitado:</strong> ${fmtEur(requested_value)}</p>
-                ${reason ? `<p><strong>Motivo:</strong> ${reason}</p>` : ''}
-                <p><strong>Solicitado por:</strong> ${requested_by_email || 'N/A'}</p>
-            `,
+            subject: `[Solicitud Presupuesto] ${dept} — ${item} (${MONTHS[month_idx]} ${fiscal_year})`,
+            html: emailBase(`Solicitud de cambio de presupuesto`, {
+                subtitle: `${dept} · ${fiscal_year}`,
+                body: `
+                    <div class="kv"><span class="label">Departamento</span><span class="value">${dept}</span></div>
+                    <div class="kv"><span class="label">Categoría</span><span class="value">${category}</span></div>
+                    <div class="kv"><span class="label">Item</span><span class="value">${item}</span></div>
+                    <div class="kv"><span class="label">Mes</span><span class="value">${MONTHS[month_idx]} ${fiscal_year}</span></div>
+                    <div class="kv"><span class="label">Presupuesto actual</span><span class="value">${fmtEur(current_value)}</span></div>
+                    <div class="kv"><span class="label">Valor solicitado</span><span class="value">${fmtEur(requested_value)}</span></div>
+                    <div class="kv"><span class="label">Diferencia</span><span class="value ${diff >= 0 ? 'diff-up' : 'diff-down'}">${diffStr}</span></div>
+                    ${reason ? `<div class="kv"><span class="label">Motivo</span><span class="value">${reason}</span></div>` : ''}
+                    <div class="kv"><span class="label">Solicitado por</span><span class="value">${requested_by_email || 'N/A'}</span></div>
+                    <a href="${link}" class="btn">Revisar solicitud →</a>
+                `,
+            }),
         });
 
         res.json({ request: data });
@@ -199,27 +247,39 @@ router.post('/bulk', async (req, res) => {
         }
 
         // Summary email to admin
-        const tableRows = rows.map(r => `
-            <tr>
+        const link = solicitudesUrl(deptCodeFromLabel(dept));
+        const tableRows = rows.map(r => {
+            const d = r.requested_value - (r.current_value ?? 0);
+            return `<tr>
                 <td>${r.category}</td>
-                <td>${r.item}</td>
+                <td><strong>${r.item}</strong></td>
                 <td>${MONTHS[r.month_idx]}</td>
-                <td>${fmtEur(r.current_value)}</td>
-                <td><strong>${fmtEur(r.requested_value)}</strong></td>
-                <td>${r.reason || ''}</td>
-            </tr>`).join('');
+                <td style="text-align:right;color:#94a3b8">${fmtEur(r.current_value)}</td>
+                <td style="text-align:right;font-weight:700;color:#4f46e5">${fmtEur(r.requested_value)}</td>
+                <td style="text-align:right;color:${d >= 0 ? '#16a34a' : '#dc2626'};font-weight:600">${d > 0 ? '+' : ''}${fmtEur(d)}</td>
+                <td style="color:#64748b;font-style:italic">${r.reason ? `"${r.reason}"` : '—'}</td>
+            </tr>`;
+        }).join('');
 
         await sendEmail({
             to: ADMIN_EMAIL,
-            subject: `[Solicitud Presupuesto] ${dept} — ${rows.length} cambio(s) ${fiscal_year}`,
-            html: `
-                <p>El departamento <strong>${dept}</strong> ha enviado ${rows.length} solicitud(es) de cambio de presupuesto para ${fiscal_year}.</p>
-                <p><strong>Solicitado por:</strong> ${requested_by_email || 'N/A'}</p>
-                <table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-size:13px">
-                    <thead><tr><th>Categoría</th><th>Item</th><th>Mes</th><th>Actual</th><th>Solicitado</th><th>Motivo</th></tr></thead>
-                    <tbody>${tableRows}</tbody>
-                </table>
-            `,
+            subject: `[Solicitud Presupuesto] ${dept} — ${rows.length} cambio(s) · ${fiscal_year}`,
+            html: emailBase(`${rows.length} solicitud${rows.length !== 1 ? 'es' : ''} de cambio de presupuesto`, {
+                subtitle: `${dept} · ${fiscal_year} · Solicitado por ${requested_by_email || 'N/A'}`,
+                body: `
+                    <table class="changes">
+                        <thead><tr>
+                            <th>Categoría</th><th>Item</th><th>Mes</th>
+                            <th style="text-align:right">Actual</th>
+                            <th style="text-align:right">Solicitado</th>
+                            <th style="text-align:right">Diferencia</th>
+                            <th>Motivo</th>
+                        </tr></thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                    <a href="${link}" class="btn">Revisar y aprobar →</a>
+                `,
+            }),
         });
 
         res.json({ requests: data, count: data.length });
@@ -305,16 +365,21 @@ router.patch('/:id/approve', async (req, res) => {
         }
 
         if (req_data.requested_by_email) {
+            const link = solicitudesUrl(deptCodeFromLabel(req_data.dept));
             await sendEmail({
                 to: req_data.requested_by_email,
-                subject: `[Presupuesto Aprobado] ${req_data.dept} — ${req_data.item}`,
-                html: `
-                    <p>Tu solicitud de cambio de presupuesto ha sido <strong style="color:green">aprobada</strong>.</p>
-                    <p><strong>Item:</strong> ${req_data.item}</p>
-                    <p><strong>Mes:</strong> ${MONTHS[req_data.month_idx]} ${req_data.fiscal_year}</p>
-                    <p><strong>Nuevo valor:</strong> ${fmtEur(req_data.requested_value)}</p>
-                    ${review_notes ? `<p><strong>Nota:</strong> ${review_notes}</p>` : ''}
-                `,
+                subject: `✅ Presupuesto aprobado — ${req_data.item} (${MONTHS[req_data.month_idx]} ${req_data.fiscal_year})`,
+                html: emailBase('Solicitud de presupuesto aprobada ✅', {
+                    subtitle: `${req_data.dept} · ${req_data.fiscal_year}`,
+                    body: `
+                        <p style="color:#16a34a;font-weight:600;font-size:14px;margin-bottom:16px">Tu solicitud ha sido aprobada y el presupuesto actualizado.</p>
+                        <div class="kv"><span class="label">Item</span><span class="value">${req_data.item}</span></div>
+                        <div class="kv"><span class="label">Mes</span><span class="value">${MONTHS[req_data.month_idx]} ${req_data.fiscal_year}</span></div>
+                        <div class="kv"><span class="label">Nuevo valor</span><span class="value diff-up">${fmtEur(req_data.requested_value)}</span></div>
+                        ${review_notes ? `<div class="kv"><span class="label">Nota del revisor</span><span class="value">${review_notes}</span></div>` : ''}
+                        <a href="${link}" class="btn">Ver en la app →</a>
+                    `,
+                }),
             });
         }
 
@@ -369,16 +434,21 @@ router.patch('/:id/reject', async (req, res) => {
         }
 
         if (req_data.requested_by_email) {
+            const link = solicitudesUrl(deptCodeFromLabel(req_data.dept));
             await sendEmail({
                 to: req_data.requested_by_email,
-                subject: `[Presupuesto Rechazado] ${req_data.dept} — ${req_data.item}`,
-                html: `
-                    <p>Tu solicitud de cambio de presupuesto ha sido <strong style="color:red">rechazada</strong>.</p>
-                    <p><strong>Item:</strong> ${req_data.item}</p>
-                    <p><strong>Mes:</strong> ${MONTHS[req_data.month_idx]} ${req_data.fiscal_year}</p>
-                    <p><strong>Valor solicitado:</strong> ${fmtEur(req_data.requested_value)}</p>
-                    ${review_notes ? `<p><strong>Motivo:</strong> ${review_notes}</p>` : ''}
-                `,
+                subject: `❌ Solicitud rechazada — ${req_data.item} (${MONTHS[req_data.month_idx]} ${req_data.fiscal_year})`,
+                html: emailBase('Solicitud de presupuesto rechazada', {
+                    subtitle: `${req_data.dept} · ${req_data.fiscal_year}`,
+                    body: `
+                        <p style="color:#dc2626;font-weight:600;font-size:14px;margin-bottom:16px">Tu solicitud no ha sido aprobada.</p>
+                        <div class="kv"><span class="label">Item</span><span class="value">${req_data.item}</span></div>
+                        <div class="kv"><span class="label">Mes</span><span class="value">${MONTHS[req_data.month_idx]} ${req_data.fiscal_year}</span></div>
+                        <div class="kv"><span class="label">Valor solicitado</span><span class="value">${fmtEur(req_data.requested_value)}</span></div>
+                        ${review_notes ? `<div class="kv"><span class="label">Motivo del rechazo</span><span class="value" style="color:#dc2626">${review_notes}</span></div>` : ''}
+                        <a href="${link}" class="btn" style="background:#64748b">Ver en la app →</a>
+                    `,
+                }),
             });
         }
 

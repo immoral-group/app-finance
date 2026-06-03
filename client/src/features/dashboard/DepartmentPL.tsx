@@ -1777,8 +1777,8 @@ export default function DepartmentPL() {
         `${section}|||${dept}|||${item}|||${monthIdx}`;
 
     const getBudgetCellValue = (section: string, dept: string, item: string, monthIdx: number) => {
-        const key = `${section}-${dept}-${item}-${monthIdx}-budget`;
-        return cellValues[key] ?? 0;
+        const key = `${section}-${dept}-${item}-${monthIdx}`;
+        return compBudgetValues[key] ?? 0;
     };
 
     const getDraftValue = (section: string, dept: string, item: string, monthIdx: number) => {
@@ -1825,50 +1825,66 @@ export default function DepartmentPL() {
         const fmtEur = (v: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v ?? 0);
 
         const statusBadge = (status: string) => {
-            if (status === 'approved') return <span className="px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700 font-medium">Aprobado</span>;
-            if (status === 'rejected') return <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 font-medium">Rechazado</span>;
-            return <span className="px-2 py-0.5 rounded-full text-xs bg-yellow-100 text-yellow-700 font-medium">Pendiente</span>;
+            if (status === 'approved') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700 font-medium"><Check size={10} />Aprobado</span>;
+            if (status === 'rejected') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 font-medium"><X size={10} />Rechazado</span>;
+            return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700 font-medium">⏳ Pendiente</span>;
         };
 
         const isAdmin = isSuperAdmin();
         const draftCount = Object.keys(draftEdits).length;
+        const currentYear = new Date().getFullYear();
+        const currentMonth = new Date().getMonth(); // 0-indexed
+        const isPastYear = year < currentYear;
 
-        // Build rows: dept revenue + expense categories
-        const solicitudRows: { section: string; category: string; dept: string; item: string }[] = [];
+        const isMonthLocked = (mIdx: number) => isPastYear || (year === currentYear && mIdx < currentMonth);
 
-        deptRevenue.forEach(group => {
-            (group.services || []).forEach((item: string) => {
-                solicitudRows.push({ section: 'revenue', category: 'Ingresos', dept: group.dept, item });
-            });
-        });
+        // Secciones agrupadas por categoría: ingresos + cada categoría de gastos
+        type SolicitudSection = {
+            key: string;
+            label: string;
+            color: string;
+            headerBg: string;
+            rows: { section: string; dept: string; item: string }[];
+        };
+
+        const sections: SolicitudSection[] = [];
+
+        const revRows = deptRevenue.flatMap(group =>
+            (group.services || []).map((item: string) => ({ section: 'revenue', dept: group.dept, item }))
+        );
+        if (revRows.length > 0) sections.push({ key: 'revenue', label: 'INGRESOS DE EXPLOTACIÓN', color: 'text-purple-800', headerBg: 'bg-purple-100 border-purple-300', rows: revRows });
 
         expCats.forEach(cat => {
-            cat.items.forEach((group: { dept: string; items: string[] }) => {
-                group.items.forEach((item: string) => {
-                    solicitudRows.push({ section: cat.key, category: cat.label, dept: group.dept, item });
-                });
-            });
+            const rows = cat.items.flatMap((group: { dept: string; items: string[] }) =>
+                group.items.map((item: string) => ({ section: cat.key, dept: group.dept, item }))
+            );
+            if (rows.length > 0) {
+                sections.push({ key: cat.key, label: cat.label.toUpperCase(), color: 'text-orange-800', headerBg: 'bg-orange-50 border-orange-200', rows });
+            }
         });
 
         return (
-            <div className="px-4 pb-8 space-y-6">
-                {/* ── Admin review panel ── */}
-                {isAdmin && budgetRequests.length > 0 && (
+            <div className="px-4 pb-10 space-y-6 max-w-screen-2xl mx-auto">
+
+                {/* ── Panel de revisión (admin) ── */}
+                {isAdmin && (
                     <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-                        <div className="px-5 py-3 border-b bg-gray-50 flex items-center justify-between">
-                            <h2 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
-                                <ClipboardList size={15} />
-                                Solicitudes de {deptLabel} — {year}
-                                {pendingRequests.length > 0 && (
-                                    <span className="ml-1 px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 text-xs font-medium">
-                                        {pendingRequests.length} pendiente(s)
-                                    </span>
-                                )}
-                            </h2>
+                        <div className="px-5 py-3 border-b bg-gradient-to-r from-slate-50 to-white flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-1.5 bg-slate-100 rounded-lg">
+                                    <ClipboardList size={15} className="text-slate-600" />
+                                </div>
+                                <div>
+                                    <h2 className="font-semibold text-slate-800 text-sm">Revisión de solicitudes — {deptLabel} {year}</h2>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                        {budgetRequests.length === 0 ? 'Sin solicitudes' : `${budgetRequests.length} solicitud(es) · ${pendingRequests.length} pendiente(s)`}
+                                    </p>
+                                </div>
+                            </div>
                             {pendingRequests.length > 0 && (
                                 <Button
                                     size="sm"
-                                    className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
+                                    className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white gap-1.5 shadow-sm"
                                     onClick={() => approveDeptMutation.mutate()}
                                     disabled={approveDeptMutation.isPending}
                                 >
@@ -1877,197 +1893,263 @@ export default function DepartmentPL() {
                                 </Button>
                             )}
                         </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-xs">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th className="px-3 py-2 text-left font-medium text-gray-600">Categoría</th>
-                                        <th className="px-3 py-2 text-left font-medium text-gray-600">Item</th>
-                                        <th className="px-3 py-2 text-center font-medium text-gray-600">Mes</th>
-                                        <th className="px-3 py-2 text-right font-medium text-gray-600">Actual</th>
-                                        <th className="px-3 py-2 text-right font-medium text-gray-600">Solicitado</th>
-                                        <th className="px-3 py-2 text-left font-medium text-gray-600">Motivo</th>
-                                        <th className="px-3 py-2 text-center font-medium text-gray-600">Estado</th>
-                                        <th className="px-3 py-2 text-center font-medium text-gray-600">Acción</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {budgetRequests.map(req => (
-                                        <tr key={req.id} className="border-t hover:bg-gray-50">
-                                            <td className="px-3 py-2 text-gray-700">{req.category}</td>
-                                            <td className="px-3 py-2 font-medium text-gray-900">{req.item}</td>
-                                            <td className="px-3 py-2 text-center text-gray-600">{MONTHS[req.month_idx]}</td>
-                                            <td className="px-3 py-2 text-right tabular-nums text-gray-500">{fmtEur(req.current_value)}</td>
-                                            <td className="px-3 py-2 text-right tabular-nums font-semibold text-indigo-700">{fmtEur(req.requested_value)}</td>
-                                            <td className="px-3 py-2 text-gray-500 max-w-[200px] truncate">{req.reason || '—'}</td>
-                                            <td className="px-3 py-2 text-center">{statusBadge(req.status)}</td>
-                                            <td className="px-3 py-2">
-                                                {req.status === 'pending' && (
-                                                    <div className="flex items-center justify-center gap-1">
-                                                        <button
-                                                            className="p-1 rounded hover:bg-green-50 text-green-600"
-                                                            title="Aprobar"
-                                                            onClick={() => approveMutation.mutate(req.id)}
-                                                            disabled={approveMutation.isPending}
-                                                        >
-                                                            <Check size={14} />
-                                                        </button>
-                                                        {rejectNoteId === req.id ? (
-                                                            <div className="flex items-center gap-1">
-                                                                <input
-                                                                    type="text"
-                                                                    placeholder="Motivo..."
-                                                                    value={rejectNote}
-                                                                    onChange={e => setRejectNote(e.target.value)}
-                                                                    className="text-xs border rounded px-1 py-0.5 w-24"
-                                                                    autoFocus
-                                                                />
-                                                                <button
-                                                                    className="p-1 rounded hover:bg-red-50 text-red-600"
-                                                                    onClick={() => rejectMutation.mutate({ id: req.id, notes: rejectNote })}
-                                                                >
-                                                                    <Check size={12} />
-                                                                </button>
-                                                                <button
-                                                                    className="p-1 rounded hover:bg-gray-100 text-gray-500"
-                                                                    onClick={() => setRejectNoteId(null)}
-                                                                >
-                                                                    <X size={12} />
-                                                                </button>
-                                                            </div>
-                                                        ) : (
-                                                            <button
-                                                                className="p-1 rounded hover:bg-red-50 text-red-600"
-                                                                title="Rechazar"
-                                                                onClick={() => setRejectNoteId(req.id)}
-                                                            >
-                                                                <X size={14} />
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                )}
-                                                {req.status !== 'pending' && (
-                                                    <span className="text-gray-400 text-[10px]">{req.review_notes || ''}</span>
-                                                )}
-                                            </td>
+
+                        {budgetRequestsLoading && (
+                            <div className="px-5 py-6 text-center text-sm text-slate-400">Cargando...</div>
+                        )}
+
+                        {!budgetRequestsLoading && budgetRequests.length === 0 && (
+                            <div className="px-5 py-8 text-center text-sm text-slate-400">
+                                No hay solicitudes para {deptLabel} en {year}.
+                            </div>
+                        )}
+
+                        {budgetRequests.length > 0 && (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                    <thead>
+                                        <tr className="bg-slate-50 border-b border-slate-200">
+                                            <th className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Categoría</th>
+                                            <th className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Item</th>
+                                            <th className="px-4 py-2.5 text-center font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Mes</th>
+                                            <th className="px-4 py-2.5 text-right font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Presupuesto actual</th>
+                                            <th className="px-4 py-2.5 text-right font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Valor solicitado</th>
+                                            <th className="px-4 py-2.5 text-right font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Diferencia</th>
+                                            <th className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Motivo</th>
+                                            <th className="px-4 py-2.5 text-center font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Estado</th>
+                                            <th className="px-4 py-2.5 text-center font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Acción</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-
-                {budgetRequestsLoading && (
-                    <div className="text-center text-gray-400 py-8 text-sm">Cargando solicitudes...</div>
-                )}
-
-                {/* ── Draft editor for dept heads (and admins) ── */}
-                <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-                    <div className="px-5 py-3 border-b bg-gray-50 flex items-center justify-between">
-                        <h2 className="font-semibold text-gray-800 text-sm">
-                            Solicitar cambios de presupuesto — {deptLabel} {year}
-                        </h2>
-                        <div className="flex items-center gap-2">
-                            {draftCount > 0 && (
-                                <span className="text-xs text-indigo-600 font-medium">
-                                    {draftCount} cambio(s) pendiente(s) de envío
-                                </span>
-                            )}
-                            {submitSuccess && (
-                                <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-                                    <Check size={12} /> Enviado
-                                </span>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="p-4 space-y-3">
-                        <p className="text-xs text-gray-500">
-                            Edita los valores de presupuesto que deseas solicitar. Los cambios no se aplicarán hasta que un administrador los apruebe.
-                        </p>
-
-                        <div className="overflow-x-auto">
-                            <table className="w-full border-collapse text-xs" style={{ minWidth: '1100px' }}>
-                                <thead>
-                                    <tr className="bg-gray-50">
-                                        <th className="border border-gray-200 px-2 py-1.5 text-left font-medium text-gray-600" style={{ width: '100px' }}>Categoría</th>
-                                        <th className="border border-gray-200 px-2 py-1.5 text-left font-medium text-gray-600" style={{ width: '150px' }}>Item</th>
-                                        {MONTHS.map((m, i) => (
-                                            <th key={i} className="border border-gray-200 px-1 py-1.5 text-center font-medium text-gray-600" style={{ minWidth: '70px' }}>
-                                                {m.substring(0, 3)}
-                                            </th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {solicitudRows.map((row, rowIdx) => (
-                                        <tr key={rowIdx} className="hover:bg-indigo-50/30">
-                                            <td className="border border-gray-100 px-2 py-1 text-gray-500">{row.category}</td>
-                                            <td className="border border-gray-100 px-2 py-1 font-medium text-gray-800">{row.item}</td>
-                                            {MONTHS.map((_, mIdx) => {
-                                                const current = getBudgetCellValue(row.section, row.dept, row.item, mIdx);
-                                                const k = draftKey(row.section, row.dept, row.item, mIdx);
-                                                const isDirty = k in draftEdits && draftEdits[k] !== current;
-                                                return (
-                                                    <td key={mIdx} className={`border px-0.5 py-0.5 ${isDirty ? 'border-indigo-400 bg-indigo-50' : 'border-gray-100'}`}>
-                                                        <input
-                                                            type="number"
-                                                            value={getDraftValue(row.section, row.dept, row.item, mIdx) || ''}
-                                                            onChange={e => {
-                                                                const v = parseFloat(e.target.value) || 0;
-                                                                setDraftValue(row.section, row.dept, row.item, mIdx, v);
-                                                            }}
-                                                            onBlur={e => {
-                                                                const v = parseFloat(e.target.value) || 0;
-                                                                if (v === current) clearDraft(row.section, row.dept, row.item, mIdx);
-                                                            }}
-                                                            className="w-full text-right px-1 py-0.5 text-xs bg-transparent focus:outline-none focus:bg-white rounded tabular-nums"
-                                                            placeholder="0"
-                                                        />
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {budgetRequests.map(req => {
+                                            const diff = req.requested_value - req.current_value;
+                                            return (
+                                                <tr key={req.id} className={`hover:bg-slate-50 transition-colors ${req.status === 'approved' ? 'opacity-60' : ''}`}>
+                                                    <td className="px-4 py-2.5">
+                                                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-medium">{req.category}</span>
                                                     </td>
-                                                );
-                                            })}
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {draftCount > 0 && (
-                            <div className="flex items-end gap-3 pt-2 border-t">
-                                <div className="flex-1">
-                                    <label className="text-xs font-medium text-gray-700 mb-1 block">Motivo de la solicitud (opcional)</label>
-                                    <textarea
-                                        value={requestReason}
-                                        onChange={e => setRequestReason(e.target.value)}
-                                        placeholder="Explica brevemente el motivo de los cambios..."
-                                        className="w-full text-xs border rounded px-2 py-1.5 h-16 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                                    />
-                                </div>
-                                <div className="flex flex-col gap-2">
-                                    <Button
-                                        size="sm"
-                                        className="h-8 text-xs bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
-                                        onClick={handleSubmitRequests}
-                                        disabled={submitBudgetRequestsMutation.isPending}
-                                    >
-                                        <Send size={12} />
-                                        Enviar solicitud ({draftCount} cambio{draftCount !== 1 ? 's' : ''})
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 text-xs text-gray-500 gap-1"
-                                        onClick={() => setDraftEdits({})}
-                                    >
-                                        <Trash2 size={11} />
-                                        Limpiar
-                                    </Button>
-                                </div>
+                                                    <td className="px-4 py-2.5 font-medium text-slate-800">{req.item}</td>
+                                                    <td className="px-4 py-2.5 text-center text-slate-500">{MONTHS[req.month_idx]}</td>
+                                                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-400">{fmtEur(req.current_value)}</td>
+                                                    <td className="px-4 py-2.5 text-right tabular-nums font-bold text-indigo-700">{fmtEur(req.requested_value)}</td>
+                                                    <td className={`px-4 py-2.5 text-right tabular-nums font-medium ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                                                        {diff > 0 ? '+' : ''}{fmtEur(diff)}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-slate-500 max-w-[180px]">
+                                                        {req.reason ? (
+                                                            <span className="italic truncate block" title={req.reason}>"{req.reason}"</span>
+                                                        ) : <span className="text-slate-300">—</span>}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-center">{statusBadge(req.status)}</td>
+                                                    <td className="px-4 py-2.5">
+                                                        {req.status === 'pending' && (
+                                                            <div className="flex items-center justify-center gap-1">
+                                                                <button
+                                                                    className="flex items-center gap-0.5 px-2 py-1 rounded-md bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-medium border border-green-200 transition-colors"
+                                                                    onClick={() => approveMutation.mutate(req.id)}
+                                                                    disabled={approveMutation.isPending}
+                                                                >
+                                                                    <Check size={11} /> Aprobar
+                                                                </button>
+                                                                {rejectNoteId === req.id ? (
+                                                                    <div className="flex items-center gap-1">
+                                                                        <input
+                                                                            type="text"
+                                                                            placeholder="Motivo rechazo..."
+                                                                            value={rejectNote}
+                                                                            onChange={e => setRejectNote(e.target.value)}
+                                                                            className="text-xs border border-red-200 rounded px-1.5 py-0.5 w-28 focus:outline-none focus:ring-1 focus:ring-red-300"
+                                                                            autoFocus
+                                                                            onKeyDown={e => {
+                                                                                if (e.key === 'Enter') rejectMutation.mutate({ id: req.id, notes: rejectNote });
+                                                                                if (e.key === 'Escape') setRejectNoteId(null);
+                                                                            }}
+                                                                        />
+                                                                        <button className="p-1 text-red-600 hover:bg-red-50 rounded" onClick={() => rejectMutation.mutate({ id: req.id, notes: rejectNote })}>
+                                                                            <Check size={11} />
+                                                                        </button>
+                                                                        <button className="p-1 text-slate-400 hover:bg-slate-100 rounded" onClick={() => setRejectNoteId(null)}>
+                                                                            <X size={11} />
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <button
+                                                                        className="flex items-center gap-0.5 px-2 py-1 rounded-md bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-medium border border-red-200 transition-colors"
+                                                                        onClick={() => setRejectNoteId(req.id)}
+                                                                    >
+                                                                        <X size={11} /> Rechazar
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                        {req.status !== 'pending' && req.review_notes && (
+                                                            <span className="text-slate-400 text-[10px] italic">"{req.review_notes}"</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </div>
+                )}
+
+                {/* ── Editor de borrador ── */}
+                <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+                    <div className="px-5 py-3 border-b bg-gradient-to-r from-indigo-50 to-white flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="p-1.5 bg-indigo-100 rounded-lg">
+                                <Send size={14} className="text-indigo-600" />
+                            </div>
+                            <div>
+                                <h2 className="font-semibold text-slate-800 text-sm">Nueva solicitud de cambio — {deptLabel} {year}</h2>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                    Modifica los valores deseados. Los meses pasados están bloqueados.
+                                    {isPastYear && <span className="ml-1 text-amber-500 font-medium">Año pasado — solo lectura.</span>}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {draftCount > 0 && (
+                                <span className="px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
+                                    {draftCount} cambio{draftCount !== 1 ? 's' : ''} sin enviar
+                                </span>
+                            )}
+                            {submitSuccess && (
+                                <span className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold">
+                                    <Check size={11} /> Solicitud enviada
+                                </span>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full border-collapse text-xs" style={{ minWidth: '1200px' }}>
+                            <thead className="sticky top-0 z-10">
+                                <tr className="bg-slate-100 border-b border-slate-300">
+                                    <th className="border-r border-slate-200 px-3 py-2 text-left font-semibold text-slate-600 text-[10px] uppercase tracking-wide" style={{ width: '140px' }}>Item</th>
+                                    {MONTHS.map((m, i) => {
+                                        const locked = isMonthLocked(i);
+                                        return (
+                                            <th key={i} className={`px-1 py-2 text-center font-semibold text-[10px] uppercase tracking-wide ${locked ? 'text-slate-300 bg-slate-50' : 'text-slate-600'}`} style={{ minWidth: '72px' }}>
+                                                {m.substring(0, 3)}
+                                                {locked && <span className="block text-[8px] font-normal text-slate-300">🔒</span>}
+                                            </th>
+                                        );
+                                    })}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {sections.map(sec => (
+                                    <React.Fragment key={sec.key}>
+                                        {/* Cabecera de sección */}
+                                        <tr>
+                                            <td colSpan={13} className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest border-t-2 ${sec.headerBg} ${sec.color}`}>
+                                                {sec.label}
+                                            </td>
+                                        </tr>
+                                        {sec.rows.map((row, rowIdx) => {
+                                            const rowHasDraft = MONTHS.some((_, mIdx) => {
+                                                const k = draftKey(row.section, row.dept, row.item, mIdx);
+                                                return k in draftEdits && draftEdits[k] !== getBudgetCellValue(row.section, row.dept, row.item, mIdx);
+                                            });
+                                            return (
+                                                <tr key={rowIdx} className={`border-b border-slate-50 ${rowHasDraft ? 'bg-indigo-50/40' : 'hover:bg-slate-50/60'} transition-colors`}>
+                                                    <td className="border-r border-slate-100 px-3 py-1.5 font-medium text-slate-700 whitespace-nowrap">{row.item}</td>
+                                                    {MONTHS.map((_, mIdx) => {
+                                                        const locked = isMonthLocked(mIdx);
+                                                        const current = getBudgetCellValue(row.section, row.dept, row.item, mIdx);
+                                                        const k = draftKey(row.section, row.dept, row.item, mIdx);
+                                                        const isDirty = k in draftEdits && draftEdits[k] !== current;
+                                                        const displayVal = getDraftValue(row.section, row.dept, row.item, mIdx);
+
+                                                        if (locked) {
+                                                            return (
+                                                                <td key={mIdx} className="px-1 py-1.5 text-right tabular-nums text-slate-300 bg-slate-50/50 select-none" title="Mes cerrado">
+                                                                    {current > 0 ? fmtEur(current) : <span className="text-slate-200">—</span>}
+                                                                </td>
+                                                            );
+                                                        }
+
+                                                        return (
+                                                            <td key={mIdx} className={`px-0.5 py-0.5 ${isDirty ? 'bg-indigo-100 ring-1 ring-inset ring-indigo-300' : ''}`}>
+                                                                <div className="relative group">
+                                                                    {isDirty && (
+                                                                        <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-indigo-500 z-10" />
+                                                                    )}
+                                                                    <input
+                                                                        type="number"
+                                                                        value={displayVal || ''}
+                                                                        onChange={e => {
+                                                                            const v = parseFloat(e.target.value) || 0;
+                                                                            setDraftValue(row.section, row.dept, row.item, mIdx, v);
+                                                                        }}
+                                                                        onFocus={e => { if (!draftEdits[k] && current > 0) e.target.select(); }}
+                                                                        onBlur={e => {
+                                                                            const v = parseFloat(e.target.value) || 0;
+                                                                            if (v === current) clearDraft(row.section, row.dept, row.item, mIdx);
+                                                                        }}
+                                                                        className={`w-full text-right px-1.5 py-1 text-xs focus:outline-none focus:bg-white rounded tabular-nums transition-colors
+                                                                            ${isDirty ? 'bg-indigo-50 font-semibold text-indigo-800' : 'bg-transparent text-slate-600 hover:bg-slate-50'}`}
+                                                                        placeholder={current > 0 ? String(current) : '0'}
+                                                                    />
+                                                                </div>
+                                                            </td>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            );
+                                        })}
+                                    </React.Fragment>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Footer con motivo y envío */}
+                    {!isPastYear && (
+                        <div className="px-5 py-4 border-t bg-slate-50">
+                            {draftCount > 0 ? (
+                                <div className="flex items-end gap-4">
+                                    <div className="flex-1">
+                                        <label className="text-xs font-semibold text-slate-700 mb-1.5 block">Motivo de la solicitud <span className="font-normal text-slate-400">(opcional)</span></label>
+                                        <textarea
+                                            value={requestReason}
+                                            onChange={e => setRequestReason(e.target.value)}
+                                            placeholder="Explica brevemente el motivo de los cambios solicitados..."
+                                            className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 h-16 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-2 shrink-0">
+                                        <Button
+                                            size="sm"
+                                            className="h-9 text-xs bg-indigo-600 hover:bg-indigo-700 text-white gap-2 px-4 shadow-sm"
+                                            onClick={handleSubmitRequests}
+                                            disabled={submitBudgetRequestsMutation.isPending}
+                                        >
+                                            <Send size={12} />
+                                            Enviar {draftCount} solicitud{draftCount !== 1 ? 'es' : ''}
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-9 text-xs text-slate-400 hover:text-slate-600 gap-1.5"
+                                            onClick={() => setDraftEdits({})}
+                                        >
+                                            <Trash2 size={11} />
+                                            Limpiar cambios
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-xs text-slate-400 text-center">
+                                    Edita cualquier celda para comenzar una solicitud de cambio de presupuesto.
+                                </p>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
         );
