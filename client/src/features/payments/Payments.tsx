@@ -377,15 +377,20 @@ export default function Payments() {
         return () => ro.disconnect();
     }, [filteredPayments.length, tab]);
 
+    const isSyncing = useRef(false);
     const syncFromTop = () => {
-        if (tableScrollRef.current && topScrollRef.current) {
+        if (isSyncing.current) return;
+        isSyncing.current = true;
+        if (tableScrollRef.current && topScrollRef.current)
             tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
-        }
+        requestAnimationFrame(() => { isSyncing.current = false; });
     };
     const syncFromBottom = () => {
-        if (tableScrollRef.current && topScrollRef.current) {
+        if (isSyncing.current) return;
+        isSyncing.current = true;
+        if (tableScrollRef.current && topScrollRef.current)
             topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
-        }
+        requestAnimationFrame(() => { isSyncing.current = false; });
     };
 
     return (
