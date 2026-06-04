@@ -48,65 +48,68 @@ const CommentModal = ({ isOpen, onClose, onSave, onStatusChange, initialValue, i
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
-            <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-[450px] p-4 animate-in fade-in zoom-in duration-200 flex flex-col gap-4">
-                <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-lg">{title}</h3>
-                    <button className="p-1 hover:bg-gray-100 rounded" onClick={onClose}><X className="h-4 w-4" /></button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="bg-card rounded-2xl shadow-2xl border border-border w-[90vw] max-w-[440px] flex flex-col gap-0 overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                    <h3 className="text-sm font-bold text-foreground">{title}</h3>
+                    <button className="h-7 w-7 rounded-lg hover:bg-muted flex items-center justify-center transition-colors" onClick={onClose}>
+                        <X className="h-4 w-4 text-muted-foreground" />
+                    </button>
                 </div>
 
-                <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium text-gray-700">Comentario</label>
-                    <textarea
-                        className="w-full h-24 p-2 border rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                        placeholder="Escriba una nota..."
-                        value={value}
-                        onChange={(e) => setValue(e.target.value)}
-                        autoFocus
-                    />
-                </div>
+                <div className="p-5 flex flex-col gap-4">
+                    <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Comentario</label>
+                        <textarea
+                            className="w-full h-24 p-3 border border-border rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm bg-background text-foreground"
+                            placeholder="Escriba una nota..."
+                            value={value}
+                            onChange={(e) => setValue(e.target.value)}
+                            autoFocus
+                        />
+                    </div>
 
-                <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium text-gray-700">Asignar a:</label>
-                    <div className="border rounded-md p-2 max-h-[150px] overflow-y-auto space-y-1">
-                        {users.map(user => (
-                            <div
-                                key={user.id}
-                                className={`flex items-center gap-2 p-1.5 rounded cursor-pointer hover:bg-gray-100 ${assigned.includes(user.id) ? 'bg-blue-50' : ''}`}
-                                onClick={() => toggleUser(user.id)}
-                            >
-                                <div className={`w-4 h-4 rounded border flex items-center justify-center ${assigned.includes(user.id) ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
-                                    {assigned.includes(user.id) && <Check className="h-3 w-3 text-white" />}
+                    <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Asignar a</label>
+                        <div className="border border-border rounded-xl p-2 max-h-[150px] overflow-y-auto space-y-0.5 bg-background">
+                            {users.map(user => (
+                                <div
+                                    key={user.id}
+                                    className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${assigned.includes(user.id) ? 'bg-primary/8 text-primary' : 'hover:bg-muted'}`}
+                                    onClick={() => toggleUser(user.id)}
+                                >
+                                    <div className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${assigned.includes(user.id) ? 'bg-primary border-primary' : 'border-border'}`}>
+                                        {assigned.includes(user.id) && <Check className="h-2.5 w-2.5 text-white" />}
+                                    </div>
+                                    <span className="text-sm font-medium">{user.display_name || user.email}</span>
                                 </div>
-                                <span className="text-sm">{user.display_name || user.email}</span>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
-                </div>
 
-                {/* Acciones de estado — solo si la nota ya existe */}
-                {hasNote && onStatusChange && (
-                    <div className="flex gap-2 pt-1 border-t">
-                        <button
-                            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm text-green-700 border border-green-300 rounded-md hover:bg-green-50 transition-colors"
-                            onClick={() => { onStatusChange('done'); onClose(); }}
-                        >
-                            <CheckCircle2 className="h-4 w-4" />
-                            Realizado
-                        </button>
-                        <button
-                            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm text-red-700 border border-red-300 rounded-md hover:bg-red-50 transition-colors"
-                            onClick={() => { onStatusChange('deleted'); onClose(); }}
-                        >
-                            <Trash2 className="h-4 w-4" />
-                            Eliminar
-                        </button>
+                    {hasNote && onStatusChange && (
+                        <div className="flex gap-2 pt-1 border-t border-border">
+                            <button
+                                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-700 border border-emerald-200 rounded-xl hover:bg-emerald-50 transition-colors"
+                                onClick={() => { onStatusChange('done'); onClose(); }}
+                            >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                Realizado
+                            </button>
+                            <button
+                                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-700 border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
+                                onClick={() => { onStatusChange('deleted'); onClose(); }}
+                            >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Eliminar
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="flex justify-end gap-2">
+                        <button className="px-4 py-2 text-xs font-semibold border border-border rounded-xl hover:bg-muted transition-colors" onClick={onClose}>Cancelar</button>
+                        <button className="px-4 py-2 text-xs font-semibold bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-colors" onClick={() => onSave(value, assigned)}>Guardar</button>
                     </div>
-                )}
-
-                <div className="flex justify-end gap-2 mt-1">
-                    <button className="px-3 py-1.5 text-sm border rounded-md hover:bg-gray-50" onClick={onClose}>Cancelar</button>
-                    <button className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700" onClick={() => onSave(value, assigned)}>Guardar</button>
                 </div>
             </div>
         </div>
@@ -137,49 +140,47 @@ const AddRowModal = ({ isOpen, onClose, onSelectExisting, existingClients }: Add
     );
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
-            <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-[420px] p-5 animate-in fade-in zoom-in duration-200 flex flex-col gap-4">
-                <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-lg">Agregar Fila</h3>
-                    <button className="p-1 hover:bg-gray-100 rounded" onClick={onClose}><X className="h-4 w-4" /></button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="bg-card rounded-2xl shadow-2xl border border-border w-[90vw] max-w-[420px] overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                    <h3 className="text-sm font-bold text-foreground">Agregar fila</h3>
+                    <button className="h-7 w-7 rounded-lg hover:bg-muted flex items-center justify-center transition-colors" onClick={onClose}>
+                        <X className="h-4 w-4 text-muted-foreground" />
+                    </button>
                 </div>
 
-                <div className="flex flex-col gap-3">
-                    <label className="text-sm font-medium text-gray-700">Seleccionar cliente existente</label>
+                <div className="p-5 flex flex-col gap-3">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Seleccionar cliente</label>
                     <div className="relative">
-                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                         <input
                             type="text"
-                            className="w-full pl-9 pr-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full pl-9 pr-3 h-9 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground"
                             placeholder="Buscar cliente..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                             autoFocus
                         />
                     </div>
-                    <div className="border rounded-md max-h-[250px] overflow-y-auto">
+                    <div className="border border-border rounded-xl max-h-[260px] overflow-y-auto bg-background divide-y divide-border">
                         {filtered.length === 0 ? (
-                            <div className="p-4 text-center text-sm text-muted-foreground">No se encontraron clientes</div>
+                            <div className="p-6 text-center text-sm text-muted-foreground">No se encontraron clientes</div>
                         ) : (
                             filtered.map(client => (
                                 <button
                                     key={client.id}
-                                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 border-b last:border-b-0 flex items-center gap-2 transition-colors"
-                                    onClick={() => {
-                                        onSelectExisting(client);
-                                        onClose();
-                                    }}
+                                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted flex items-center gap-2.5 transition-colors"
+                                    onClick={() => { onSelectExisting(client); onClose(); }}
                                 >
-                                    <UserPlus className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                                    <span className="truncate">{client.name}</span>
+                                    <UserPlus className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                                    <span className="truncate font-medium">{client.name}</span>
                                 </button>
                             ))
                         )}
                     </div>
-                </div>
-
-                <div className="flex justify-end gap-2 mt-1">
-                    <button className="px-3 py-1.5 text-sm border rounded-md hover:bg-gray-50" onClick={onClose}>Cancelar</button>
+                    <div className="flex justify-end pt-1">
+                        <button className="px-4 py-2 text-xs font-semibold border border-border rounded-xl hover:bg-muted transition-colors" onClick={onClose}>Cancelar</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -868,11 +869,11 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                         <tr className="border-b">
                             <td colSpan={7 + allServiceCols.length + (hasHorasInDB ? 0 : 1) + 1} className="p-0">
                                 <button
-                                    className="w-full flex items-center justify-center gap-2 py-2 text-sm text-blue-600 hover:bg-blue-50/50 transition-colors font-medium"
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 text-xs font-semibold text-primary hover:bg-primary/5 transition-colors"
                                     onClick={() => setShowAddRow(true)}
                                 >
-                                    <Plus className="h-4 w-4" />
-                                    Agregar Fila
+                                    <Plus className="h-3.5 w-3.5" />
+                                    Agregar fila
                                 </button>
                             </td>
                         </tr>
@@ -988,38 +989,37 @@ export const MatrixGrid = ({ data, year, month }: MatrixGridProps) => {
                 {/* Confirmación para ocultar fila */}
                 {hideConfirm && (
                     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                        <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
-                            <div className="flex items-start gap-3">
-                                <div className="p-2 rounded-full bg-amber-100 shrink-0">
-                                    <EyeOff size={18} className="text-amber-600" />
+                        <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-sm mx-4 overflow-hidden">
+                            <div className="px-5 py-4 border-b border-border flex items-center gap-3">
+                                <div className="h-8 w-8 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+                                    <EyeOff size={15} className="text-amber-600" />
                                 </div>
-                                <div>
-                                    <h3 className="font-semibold text-gray-900">¿Ocultar este cliente?</h3>
-                                    <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-                                        <span className="font-medium text-gray-800">{hideConfirm.client_name}</span> dejará de
-                                        aparecer a partir de{' '}
-                                        <span className="font-medium text-gray-800">{MONTH_NAMES[month - 1]} {year}</span>.
-                                    </p>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        Los meses anteriores con datos registrados no se ven afectados.
-                                        Los cálculos de fee y P&L permanecen intactos.
-                                    </p>
-                                </div>
+                                <h3 className="text-sm font-bold text-foreground">¿Ocultar este cliente?</h3>
                             </div>
-                            <div className="flex gap-2 justify-end pt-1">
+                            <div className="px-5 py-4 space-y-2">
+                                <p className="text-sm text-muted-foreground leading-relaxed">
+                                    <span className="font-semibold text-foreground">{hideConfirm.client_name}</span> dejará de
+                                    aparecer a partir de{' '}
+                                    <span className="font-semibold text-foreground">{MONTH_NAMES[month - 1]} {year}</span>.
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    Los datos de meses anteriores y los cálculos de P&L no se verán afectados.
+                                </p>
+                            </div>
+                            <div className="flex gap-2 px-5 pb-5 justify-end">
                                 <button
-                                    className="px-3 py-1.5 text-sm border rounded-md hover:bg-gray-50 disabled:opacity-50"
+                                    className="px-4 py-2 text-xs font-semibold border border-border rounded-xl hover:bg-muted transition-colors disabled:opacity-50"
                                     onClick={() => setHideConfirm(null)}
                                     disabled={hideRowMutation.isPending}
                                 >
                                     Cancelar
                                 </button>
                                 <button
-                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-md disabled:opacity-50"
+                                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-xl transition-colors disabled:opacity-50"
                                     onClick={() => hideRowMutation.mutate(hideConfirm.client_id)}
                                     disabled={hideRowMutation.isPending}
                                 >
-                                    <EyeOff size={14} />
+                                    <EyeOff size={13} />
                                     {hideRowMutation.isPending ? 'Ocultando...' : 'Ocultar en meses posteriores'}
                                 </button>
                             </div>

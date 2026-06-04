@@ -197,9 +197,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
     const location = useLocation();
     const { hasPermission, isSuperAdmin, isDeptHead, isPartner, profile, signOut } = useAuth();
     const { isDark } = useTheme();
-    const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({
-        '/departamentos': true
-    });
+    const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
     const [moduleHighlights, setModuleHighlights] = useState<Map<string, ChangelogEntry>>(() => getModuleHighlights());
 
     const handleDismissHighlight = useCallback((moduleKey: string, entryId: string) => {
