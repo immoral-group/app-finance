@@ -235,6 +235,18 @@ const HUB_CORE = ['Immedia', 'Imcontent', 'Immoralia'];
 const HUB_OPTIONAL = ['Imloyal', 'Imseo', 'Immoral', 'Imsales'];
 const VERTICAL_ONLY = ['Imfilms', 'Imfashion'];
 
+const DEPT_DOT_COLORS: Record<string, string> = {
+    Immedia: '#6366f1',
+    Imcontent: '#ec4899',
+    Immoralia: '#f59e0b',
+    Imloyal: '#10b981',
+    Imseo: '#3b82f6',
+    Immoral: '#8b5cf6',
+    Imsales: '#ef4444',
+    Imfilms: '#14b8a6',
+    Imfashion: '#f97316',
+};
+
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const QUARTERS = [
     { label: 'Q1', months: [0, 1, 2] },
@@ -611,89 +623,95 @@ function DashboardContent() {
     return (
         <div className="space-y-6" >
             {/* Header with Dashboard tabs */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-                    <p className="text-muted-foreground mt-1">Overview for Fiscal Year {year}</p>
+            <div className="flex items-end justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                    <div className="h-11 w-11 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                        <LayoutDashboard size={22} />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight leading-tight">Dashboard</h1>
+                        <p className="text-sm text-muted-foreground">Resumen del ejercicio {year}</p>
+                    </div>
                 </div>
                 {isSuperAdmin() && (
-                    <div className="flex items-center gap-3">
-                        <Button
-                            variant={isConfiguring ? "secondary" : "outline"}
-                            onClick={() => setIsConfiguring(!isConfiguring)}
-                            className="gap-2"
-                        >
-                            <Settings2 size={16} />
-                            {isConfiguring ? 'Done' : 'Customize'}
-                        </Button>
-                    </div>
+                    <Button
+                        variant={isConfiguring ? "secondary" : "outline"}
+                        onClick={() => setIsConfiguring(!isConfiguring)}
+                        className="gap-2 rounded-xl"
+                    >
+                        <Settings2 size={16} />
+                        {isConfiguring ? 'Listo' : 'Personalizar'}
+                    </Button>
                 )}
             </div>
 
-            {/* Sub-module tabs: General / Detalle */}
-            <div className="flex gap-2 border-b pb-1">
-                <button
-                    className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${dashboardTab === 'general'
-                        ? 'bg-primary text-primary-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                        }`}
-                    onClick={() => setDashboardTab('general')}
-                >
-                    <LayoutDashboard size={16} />
-                    General
-                </button>
-                <button
-                    className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${dashboardTab === 'detalle'
-                        ? 'bg-primary text-primary-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                        }`}
-                    onClick={() => setDashboardTab('detalle')}
-                >
-                    <BarChart3 size={16} />
-                    Detalle
-                </button>
-            </div>
-
-            {/* Time Period Selector — shared across both tabs */}
-            <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex gap-1 bg-muted/50 rounded-lg p-1">
-                    {([['monthly', 'Mensual'], ['quarterly', 'Trimestral'], ['annual', 'Anual']] as const).map(([key, label]) => (
-                        <button
-                            key={key}
-                            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${timePeriod === key
-                                ? 'bg-white shadow-sm text-foreground'
-                                : 'text-muted-foreground hover:text-foreground'
-                                }`}
-                            onClick={() => setTimePeriod(key as TimePeriod)}
-                        >
-                            {label}
-                        </button>
-                    ))}
+            {/* Controls bar: tabs (left) + period selector (right) */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+                {/* Sub-module tabs: General / Detalle — segmented pill */}
+                <div className="inline-flex gap-1 bg-muted/60 rounded-xl p-1">
+                    <button
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${dashboardTab === 'general'
+                            ? 'bg-white text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                        onClick={() => setDashboardTab('general')}
+                    >
+                        <LayoutDashboard size={16} />
+                        General
+                    </button>
+                    <button
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${dashboardTab === 'detalle'
+                            ? 'bg-white text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                        onClick={() => setDashboardTab('detalle')}
+                    >
+                        <BarChart3 size={16} />
+                        Detalle
+                    </button>
                 </div>
 
-                {timePeriod === 'monthly' && (
-                    <select
-                        className="border rounded-md px-3 py-1.5 text-sm bg-white"
-                        value={selectedMonth}
-                        onChange={e => setSelectedMonth(Number(e.target.value))}
-                    >
-                        {MONTHS.map((m, i) => (
-                            <option key={i} value={i}>{m}</option>
+                {/* Time Period Selector */}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <div className="inline-flex gap-1 bg-muted/60 rounded-xl p-1">
+                        {([['monthly', 'Mensual'], ['quarterly', 'Trimestral'], ['annual', 'Anual']] as const).map(([key, label]) => (
+                            <button
+                                key={key}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${timePeriod === key
+                                    ? 'bg-white shadow-sm text-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                    }`}
+                                onClick={() => setTimePeriod(key as TimePeriod)}
+                            >
+                                {label}
+                            </button>
                         ))}
-                    </select>
-                )}
+                    </div>
 
-                {timePeriod === 'quarterly' && (
-                    <select
-                        className="border rounded-md px-3 py-1.5 text-sm bg-white"
-                        value={selectedQuarter}
-                        onChange={e => setSelectedQuarter(Number(e.target.value))}
-                    >
-                        {QUARTERS.map((q, i) => (
-                            <option key={i} value={i}>{q.label} ({MONTHS[q.months[0]]}–{MONTHS[q.months[2]]})</option>
-                        ))}
-                    </select>
-                )}
+                    {timePeriod === 'monthly' && (
+                        <select
+                            className="border rounded-xl px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            value={selectedMonth}
+                            onChange={e => setSelectedMonth(Number(e.target.value))}
+                        >
+                            {MONTHS.map((m, i) => (
+                                <option key={i} value={i}>{m}</option>
+                            ))}
+                        </select>
+                    )}
+
+                    {timePeriod === 'quarterly' && (
+                        <select
+                            className="border rounded-xl px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            value={selectedQuarter}
+                            onChange={e => setSelectedQuarter(Number(e.target.value))}
+                        >
+                            {QUARTERS.map((q, i) => (
+                                <option key={i} value={i}>{q.label} ({MONTHS[q.months[0]]}–{MONTHS[q.months[2]]})</option>
+                            ))}
+                        </select>
+                    )}
+                </div>
             </div>
 
             {isConfiguring && (
@@ -727,46 +745,58 @@ function DashboardContent() {
                     {/* KPI Cards — from PL matrix */}
                     {
                         visibleWidgets.kpis && (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                                <Card className="bg-white border-l-4 border-l-primary shadow-sm hover:shadow-md transition-shadow">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
                                     <CardContent className="p-6">
-                                        <div className="flex items-center justify-between space-y-0 pb-2">
-                                            <p className="text-sm font-medium text-muted-foreground">Total Billing ({periodLabel})</p>
-                                            <Wallet className="h-4 w-4 text-primary" />
+                                        <div className="flex items-start justify-between">
+                                            <div className="space-y-1">
+                                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Facturación</p>
+                                                <span className="text-[11px] text-muted-foreground/70">{periodLabel}</span>
+                                            </div>
+                                            <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                                                <Wallet className="h-5 w-5" />
+                                            </div>
                                         </div>
-                                        <div className="flex flex-col mt-2">
-                                            <h2 className="text-3xl font-bold">{formatCurrency(plKpis.totalBilling)}</h2>
-                                            <p className="text-xs text-muted-foreground mt-1">Gross Revenue</p>
-                                        </div>
+                                        <h2 className="text-3xl font-bold tracking-tight mt-4">{formatCurrency(plKpis.totalBilling)}</h2>
+                                        <p className="text-xs text-muted-foreground mt-1">Ingresos brutos</p>
                                     </CardContent>
                                 </Card>
 
-                                <Card className="bg-white border-l-4 border-l-red-500 shadow-sm hover:shadow-md transition-shadow">
+                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
                                     <CardContent className="p-6">
-                                        <div className="flex items-center justify-between space-y-0 pb-2">
-                                            <p className="text-sm font-medium text-muted-foreground">Total Expenses ({periodLabel})</p>
-                                            <TrendingDown className="h-4 w-4 text-red-500" />
+                                        <div className="flex items-start justify-between">
+                                            <div className="space-y-1">
+                                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Gastos</p>
+                                                <span className="text-[11px] text-muted-foreground/70">{periodLabel}</span>
+                                            </div>
+                                            <div className="h-10 w-10 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center">
+                                                <TrendingDown className="h-5 w-5" />
+                                            </div>
                                         </div>
-                                        <div className="flex flex-col mt-2">
-                                            <h2 className="text-3xl font-bold">{formatCurrency(plKpis.totalExpenses)}</h2>
-                                            <p className="text-xs text-muted-foreground mt-1">Operational Costs</p>
-                                        </div>
+                                        <h2 className="text-3xl font-bold tracking-tight mt-4">{formatCurrency(plKpis.totalExpenses)}</h2>
+                                        <p className="text-xs text-muted-foreground mt-1">Costes operativos</p>
                                     </CardContent>
                                 </Card>
 
-                                <Card className="bg-white border-l-4 border-l-green-500 shadow-sm hover:shadow-md transition-shadow">
+                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
                                     <CardContent className="p-6">
-                                        <div className="flex items-center justify-between space-y-0 pb-2">
-                                            <p className="text-sm font-medium text-muted-foreground">Net Margin ({periodLabel})</p>
-                                            <TrendingUp className="h-4 w-4 text-green-500" />
+                                        <div className="flex items-start justify-between">
+                                            <div className="space-y-1">
+                                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Margen Neto</p>
+                                                <span className="text-[11px] text-muted-foreground/70">{periodLabel}</span>
+                                            </div>
+                                            <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${plKpis.netMargin >= 0 ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'}`}>
+                                                <TrendingUp className="h-5 w-5" />
+                                            </div>
                                         </div>
-                                        <div className="flex flex-col mt-2">
-                                            <h2 className={`text-3xl font-bold ${plKpis.netMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                {formatCurrency(plKpis.netMargin)}
-                                            </h2>
-                                            <p className="text-xs text-muted-foreground mt-1">
-                                                {plKpis.marginPercentage.toFixed(1)}% margin
-                                            </p>
+                                        <h2 className={`text-3xl font-bold tracking-tight mt-4 ${plKpis.netMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {formatCurrency(plKpis.netMargin)}
+                                        </h2>
+                                        <div className="flex items-center gap-1.5 mt-1">
+                                            <span className={`inline-flex items-center text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${plKpis.netMargin >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                {plKpis.marginPercentage.toFixed(1)}%
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">de margen</span>
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -858,11 +888,14 @@ function DashboardContent() {
                                             const dynamicMarginPct = dept.income > 0 ? (dynamicResultado / dept.income) * 100 : 0;
 
                                             return (
-                                                <Card key={dept.key} className="hover:shadow-md transition-shadow">
-                                                    <CardHeader className="pb-2">
+                                                <Card key={dept.key} className="rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+                                                    <CardHeader className="pb-3">
                                                         <CardTitle className="text-base font-bold flex justify-between items-center">
-                                                            {dept.name}
-                                                            <span className={`text-sm font-normal px-2 py-1 rounded-full ${dynamicResultado >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                            <span className="flex items-center gap-2">
+                                                                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: DEPT_DOT_COLORS[dept.name] || '#6b7280' }} />
+                                                                {dept.name}
+                                                            </span>
+                                                            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${dynamicResultado >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                                                                 {dynamicMarginPct.toFixed(1)}% margen
                                                             </span>
                                                         </CardTitle>
@@ -963,26 +996,30 @@ function DashboardContent() {
                                 <span className="text-xs text-muted-foreground">Facturación y Tesorería</span>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                <Card className="bg-white border-l-4 border-l-orange-500 shadow-sm hover:shadow-md transition-shadow cursor-pointer" onClick={() => openHoldedDetail('pending')}>
+                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 cursor-pointer" onClick={() => openHoldedDetail('pending')}>
                                     <CardContent className="p-5">
-                                        <div className="flex items-center justify-between pb-1">
+                                        <div className="flex items-start justify-between">
                                             <p className="text-xs font-medium text-muted-foreground">Facturas Pendientes</p>
-                                            <FileText className="h-4 w-4 text-orange-500" />
+                                            <div className="h-9 w-9 rounded-xl bg-orange-500/10 text-orange-500 flex items-center justify-center">
+                                                <FileText className="h-4 w-4" />
+                                            </div>
                                         </div>
-                                        <h2 className="text-2xl font-bold mt-1">{formatCurrency(holdedSummary.invoices_pending?.total || 0)}</h2>
+                                        <h2 className="text-2xl font-bold mt-3">{formatCurrency(holdedSummary.invoices_pending?.total || 0)}</h2>
                                         <p className="text-[11px] text-muted-foreground mt-0.5">
                                             {holdedSummary.invoices_pending?.count || 0} factura{(holdedSummary.invoices_pending?.count || 0) !== 1 ? 's' : ''} aún no vencidas
                                         </p>
                                     </CardContent>
                                 </Card>
 
-                                <Card className="bg-white border-l-4 border-l-red-500 shadow-sm hover:shadow-md transition-shadow cursor-pointer" onClick={() => openHoldedDetail('overdue')}>
+                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 cursor-pointer" onClick={() => openHoldedDetail('overdue')}>
                                     <CardContent className="p-5">
-                                        <div className="flex items-center justify-between pb-1">
+                                        <div className="flex items-start justify-between">
                                             <p className="text-xs font-medium text-muted-foreground">Facturas Vencidas</p>
-                                            <AlertCircle className="h-4 w-4 text-red-500" />
+                                            <div className="h-9 w-9 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center">
+                                                <AlertCircle className="h-4 w-4" />
+                                            </div>
                                         </div>
-                                        <h2 className={`text-2xl font-bold mt-1 ${(holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                        <h2 className={`text-2xl font-bold mt-3 ${(holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
                                             {formatCurrency(holdedSummary.invoices_overdue?.total || 0)}
                                         </h2>
                                         <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -991,26 +1028,30 @@ function DashboardContent() {
                                     </CardContent>
                                 </Card>
 
-                                <Card className="bg-white border-l-4 border-l-purple-500 shadow-sm hover:shadow-md transition-shadow">
+                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
                                     <CardContent className="p-5">
-                                        <div className="flex items-center justify-between pb-1">
+                                        <div className="flex items-start justify-between">
                                             <p className="text-xs font-medium text-muted-foreground">Estimado por Recibir</p>
-                                            <TrendingUp className="h-4 w-4 text-purple-500" />
+                                            <div className="h-9 w-9 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
+                                                <TrendingUp className="h-4 w-4" />
+                                            </div>
                                         </div>
-                                        <h2 className="text-2xl font-bold mt-1">{formatCurrency(holdedSummary.invoices_estimado?.total || 0)}</h2>
+                                        <h2 className="text-2xl font-bold mt-3">{formatCurrency(holdedSummary.invoices_estimado?.total || 0)}</h2>
                                         <p className="text-[11px] text-muted-foreground mt-0.5">
                                             {holdedSummary.invoices_estimado?.count || 0} factura{(holdedSummary.invoices_estimado?.count || 0) !== 1 ? 's' : ''} (pendientes + vencidas)
                                         </p>
                                     </CardContent>
                                 </Card>
 
-                                <Card className="bg-white border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-shadow">
+                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
                                     <CardContent className="p-5">
-                                        <div className="flex items-center justify-between pb-1">
+                                        <div className="flex items-start justify-between">
                                             <p className="text-xs font-medium text-muted-foreground">Saldo en Caja</p>
-                                            <Landmark className="h-4 w-4 text-blue-500" />
+                                            <div className="h-9 w-9 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
+                                                <Landmark className="h-4 w-4" />
+                                            </div>
                                         </div>
-                                        <h2 className="text-2xl font-bold mt-1">{formatCurrency(holdedSummary.treasury_balance || 0)}</h2>
+                                        <h2 className="text-2xl font-bold mt-3">{formatCurrency(holdedSummary.treasury_balance || 0)}</h2>
                                         <p className="text-[11px] text-muted-foreground mt-0.5">
                                             Total en tesorería
                                         </p>

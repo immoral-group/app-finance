@@ -146,13 +146,13 @@ const renderDonutLabel = ({ cx, cy, midAngle, outerRadius, percent, name }: any)
 const PremiumTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
     return (
-        <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-gray-100 px-4 py-3 text-xs">
-            {label && <p className="font-semibold text-gray-700 mb-1.5">{label}</p>}
+        <div className="bg-popover/95 backdrop-blur-md rounded-xl shadow-xl border border-border px-4 py-3 text-xs">
+            {label && <p className="font-semibold text-foreground mb-1.5">{label}</p>}
             {payload.map((p: any, i: number) => (
                 <div key={i} className="flex items-center gap-2 py-0.5">
                     <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
-                    <span className="text-gray-500">{p.name}:</span>
-                    <span className="font-bold text-gray-800 ml-auto">{formatCurrency(Number(p.value ?? 0))}</span>
+                    <span className="text-muted-foreground">{p.name}:</span>
+                    <span className="font-bold text-foreground ml-auto">{formatCurrency(Number(p.value ?? 0))}</span>
                 </div>
             ))}
         </div>
@@ -388,13 +388,16 @@ export default function DashboardDetalle({ year, activeMonths }: Props) {
     // Section card wrapper with premium styling
     const Section = ({ title, subtitle, children, className = '' }: { title: string; subtitle: string; children: React.ReactNode; className?: string }) => (
         <div
-            className={`group bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden ${className}`}
+            className={`group bg-card rounded-2xl border border-border/60 shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden ${className}`}
             style={chartWrapperStyle}
             tabIndex={-1}
         >
-            <div className="px-6 pt-5 pb-3">
-                <h3 className="text-base font-bold text-gray-900 tracking-tight">{title}</h3>
-                <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
+            <div className="px-6 pt-5 pb-3 flex items-start gap-3">
+                <span className="mt-1 h-8 w-1 rounded-full bg-primary/70 shrink-0" />
+                <div>
+                    <h3 className="text-base font-bold text-foreground tracking-tight">{title}</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+                </div>
             </div>
             <div className="px-4 pb-5" style={chartWrapperStyle} tabIndex={-1}>
                 {children}
