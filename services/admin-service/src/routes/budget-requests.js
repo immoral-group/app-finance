@@ -536,7 +536,101 @@ router.patch('/approve-dept', async (req, res) => {
 });
 
 /**
- * DELETE /budget-requests/:id  (cancel own pending request)
+ * PATCH /budget-requests/reject-dept
+ * Rechazar todas las solicitudes pendientes de un depto/año
+ */
+router.patch('/reject-dept', async (req, res) => {
+    const { fiscal_year, dept, reviewed_by, reviewed_by_email, review_notes } = req.body;
+
+    if (!fiscal_year || !dept) return res.status(400).json({ error: 'fiscal_year and dept required' });
+
+    try {
+        const { data: pending, error: fetchErr } = await supabase
+            .from('budget_requests')
+            .select('*')
+            .eq('fiscal_year', fiscal_year)
+            .eq('dept', dept)
+            .eq('status', 'pending');
+
+        if (fetchErr) throw fetchErr;
+        if (!pending?.length) return res.json({ ok: true, rejected: 0 });
+
+        await supabase
+            .from('budget_requests')
+            .update({
+                status: 'rejected',
+                reviewed_by: reviewed_by || null,
+                reviewed_by_email: reviewed_by_email || null,
+                review_notes: review_notes || null,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('fiscal_year', fiscal_year)
+            .eq('dept', dept)
+            .eq('status', 'pending');
+
+        // Notificar a cada solicitante único
+        const requesters = [...new Set(pending.filter(r => r.requested_by).map(r => r.requested_by))];
+        if (requesters.length) {
+            try {
+                await createNotifications(
+                    requesters,
+                    'budget_rejected',
+                    `${dept}: ${pending.length} solicitud(es) rechazada(s)${review_notes ? ' — ' + review_notes : ''}`,
+                    { dept, fiscal_year }
+                );
+            } catch (_) {}
+        }
+
+        // Email a los solicitantes únicos
+        const requesterEmails = [...new Set(pending.filter(r => r.requested_by_email).map(r => r.requested_by_email))];
+        for (const email of requesterEmails) {
+            const link = solicitudesUrl(deptCodeFromLabel(dept));
+            await sendEmail({
+                to: email,
+                subject: `Solicitudes rechazadas · ${dept} (${fiscal_year})`,
+                html: emailBase('Solicitudes de presupuesto rechazadas', {
+                    subtitle: `${dept} · ${fiscal_year}`,
+                    body: `
+                        <p style="color:#dc2626;font-weight:600;font-size:14px;margin-bottom:16px">
+                            ${pending.length} solicitud${pending.length !== 1 ? 'es han sido rechazadas' : ' ha sido rechazada'}.
+                        </p>
+                        ${review_notes ? `<div class="kv"><span class="label">Motivo</span><span class="value" style="color:#dc2626">${review_notes}</span></div>` : ''}
+                        <a href="${link}" class="btn" style="background-color:#64748b">Ver en la app →</a>
+                    `,
+                }),
+            });
+        }
+
+        res.json({ ok: true, rejected: pending.length });
+    } catch (err) {
+        console.error('[BUDGET-REQ] REJECT-DEPT error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * DELETE /budget-requests/dept  (admin: eliminar todas las solicitudes de un depto/año)
+ */
+router.delete('/dept', async (req, res) => {
+    const { fiscal_year, dept } = req.body;
+    if (!fiscal_year || !dept) return res.status(400).json({ error: 'fiscal_year and dept required' });
+    try {
+        const { error } = await supabase
+            .from('budget_requests')
+            .delete()
+            .eq('fiscal_year', fiscal_year)
+            .eq('dept', dept);
+
+        if (error) throw error;
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[BUDGET-REQ] DELETE-DEPT error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * DELETE /budget-requests/:id  (admin: eliminar una solicitud individual)
  */
 router.delete('/:id', async (req, res) => {
     const { id } = req.params;
@@ -544,8 +638,7 @@ router.delete('/:id', async (req, res) => {
         const { error } = await supabase
             .from('budget_requests')
             .delete()
-            .eq('id', id)
-            .eq('status', 'pending');
+            .eq('id', id);
 
         if (error) throw error;
         res.json({ ok: true });

@@ -281,6 +281,34 @@ export default function DepartmentPL() {
         },
     });
 
+    const [bulkRejectNote, setBulkRejectNote] = useState('');
+    const [showBulkRejectInput, setShowBulkRejectInput] = useState(false);
+
+    const rejectDeptMutation = useMutation({
+        mutationFn: (notes: string) => adminApi.rejectDeptBudgetRequests({
+            fiscal_year: year,
+            dept: deptLabel,
+            reviewed_by: profile?.id,
+            reviewed_by_email: profile?.email || undefined,
+            review_notes: notes || undefined,
+        }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['budget-requests', year, deptLabel] });
+            setShowBulkRejectInput(false);
+            setBulkRejectNote('');
+        },
+    });
+
+    const deleteRequestMutation = useMutation({
+        mutationFn: (id: string) => adminApi.deleteBudgetRequest(id),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['budget-requests', year, deptLabel] }),
+    });
+
+    const deleteAllDeptMutation = useMutation({
+        mutationFn: () => adminApi.deleteAllDeptBudgetRequests({ fiscal_year: year, dept: deptLabel }),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['budget-requests', year, deptLabel] }),
+    });
+
 
     // Limpiar borradores al cambiar de departamento
     useEffect(() => {
@@ -1895,17 +1923,74 @@ export default function DepartmentPL() {
                                     </p>
                                 </div>
                             </div>
-                            {pendingRequests.length > 0 && (
-                                <Button
-                                    size="sm"
-                                    className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white gap-1.5 shadow-sm"
-                                    onClick={() => approveDeptMutation.mutate()}
-                                    disabled={approveDeptMutation.isPending}
-                                >
-                                    <Check size={12} />
-                                    Aprobar todos ({pendingRequests.length})
-                                </Button>
-                            )}
+                            <div className="flex items-center gap-2">
+                                {pendingRequests.length > 0 && (
+                                    <Button
+                                        size="sm"
+                                        className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white gap-1.5 shadow-sm"
+                                        onClick={() => approveDeptMutation.mutate()}
+                                        disabled={approveDeptMutation.isPending}
+                                    >
+                                        <Check size={12} />
+                                        Aprobar todos ({pendingRequests.length})
+                                    </Button>
+                                )}
+                                {pendingRequests.length > 0 && !showBulkRejectInput && (
+                                    <Button
+                                        size="sm"
+                                        className="h-8 text-xs bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 gap-1.5"
+                                        onClick={() => setShowBulkRejectInput(true)}
+                                    >
+                                        <X size={12} />
+                                        Rechazar todos
+                                    </Button>
+                                )}
+                                {showBulkRejectInput && (
+                                    <div className="flex items-center gap-1.5">
+                                        <input
+                                            type="text"
+                                            placeholder="Motivo del rechazo..."
+                                            value={bulkRejectNote}
+                                            onChange={e => setBulkRejectNote(e.target.value)}
+                                            className="text-xs border border-red-200 rounded px-2 py-1.5 w-44 focus:outline-none focus:ring-1 focus:ring-red-300"
+                                            autoFocus
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter') rejectDeptMutation.mutate(bulkRejectNote);
+                                                if (e.key === 'Escape') setShowBulkRejectInput(false);
+                                            }}
+                                        />
+                                        <button
+                                            className="px-2.5 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-medium"
+                                            onClick={() => rejectDeptMutation.mutate(bulkRejectNote)}
+                                            disabled={rejectDeptMutation.isPending}
+                                        >
+                                            Confirmar
+                                        </button>
+                                        <button
+                                            className="px-2 py-1.5 rounded hover:bg-slate-100 text-slate-400 text-xs"
+                                            onClick={() => setShowBulkRejectInput(false)}
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </div>
+                                )}
+                                {budgetRequests.length > 0 && (
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 text-xs text-slate-400 hover:text-red-600 hover:bg-red-50 gap-1"
+                                        onClick={() => {
+                                            if (confirm(`¿Eliminar todas las solicitudes de ${deptLabel} en ${year}?`)) {
+                                                deleteAllDeptMutation.mutate();
+                                            }
+                                        }}
+                                        disabled={deleteAllDeptMutation.isPending}
+                                    >
+                                        <Trash2 size={12} />
+                                        Eliminar todo
+                                    </Button>
+                                )}
+                            </div>
                         </div>
 
                         {budgetRequestsLoading && (
@@ -1931,7 +2016,8 @@ export default function DepartmentPL() {
                                             <th className="px-4 py-2.5 text-right font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Diferencia</th>
                                             <th className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Motivo</th>
                                             <th className="px-4 py-2.5 text-center font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Estado</th>
-                                            <th className="px-4 py-2.5 text-center font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Acción</th>
+                                            <th className="px-4 py-2.5 text-center font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Aprobar / Rechazar</th>
+                                            <th className="px-4 py-2.5 text-center font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Eliminar</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -1999,6 +2085,20 @@ export default function DepartmentPL() {
                                                         {req.status !== 'pending' && req.review_notes && (
                                                             <span className="text-slate-400 text-[10px] italic">"{req.review_notes}"</span>
                                                         )}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-center">
+                                                        <button
+                                                            className="p-1.5 rounded-md hover:bg-red-50 text-slate-300 hover:text-red-500 transition-colors"
+                                                            title="Eliminar solicitud"
+                                                            onClick={() => {
+                                                                if (confirm(`¿Eliminar la solicitud de "${req.item}"?`)) {
+                                                                    deleteRequestMutation.mutate(req.id);
+                                                                }
+                                                            }}
+                                                            disabled={deleteRequestMutation.isPending}
+                                                        >
+                                                            <Trash2 size={13} />
+                                                        </button>
                                                     </td>
                                                 </tr>
                                             );

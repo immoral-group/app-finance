@@ -472,8 +472,12 @@ export const adminApi = {
         fetchApi(`/budget-requests/${id}/reject`, { method: 'PATCH', body: JSON.stringify(data) }),
     approveDeptBudgetRequests: (data: { fiscal_year: number; dept: string; reviewed_by?: string; reviewed_by_email?: string }) =>
         fetchApi<{ ok: boolean; approved: number }>('/budget-requests/approve-dept', { method: 'PATCH', body: JSON.stringify(data) }),
+    rejectDeptBudgetRequests: (data: { fiscal_year: number; dept: string; reviewed_by?: string; reviewed_by_email?: string; review_notes?: string }) =>
+        fetchApi<{ ok: boolean; rejected: number }>('/budget-requests/reject-dept', { method: 'PATCH', body: JSON.stringify(data) }),
     deleteBudgetRequest: (id: string) =>
         fetchApi(`/budget-requests/${id}`, { method: 'DELETE' }),
+    deleteAllDeptBudgetRequests: (data: { fiscal_year: number; dept: string }) =>
+        fetchApi('/budget-requests/dept', { method: 'DELETE', body: JSON.stringify(data) }),
 };
 
 export interface BudgetRequest {
