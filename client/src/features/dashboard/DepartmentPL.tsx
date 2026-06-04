@@ -282,6 +282,12 @@ export default function DepartmentPL() {
     });
 
 
+    // Limpiar borradores al cambiar de departamento
+    useEffect(() => {
+        setDraftEdits({});
+        setRequestReason('');
+    }, [deptCode]);
+
     const handleContextMenu = (e: React.MouseEvent, section: string, dept: string, item: string, monthIdx: number) => {
         e.preventDefault();
         setContextMenu({
@@ -1799,22 +1805,30 @@ export default function DepartmentPL() {
     };
 
     const handleSubmitRequests = () => {
-        const requests: Partial<BudgetRequest>[] = Object.entries(draftEdits).map(([k, requested_value]) => {
-            const [section, dept, item, monthIdxStr] = k.split('|||');
-            const month_idx = parseInt(monthIdxStr);
-            const current_value = getBudgetCellValue(section, dept, item, month_idx);
-            return {
-                fiscal_year: year,
-                dept: deptLabel,
-                section,
-                category: section === 'revenue' ? 'Ingresos' : section,
-                item,
-                month_idx,
-                current_value,
-                requested_value,
-                reason: requestReason || undefined,
-            };
-        }).filter(r => r.requested_value !== r.current_value);
+        const requests: Partial<BudgetRequest>[] = Object.entries(draftEdits)
+            .filter(([k]) => {
+                // Solo incluir claves del departamento actual
+                const [, keyDept] = k.split('|||');
+                return deptNames.includes(keyDept);
+            })
+            .map(([k, requested_value]) => {
+                const [section, dept, item, monthIdxStr] = k.split('|||');
+                const month_idx = parseInt(monthIdxStr);
+                const current_value = getBudgetCellValue(section, dept, item, month_idx);
+                const expCat = expCats.find(c => c.key === section);
+                return {
+                    fiscal_year: year,
+                    dept: deptLabel,
+                    section,
+                    category: section === 'revenue' ? 'Ingresos' : (expCat?.label || section),
+                    item,
+                    month_idx,
+                    current_value,
+                    requested_value,
+                    reason: requestReason || undefined,
+                };
+            })
+            .filter(r => r.requested_value !== r.current_value);
 
         if (requests.length === 0) return;
         submitBudgetRequestsMutation.mutate(requests);
