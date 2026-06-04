@@ -13,6 +13,29 @@ import {
 import { CommentModal } from '@/features/pl/PLMatrix';
 import { useUrlState } from '@/hooks/useUrlState';
 
+// Premium tooltip shared across all dashboard charts
+function PremiumTooltip({ active, payload, label, formatter }: any) {
+    if (!active || !payload || payload.length === 0) return null;
+    return (
+        <div className="rounded-xl border border-border bg-card/95 backdrop-blur shadow-xl px-3 py-2 text-xs">
+            <p className="font-semibold text-foreground mb-1.5">{label}</p>
+            <div className="space-y-1">
+                {payload.map((entry: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between gap-4">
+                        <span className="flex items-center gap-1.5 text-muted-foreground">
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color || entry.stroke || entry.fill }} />
+                            {entry.name}
+                        </span>
+                        <span className="font-semibold text-foreground tabular-nums">
+                            {formatter ? formatter(entry.value) : entry.value}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Solicitudes'] as const;
 type TabType = typeof TABS[number];
 
@@ -1081,30 +1104,6 @@ export default function DepartmentPL() {
         // Expense category colors
         const expColors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'];
 
-        // 4) Budget alert: compare real vs budget for recent months
-        // Show every month in the range, but flag months without Real data so the chip can be rendered in a neutral style.
-        // Keeping the chip preserves the visual continuity of the month sequence; the neutral style avoids the misleading "miss"
-        // that would appear if we calculated `0 - budget = -budget` for a month with no Real registered.
-        const alertMonths: { month: string; idx: number; realResult: number; budgetResult: number; diff: number; pct: number; hasRealData: boolean }[] = [];
-        const alertStart = bannerMonth === 'ytd' ? 0 : (bannerMonth as number);
-        const alertEnd = bannerEndMonth;
-        for (let i = alertStart; i <= alertEnd; i++) {
-            const hasRealData = (revTotals[i] || 0) > 0 || (totalExpWithGroup[i] || 0) > 0;
-            const realRes = resultadoMonthly[i];
-            const budgetRes = budgetResultadoMonthly[i];
-            const diff = fmtCurrency(realRes - budgetRes);
-            const pct = budgetRes !== 0 ? fmtCurrency((diff / Math.abs(budgetRes)) * 100) : 0;
-            alertMonths.push({
-                month: MONTHS[i],
-                idx: i,
-                realResult: realRes,
-                budgetResult: budgetRes,
-                diff,
-                pct,
-                hasRealData
-            });
-        }
-
         // === SEPARATE budget comparisons for banner ===
         const isSingleMonth = bannerMonth !== 'ytd';
         const singleMonthIdx = bannerMonth as number;
@@ -1278,43 +1277,7 @@ export default function DepartmentPL() {
                     </div>
                     )}
 
-                    {/* Monthly chips — hidden when there's no closed month to chart */}
-                    {alertMonths.length > 0 && (
-                    <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50">
-                        <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-2">Detalle por mes (resultado neto vs presupuesto)</p>
-                        <div className="flex gap-1.5 flex-wrap">
-                            {alertMonths.map(am => {
-                                if (!am.hasRealData) {
-                                    return (
-                                        <div
-                                            key={am.idx}
-                                            className="px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 bg-gray-100 text-gray-500 border border-gray-200"
-                                            title="Sin Real registrado en este mes"
-                                        >
-                                            {am.month.slice(0, 3)}
-                                            <span className="font-normal italic text-[10px]">sin actividad</span>
-                                        </div>
-                                    );
-                                }
-                                const ok = am.diff >= 0;
-                                return (
-                                    <div
-                                        key={am.idx}
-                                        className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 ${ok
-                                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                            : 'bg-red-100 text-red-800 border border-red-200'
-                                            }`}
-                                        title={`Real: ${fmtDisplay(am.realResult)} € | Presup: ${fmtDisplay(am.budgetResult)} € | Dif: ${fmtDisplay(am.diff)} €`}
-                                    >
-                                        {ok ? <CheckCircle2 size={10} /> : <AlertTriangle size={10} />}
-                                        {am.month.slice(0, 3)}
-                                        <span className="font-bold">{am.diff > 0 ? '+' : ''}{fmtDisplay(am.diff)}</span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                    )}
+                    {/* Detalle por mes (chips) — ocultado a petición */}
                 </div>
 
                 {/* === SUMMARY TABLE (FIRST) === */}
@@ -1591,79 +1554,109 @@ export default function DepartmentPL() {
                 </div>
 
                 {/* === CHARTS GRID (AFTER SUMMARY TABLE) === */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     {/* Chart 1: Ventas vs Gastos */}
-                    <div className="bg-white rounded-xl border p-5 shadow-sm">
-                        <h3 className="text-sm font-bold text-gray-800 mb-4">📊 Ventas vs Gastos por Mes</h3>
-                        <ResponsiveContainer width="100%" height={280}>
-                            <BarChart data={salesVsExpenseData} barGap={2}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                                <Tooltip
-                                    formatter={currencyFormatter}
-                                    contentStyle={{ borderRadius: '8px', fontSize: '12px', border: '1px solid #e5e7eb' }}
-                                />
-                                <Legend wrapperStyle={{ fontSize: '12px' }} />
-                                <Bar dataKey="Ventas" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                                <Bar dataKey="Gastos" fill="#f97316" radius={[4, 4, 0, 0]} />
-                                <ReferenceLine y={0} stroke="#000" strokeDasharray="3 3" />
-                            </BarChart>
-                        </ResponsiveContainer>
+                    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+                        <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+                            <div className="h-9 w-9 rounded-xl bg-violet-50 flex items-center justify-center">
+                                <TrendingUp size={16} className="text-violet-600" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold tracking-tight text-foreground">Ventas vs Gastos</h3>
+                                <p className="text-[11px] text-muted-foreground">Comparativa mensual del ejercicio {year}</p>
+                            </div>
+                        </div>
+                        <div className="px-2 pb-4">
+                            <ResponsiveContainer width="100%" height={280}>
+                                <BarChart data={salesVsExpenseData} barGap={4} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="barVentas" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#8b5cf6" stopOpacity={1} />
+                                            <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.55} />
+                                        </linearGradient>
+                                        <linearGradient id="barGastos" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#fb923c" stopOpacity={1} />
+                                            <stop offset="100%" stopColor="#fb923c" stopOpacity={0.55} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" vertical={false} />
+                                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={42} />
+                                    <Tooltip cursor={{ fill: 'hsl(var(--muted))', opacity: 0.4 }} content={<PremiumTooltip formatter={currencyFormatter} />} />
+                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: 8 }} />
+                                    <Bar dataKey="Ventas" fill="url(#barVentas)" radius={[6, 6, 0, 0]} maxBarSize={26} />
+                                    <Bar dataKey="Gastos" fill="url(#barGastos)" radius={[6, 6, 0, 0]} maxBarSize={26} />
+                                    <ReferenceLine y={0} stroke="hsl(var(--border))" />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
                     </div>
 
                     {/* Chart 2: Dept % of Total General Billing */}
-                    <div className="bg-white rounded-xl border p-5 shadow-sm">
-                        <h3 className="text-sm font-bold text-gray-800 mb-4">📈 % Facturación de {deptLabel} vs Total General</h3>
-                        <ResponsiveContainer width="100%" height={280}>
-                            <AreaChart data={deptPctData}>
-                                <defs>
-                                    <linearGradient id="billingGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                                <YAxis tick={{ fontSize: 11 }} unit="%" domain={[0, 'auto']} />
-                                <Tooltip
-                                    formatter={(v: any) => `${Number(v).toFixed(1)}%`}
-                                    contentStyle={{ borderRadius: '8px', fontSize: '12px', border: '1px solid #e5e7eb' }}
-                                />
-                                <Legend wrapperStyle={{ fontSize: '12px' }} />
-                                <Area type="monotone" dataKey={`${deptLabel} %`} stroke="#8b5cf6" fill="url(#billingGrad)" strokeWidth={2} />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+                        <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+                            <div className="h-9 w-9 rounded-xl bg-sky-50 flex items-center justify-center">
+                                <TrendingUp size={16} className="text-sky-600" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold tracking-tight text-foreground">Peso de {deptLabel}</h3>
+                                <p className="text-[11px] text-muted-foreground">% sobre la facturación total del grupo</p>
+                            </div>
+                        </div>
+                        <div className="px-2 pb-4">
+                            <ResponsiveContainer width="100%" height={280}>
+                                <AreaChart data={deptPctData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="billingGrad" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.35} />
+                                            <stop offset="100%" stopColor="#0ea5e9" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" vertical={false} />
+                                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} unit="%" domain={[0, 'auto']} axisLine={false} tickLine={false} width={42} />
+                                    <Tooltip content={<PremiumTooltip formatter={(v: any) => `${Number(v).toFixed(1)}%`} />} />
+                                    <Area type="monotone" dataKey={`${deptLabel} %`} stroke="#0ea5e9" fill="url(#billingGrad)" strokeWidth={2.5} dot={{ r: 0 }} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
                     </div>
 
                     {/* Chart 3: Expense Trend Line */}
-                    <div className="bg-white rounded-xl border p-5 shadow-sm lg:col-span-2">
-                        <h3 className="text-sm font-bold text-gray-800 mb-4">📉 Tendencia de Gastos por Categoría</h3>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <LineChart data={expenseTrendData}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                                <Tooltip
-                                    formatter={currencyFormatter}
-                                    contentStyle={{ borderRadius: '8px', fontSize: '12px', border: '1px solid #e5e7eb' }}
-                                />
-                                <Legend wrapperStyle={{ fontSize: '12px' }} />
-                                {catMonthly.map((cat, idx) => (
-                                    <Line
-                                        key={cat.label}
-                                        type="monotone"
-                                        dataKey={cat.label}
-                                        stroke={expColors[idx % expColors.length]}
-                                        strokeWidth={1.5}
-                                        dot={{ r: 3 }}
-                                        activeDot={{ r: 5 }}
-                                    />
-                                ))}
-                                <Line type="monotone" dataKey="Group %" stroke="#6366f1" strokeWidth={1.5} dot={{ r: 3 }} />
-                                <Line type="monotone" dataKey="Total" stroke="#1e293b" strokeWidth={2.5} strokeDasharray="6 3" dot={{ r: 4 }} />
-                            </LineChart>
-                        </ResponsiveContainer>
+                    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden lg:col-span-2">
+                        <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+                            <div className="h-9 w-9 rounded-xl bg-rose-50 flex items-center justify-center">
+                                <TrendingDown size={16} className="text-rose-600" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold tracking-tight text-foreground">Tendencia de gastos por categoría</h3>
+                                <p className="text-[11px] text-muted-foreground">Evolución mensual y total de gastos</p>
+                            </div>
+                        </div>
+                        <div className="px-2 pb-4">
+                            <ResponsiveContainer width="100%" height={320}>
+                                <LineChart data={expenseTrendData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" vertical={false} />
+                                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={42} />
+                                    <Tooltip content={<PremiumTooltip formatter={currencyFormatter} />} />
+                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: 8 }} />
+                                    {catMonthly.map((cat, idx) => (
+                                        <Line
+                                            key={cat.label}
+                                            type="monotone"
+                                            dataKey={cat.label}
+                                            stroke={expColors[idx % expColors.length]}
+                                            strokeWidth={2}
+                                            dot={false}
+                                            activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }}
+                                        />
+                                    ))}
+                                    <Line type="monotone" dataKey="Group %" stroke="#6366f1" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }} />
+                                    <Line type="monotone" dataKey="Total" stroke="#0f172a" strokeWidth={2.5} strokeDasharray="6 4" dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
                     </div>
                 </div>
             </div>
