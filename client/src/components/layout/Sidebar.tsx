@@ -247,13 +247,10 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
             }}>
 
             {/* Logo */}
-            <div className="h-14 px-5 flex items-center gap-3 border-b border-sidebar-border flex-shrink-0">
-                <div className={cn(
-                    'h-9 w-9 flex items-center justify-center flex-shrink-0 relative overflow-hidden',
-                )}>
+            <div className="h-[60px] px-5 flex items-center gap-3 border-b border-sidebar-border flex-shrink-0">
+                <div className="h-8 w-8 flex items-center justify-center flex-shrink-0 relative overflow-hidden">
                     <img src={logoPath} alt="Logo" className="h-full w-full object-contain" />
                 </div>
-
                 <div>
                     <p className={cn(
                         'text-sm font-bold leading-none tracking-tight',
@@ -261,30 +258,27 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                     )}>
                         Finance
                     </p>
-                    <p className="text-[10px] text-sidebar-foreground/50 tracking-widest uppercase leading-none mt-0.5">
+                    <p className="text-[9px] text-sidebar-foreground/40 tracking-widest uppercase leading-none mt-0.5">
                         Immoral Growth
                     </p>
                 </div>
             </div>
 
-            {/* Perfil mini */}
+            {/* Perfil */}
             {profile && (
-                <div className="px-4 py-3 border-b border-sidebar-border flex-shrink-0">
+                <div className="px-4 py-3.5 border-b border-sidebar-border flex-shrink-0">
                     <div className="flex items-center gap-2.5">
                         <div className={cn(
-                            'h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0',
-                            isDark ? 'bg-primary/20 text-primary ring-1 ring-primary/40' : 'bg-primary/10 text-primary'
+                            'h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 shrink-0',
+                            isDark ? 'bg-primary/20 text-primary ring-1 ring-primary/30' : 'bg-primary/10 text-primary'
                         )}>
                             {profile.display_name?.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'U'}
                         </div>
                         <div className="min-w-0">
-                            <p className="text-xs font-medium text-sidebar-foreground truncate leading-none">
+                            <p className="text-xs font-semibold text-sidebar-foreground truncate leading-none">
                                 {profile.display_name}
                             </p>
-                            <span className={cn(
-                                'text-[9px] uppercase tracking-wider font-semibold',
-                                isDark ? 'text-primary/70' : 'text-primary/60'
-                            )}>
+                            <span className="text-[9px] uppercase tracking-wider font-medium text-sidebar-foreground/40 mt-0.5 block">
                                 {profile.role === 'superadmin' ? 'Admin' : profile.role === 'dept_head' ? 'Jefe Depto' : profile.role === 'partner' ? 'Partner' : 'Usuario'}
                             </span>
                         </div>
@@ -293,7 +287,7 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
             )}
 
             {/* Nav */}
-            <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+            <nav className="flex-1 px-2.5 py-3 space-y-px overflow-y-auto">
                 {visibleItems.map((item) => {
                     const Icon = Icons[item.icon || ''];
                     const hasChildren = item.children && item.children.length > 0;
@@ -318,15 +312,15 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                                 <button
                                     onClick={() => toggleMenu(item.path)}
                                     className={cn(
-                                        'flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all text-xs font-medium w-full',
+                                        'flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all text-xs font-semibold w-full',
                                         isChildActive
                                             ? isDark
                                                 ? 'bg-primary/15 text-primary'
-                                                : 'bg-sidebar-accent text-sidebar-accent-foreground'
-                                            : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground'
+                                                : 'bg-primary/8 text-primary'
+                                            : 'text-sidebar-foreground/60 hover:bg-muted/60 hover:text-sidebar-foreground'
                                     )}
                                 >
-                                    {Icon && <Icon size={16} className={isChildActive && isDark ? 'text-primary' : ''} />}
+                                    {Icon && <Icon size={15} strokeWidth={isChildActive ? 2.5 : 2} />}
                                     <span className="flex-1 text-left">{item.label}</span>
                                     {!isPartner() && parentHighlight && (
                                         <HighlightDot
@@ -336,10 +330,10 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                                             onDismiss={handleDismissHighlight}
                                         />
                                     )}
-                                    {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                    {isExpanded ? <ChevronDown size={12} className="opacity-50" /> : <ChevronRight size={12} className="opacity-50" />}
                                 </button>
                                 {isExpanded && (
-                                    <div className="ml-5 mt-0.5 mb-1 space-y-0.5 border-l border-sidebar-border/60 pl-2.5">
+                                    <div className="ml-4 mt-0.5 mb-1 space-y-px border-l-2 border-sidebar-border/40 pl-3">
                                         {filteredChildren.map(child => {
                                             const isChildItemActive = location.pathname === child.path;
                                             return (
@@ -350,16 +344,14 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                                                         'flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs',
                                                         isChildItemActive
                                                             ? isDark
-                                                                ? 'bg-primary/15 text-primary font-semibold'
-                                                                : 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold'
-                                                            : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/30 hover:text-sidebar-foreground'
+                                                                ? 'text-primary font-semibold'
+                                                                : 'text-primary font-semibold'
+                                                            : 'text-sidebar-foreground/50 hover:text-sidebar-foreground'
                                                     )}
                                                 >
                                                     <div className={cn(
-                                                        'h-1.5 w-1.5 rounded-full flex-shrink-0',
-                                                        isChildItemActive
-                                                            ? isDark ? 'bg-primary' : 'bg-primary'
-                                                            : 'bg-sidebar-foreground/25'
+                                                        'h-1.5 w-1.5 rounded-full flex-shrink-0 transition-all',
+                                                        isChildItemActive ? 'bg-primary scale-125' : 'bg-sidebar-foreground/20'
                                                     )} />
                                                     {child.label}
                                                 </Link>
@@ -378,15 +370,15 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                             key={item.path}
                             to={item.path}
                             className={cn(
-                                'flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all text-xs font-medium',
+                                'flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all text-xs font-semibold',
                                 isActive
                                     ? isDark
                                         ? 'bg-primary/15 text-primary'
-                                        : 'bg-sidebar-accent text-sidebar-accent-foreground'
-                                    : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground'
+                                        : 'bg-primary/8 text-primary'
+                                    : 'text-sidebar-foreground/60 hover:bg-muted/60 hover:text-sidebar-foreground'
                             )}
                         >
-                            {Icon && <Icon size={16} className={isActive && isDark ? 'text-primary' : ''} />}
+                            {Icon && <Icon size={15} strokeWidth={isActive ? 2.5 : 2} />}
                             <span className="flex-1">{item.label}</span>
                             {!isPartner() && highlight && (
                                 <HighlightDot
@@ -402,12 +394,12 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
             </nav>
 
             {/* Footer */}
-            <div className="px-3 py-3 border-t border-sidebar-border flex-shrink-0">
+            <div className="px-2.5 py-3 border-t border-sidebar-border flex-shrink-0">
                 <button
                     onClick={signOut}
-                    className="flex items-center gap-2.5 px-3 py-2.5 w-full rounded-lg text-sidebar-foreground/60 hover:bg-destructive/10 hover:text-destructive transition-all text-xs font-medium"
+                    className="flex items-center gap-2.5 px-3 py-2.5 w-full rounded-xl text-sidebar-foreground/50 hover:bg-red-50 dark:hover:bg-red-950/20 hover:text-red-600 transition-all text-xs font-semibold"
                 >
-                    <LogOut size={16} />
+                    <LogOut size={15} strokeWidth={2} />
                     Cerrar sesión
                 </button>
             </div>

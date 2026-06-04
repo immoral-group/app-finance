@@ -608,8 +608,8 @@ function DashboardContent() {
         return (
             <div className="flex items-center justify-center h-96">
                 <div className="flex flex-col items-center gap-3">
-                    <div className="h-10 w-10 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
-                    <p className="text-sm text-muted-foreground">Cargando datos…</p>
+                    <div className="h-8 w-8 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
+                    <p className="text-sm text-muted-foreground font-medium">Cargando datos…</p>
                 </div>
             </div>
         );
@@ -622,23 +622,24 @@ function DashboardContent() {
             : 'Anual';
 
     return (
-        <div className="space-y-7">
-            {/* ── Header ─────────────────────────────────────── */}
-            <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="space-y-8 pb-8">
+
+            {/* ── Header ─────────────────────────────────────────────── */}
+            <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div>
-                    <h1 className="text-xl font-semibold tracking-tight text-foreground">Dashboard</h1>
+                    <h1 className="text-2xl font-bold tracking-tight text-foreground">Dashboard</h1>
                     <p className="text-sm text-muted-foreground mt-0.5">Ejercicio fiscal {year}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                    {/* Tabs — segmented control */}
-                    <div className="inline-flex bg-muted rounded-lg p-0.5 gap-0.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                    {/* Tabs */}
+                    <div className="inline-flex bg-muted rounded-xl p-1">
                         {([['general', 'General', LayoutDashboard], ['detalle', 'Análisis', BarChart3]] as const).map(([key, label, Icon]) => (
                             <button
                                 key={key}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${dashboardTab === key
-                                    ? 'bg-card text-foreground shadow-sm'
+                                className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all ${dashboardTab === key
+                                    ? 'bg-white dark:bg-card text-foreground shadow-sm'
                                     : 'text-muted-foreground hover:text-foreground'
-                                    }`}
+                                }`}
                                 onClick={() => setDashboardTab(key as DashboardTab)}
                             >
                                 <Icon size={13} />
@@ -647,15 +648,15 @@ function DashboardContent() {
                         ))}
                     </div>
 
-                    {/* Period picker */}
-                    <div className="inline-flex bg-muted rounded-lg p-0.5 gap-0.5">
+                    {/* Period */}
+                    <div className="inline-flex bg-muted rounded-xl p-1">
                         {([['monthly', 'Mes'], ['quarterly', 'Trim.'], ['annual', 'Año']] as const).map(([key, label]) => (
                             <button
                                 key={key}
-                                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${timePeriod === key
-                                    ? 'bg-card text-foreground shadow-sm'
+                                className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-all ${timePeriod === key
+                                    ? 'bg-white dark:bg-card text-foreground shadow-sm'
                                     : 'text-muted-foreground hover:text-foreground'
-                                    }`}
+                                }`}
                                 onClick={() => setTimePeriod(key as TimePeriod)}
                             >
                                 {label}
@@ -665,17 +666,16 @@ function DashboardContent() {
 
                     {timePeriod === 'monthly' && (
                         <select
-                            className="h-8 border border-border rounded-lg px-2.5 text-xs bg-card focus:outline-none focus:ring-1 focus:ring-primary/40"
+                            className="h-9 border border-border rounded-xl px-3 text-xs bg-card font-medium focus:outline-none focus:ring-2 focus:ring-primary/20"
                             value={selectedMonth}
                             onChange={e => setSelectedMonth(Number(e.target.value))}
                         >
                             {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
                         </select>
                     )}
-
                     {timePeriod === 'quarterly' && (
                         <select
-                            className="h-8 border border-border rounded-lg px-2.5 text-xs bg-card focus:outline-none focus:ring-1 focus:ring-primary/40"
+                            className="h-9 border border-border rounded-xl px-3 text-xs bg-card font-medium focus:outline-none focus:ring-2 focus:ring-primary/20"
                             value={selectedQuarter}
                             onChange={e => setSelectedQuarter(Number(e.target.value))}
                         >
@@ -690,7 +690,7 @@ function DashboardContent() {
                             variant={isConfiguring ? 'secondary' : 'outline'}
                             size="sm"
                             onClick={() => setIsConfiguring(!isConfiguring)}
-                            className="gap-1.5 h-8 text-xs"
+                            className="h-9 gap-1.5 text-xs font-semibold"
                         >
                             <Settings2 size={13} />
                             {isConfiguring ? 'Listo' : 'Widgets'}
@@ -700,10 +700,10 @@ function DashboardContent() {
             </div>
 
             {isConfiguring && (
-                <div className="flex items-center gap-4 px-4 py-3 bg-muted/60 rounded-xl border border-border/60 text-xs">
-                    <span className="font-medium text-muted-foreground">Mostrar secciones:</span>
+                <div className="flex items-center gap-5 px-5 py-3.5 bg-muted/50 rounded-xl border border-border text-xs">
+                    <span className="font-semibold text-muted-foreground">Secciones:</span>
                     {(['kpis', 'departments'] as WidgetType[]).map(w => (
-                        <label key={w} className="flex items-center gap-1.5 cursor-pointer text-foreground hover:text-primary transition-colors">
+                        <label key={w} className="flex items-center gap-2 cursor-pointer text-foreground font-medium">
                             <input type="checkbox" checked={visibleWidgets[w]} onChange={() => toggleWidget(w)} className="rounded border-border" />
                             {w === 'kpis' ? 'KPIs' : 'Departamentos'}
                         </label>
@@ -713,81 +713,113 @@ function DashboardContent() {
 
             {dashboardTab === 'general' && (
                 <>
-                    {/* ── KPI Cards ─────────────────────────────── */}
+                    {/* ── KPI Cards ──────────────────────────────────────── */}
                     {visibleWidgets.kpis && (
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-1 duration-400">
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 
                             {/* Facturación */}
-                            <div className="card-premium bg-card rounded-2xl border border-border/60 p-5">
-                                <div className="flex items-center justify-between mb-4">
-                                    <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Facturación</span>
-                                    <div className="h-8 w-8 rounded-xl bg-primary/8 text-primary flex items-center justify-center">
-                                        <Wallet size={15} />
+                            <div className="card-executive bg-card rounded-2xl border border-border p-6 flex flex-col gap-4">
+                                <div className="flex items-center justify-between">
+                                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Facturación</p>
+                                    <div className="h-8 w-8 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center">
+                                        <Wallet size={15} className="text-blue-600 dark:text-blue-400" />
                                     </div>
                                 </div>
-                                <p className="text-2xl font-bold tracking-tight tabular">{formatCurrency(plKpis.totalBilling)}</p>
-                                <div className="flex items-center gap-1.5 mt-2">
-                                    <span className="text-[11px] text-muted-foreground">Ingresos brutos</span>
-                                    <span className="ml-auto text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                <div>
+                                    <p className="text-3xl font-bold tracking-tight tabular leading-none">{formatCurrency(plKpis.totalBilling)}</p>
+                                </div>
+                                <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
+                                    <span className="text-xs text-muted-foreground">Ingresos brutos</span>
+                                    <span className="text-[11px] font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">{periodLabel}</span>
                                 </div>
                             </div>
 
                             {/* Gastos */}
-                            <div className="card-premium bg-card rounded-2xl border border-border/60 p-5">
-                                <div className="flex items-center justify-between mb-4">
-                                    <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Gastos</span>
-                                    <div className="h-8 w-8 rounded-xl bg-red-500/8 text-red-500 flex items-center justify-center">
-                                        <TrendingDown size={15} />
+                            <div className="card-executive bg-card rounded-2xl border border-border p-6 flex flex-col gap-4">
+                                <div className="flex items-center justify-between">
+                                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Gastos</p>
+                                    <div className="h-8 w-8 rounded-xl bg-red-50 dark:bg-red-950/30 flex items-center justify-center">
+                                        <TrendingDown size={15} className="text-red-500" />
                                     </div>
                                 </div>
-                                <p className="text-2xl font-bold tracking-tight tabular">{formatCurrency(plKpis.totalExpenses)}</p>
-                                <div className="flex items-center gap-1.5 mt-2">
-                                    <span className="text-[11px] text-muted-foreground">Costes operativos</span>
-                                    <span className="ml-auto text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                <div>
+                                    <p className="text-3xl font-bold tracking-tight tabular leading-none">{formatCurrency(plKpis.totalExpenses)}</p>
+                                </div>
+                                <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
+                                    <span className="text-xs text-muted-foreground">Costes operativos</span>
+                                    <span className="text-[11px] font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">{periodLabel}</span>
                                 </div>
                             </div>
 
-                            {/* Margen Neto */}
-                            <div className="card-premium bg-card rounded-2xl border border-border/60 p-5">
-                                <div className="flex items-center justify-between mb-4">
-                                    <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Margen Neto</span>
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.netMargin >= 0 ? 'bg-emerald-500/8 text-emerald-600' : 'bg-red-500/8 text-red-600'}`}>
-                                        <TrendingUp size={15} />
+                            {/* Resultado */}
+                            <div className="card-executive bg-card rounded-2xl border border-border p-6 flex flex-col gap-4">
+                                <div className="flex items-center justify-between">
+                                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Resultado</p>
+                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.netMargin >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
+                                        <TrendingUp size={15} className={plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-500'} />
                                     </div>
                                 </div>
-                                <p className={`text-2xl font-bold tracking-tight tabular ${plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                    {formatCurrency(plKpis.netMargin)}
-                                </p>
-                                <div className="flex items-center gap-1.5 mt-2">
-                                    <span className={`inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-md ${plKpis.netMargin >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                                        {plKpis.marginPercentage.toFixed(1)}% margen
-                                    </span>
-                                    <span className="ml-auto text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                <div>
+                                    <p className={`text-3xl font-bold tracking-tight tabular leading-none ${plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {plKpis.netMargin >= 0 ? '+' : ''}{formatCurrency(plKpis.netMargin)}
+                                    </p>
+                                </div>
+                                <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
+                                    <span className="text-xs text-muted-foreground">Beneficio neto</span>
+                                    <span className="text-[11px] font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                </div>
+                            </div>
+
+                            {/* Margen % */}
+                            <div className="card-executive bg-card rounded-2xl border border-border p-6 flex flex-col gap-4">
+                                <div className="flex items-center justify-between">
+                                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Margen</p>
+                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.marginPercentage >= 0 ? 'bg-violet-50 dark:bg-violet-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
+                                        <BarChart3 size={15} className={plKpis.marginPercentage >= 0 ? 'text-violet-600' : 'text-red-500'} />
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className={`text-3xl font-bold tracking-tight tabular leading-none ${plKpis.marginPercentage >= 0 ? 'text-violet-600' : 'text-red-600'}`}>
+                                        {plKpis.marginPercentage.toFixed(1)}%
+                                    </p>
+                                </div>
+                                <div className="border-t border-border pt-3 mt-auto">
+                                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                        <div
+                                            className={`h-full rounded-full transition-all duration-700 ${plKpis.marginPercentage >= 0 ? 'bg-violet-500' : 'bg-red-500'}`}
+                                            style={{ width: `${Math.min(100, Math.max(0, Math.abs(plKpis.marginPercentage)))}%` }}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* ── Department Cards ──────────────────────── */}
+                    {/* ── Department Performance ──────────────────────────── */}
                     {visibleWidgets.departments && (
-                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                            {/* Toolbar */}
+                        <div className="space-y-4">
                             <div className="flex items-center justify-between gap-3 flex-wrap">
-                                <h2 className="text-sm font-semibold text-foreground">Rendimiento por departamento</h2>
+                                <div>
+                                    <h2 className="text-base font-bold tracking-tight text-foreground">Rendimiento por departamento</h2>
+                                    <p className="text-xs text-muted-foreground mt-0.5">{periodLabel} · {year}</p>
+                                </div>
                                 <div className="flex items-center gap-2 flex-wrap">
                                     {deptFilter === 'main' && (
-                                        <div className="flex flex-wrap gap-1.5 animate-in fade-in duration-200">
+                                        <div className="flex flex-wrap gap-1.5">
                                             {HUB_OPTIONAL.map(v => (
-                                                <label key={v} className={`flex items-center gap-1.5 text-xs cursor-pointer px-2.5 py-1 rounded-lg transition-all border ${visibleVerticals.has(v) ? 'bg-primary/10 border-primary/20 text-primary font-medium' : 'border-border text-muted-foreground hover:text-foreground hover:border-border/80'}`}>
+                                                <label key={v} className={`flex items-center gap-1.5 text-xs cursor-pointer px-3 py-1.5 rounded-lg transition-all border font-semibold ${visibleVerticals.has(v) ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-border/60 bg-card'}`}>
                                                     <input type="checkbox" className="sr-only" checked={visibleVerticals.has(v)} onChange={(e) => setVisibleVerticals(prev => { const s = new Set(prev); e.target.checked ? s.add(v) : s.delete(v); return s; })} />
                                                     {v}
                                                 </label>
                                             ))}
                                         </div>
                                     )}
-                                    <div className="inline-flex bg-muted rounded-lg p-0.5 gap-0.5">
+                                    <div className="inline-flex bg-muted rounded-xl p-1">
                                         {([['main', 'Hubs'], ['verticals', 'Verticales'], ['all', 'Todos']] as const).map(([key, label]) => (
-                                            <button key={key} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${deptFilter === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} onClick={() => setDeptFilter(key)}>
+                                            <button key={key}
+                                                className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-all ${deptFilter === key ? 'bg-white dark:bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                                                onClick={() => setDeptFilter(key)}
+                                            >
                                                 {label}
                                             </button>
                                         ))}
@@ -795,7 +827,6 @@ function DashboardContent() {
                                 </div>
                             </div>
 
-                            {/* Grid */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {deptPerformance
                                     .filter(dept => {
@@ -811,60 +842,73 @@ function DashboardContent() {
                                         const dynamicResultado = isImmoral ? dept.margin : isGroupVisible ? dept.margin : dept.income - dept.directExpenses;
                                         const dynamicMarginPct = dept.income > 0 ? (dynamicResultado / dept.income) * 100 : 0;
                                         const accentColor = DEPT_DOT_COLORS[dept.name] || '#6366f1';
+                                        const isPositive = dynamicResultado >= 0;
 
                                         return (
-                                            <div key={dept.key} className="card-premium bg-card rounded-2xl border border-border/60 overflow-hidden">
-                                                {/* Card top accent bar */}
-                                                <div className="h-0.5 w-full" style={{ backgroundColor: accentColor, opacity: 0.7 }} />
-
-                                                <div className="p-5">
-                                                    {/* Header row */}
-                                                    <div className="flex items-center justify-between mb-4">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: accentColor }} />
-                                                            <span className="text-sm font-semibold text-foreground">{dept.name}</span>
+                                            <div key={dept.key} className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
+                                                <div className="p-6">
+                                                    {/* Header */}
+                                                    <div className="flex items-center justify-between mb-6">
+                                                        <div className="flex items-center gap-2.5">
+                                                            <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: accentColor }} />
+                                                            <span className="text-sm font-bold text-foreground">{dept.name}</span>
                                                         </div>
-                                                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${dynamicResultado >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                                                        <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${isPositive ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400' : 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400'}`}>
                                                             {dynamicMarginPct.toFixed(1)}%
                                                         </span>
                                                     </div>
 
-                                                    {/* Facturación — hero number */}
-                                                    <div className="mb-4 pb-4 border-b border-border/60">
-                                                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-1">Facturación</p>
-                                                        <p className="text-xl font-bold tabular text-foreground">{formatCurrency(dept.income)}</p>
+                                                    {/* Revenue — hero */}
+                                                    <div className="mb-5">
+                                                        <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2">Facturación</p>
+                                                        <p className="text-2xl font-bold tracking-tight tabular leading-none">{formatCurrency(dept.income)}</p>
                                                     </div>
 
-                                                    {/* Expenses breakdown */}
-                                                    <div className="space-y-1.5 mb-4">
+                                                    {/* Margin bar */}
+                                                    <div className="mb-5">
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Margen</span>
+                                                            <span className={`text-xs font-bold tabular ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                                {isPositive ? '+' : ''}{formatCurrency(dynamicResultado)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                                            <div
+                                                                className={`h-full rounded-full transition-all duration-700 ${isPositive ? 'bg-emerald-500' : 'bg-red-500'}`}
+                                                                style={{ width: `${Math.min(100, Math.max(0, Math.abs(dynamicMarginPct)))}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Expense breakdown */}
+                                                    <div className="space-y-2 border-t border-border pt-4">
                                                         {dept.categories.map(cat => {
                                                             const val = dept.breakdown[cat.key] || 0;
+                                                            if (val === 0) return null;
                                                             return (
                                                                 <div key={cat.key} className="flex justify-between items-center">
                                                                     <span className="text-xs text-muted-foreground">{cat.label}</span>
-                                                                    <span className="text-xs font-medium tabular text-foreground/80">{val > 0 ? formatCurrency(val) : <span className="text-muted-foreground/40">—</span>}</span>
+                                                                    <span className="text-xs font-semibold tabular text-foreground/80">{formatCurrency(val)}</span>
                                                                 </div>
                                                             );
                                                         })}
                                                     </div>
 
-                                                    {/* Group % toggle */}
+                                                    {/* Group % */}
                                                     {!isImmoral && (
-                                                        <div className="border-t border-border/60 pt-3">
+                                                        <div className="mt-3">
                                                             {isGroupVisible ? (
                                                                 <div
-                                                                    className={`flex justify-between items-center text-xs text-primary/80 ${isVertical ? 'cursor-pointer hover:text-primary' : ''}`}
+                                                                    className={`flex justify-between items-center text-xs text-primary/70 ${isVertical ? 'cursor-pointer hover:text-primary' : ''}`}
                                                                     onClick={isVertical ? () => setShowGroupForCards(prev => { const n = new Set(prev); n.delete(dept.key); return n; }) : undefined}
-                                                                    title={isVertical ? 'Click para ocultar Group %' : undefined}
                                                                 >
                                                                     <span>Group % <span className="opacity-60">({dept.groupPctDisplay}%)</span></span>
-                                                                    <span className="font-medium tabular">{dept.groupCost > 0 ? formatCurrency(dept.groupCost) : '—'}</span>
+                                                                    <span className="font-semibold tabular">{dept.groupCost > 0 ? formatCurrency(dept.groupCost) : '—'}</span>
                                                                 </div>
                                                             ) : (
                                                                 <button
-                                                                    className="w-full flex justify-center text-muted-foreground/30 hover:text-primary/60 transition-colors"
+                                                                    className="w-full flex justify-center text-muted-foreground/25 hover:text-primary/50 transition-colors mt-1"
                                                                     onClick={() => setShowGroupForCards(prev => { const n = new Set(prev); n.add(dept.key); return n; })}
-                                                                    title="Mostrar Group %"
                                                                 >
                                                                     <MoreHorizontal size={14} />
                                                                 </button>
@@ -872,21 +916,19 @@ function DashboardContent() {
                                                         </div>
                                                     )}
 
-                                                    {/* Resultado */}
-                                                    <div className="mt-3 pt-3 border-t border-border/60">
-                                                        <div className="flex justify-between items-center">
-                                                            <span className="text-xs font-semibold text-foreground/70 uppercase tracking-wider">Resultado</span>
-                                                            <span className={`text-base font-bold tabular ${dynamicResultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                                {formatCurrency(dynamicResultado)}
-                                                            </span>
-                                                        </div>
+                                                    {/* Net result */}
+                                                    <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
+                                                        <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Resultado</span>
+                                                        <span className={`text-base font-bold tabular ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                            {isPositive ? '+' : ''}{formatCurrency(dynamicResultado)}
+                                                        </span>
                                                     </div>
                                                 </div>
                                             </div>
                                         );
                                     })}
                                 {deptPerformance.length === 0 && (
-                                    <div className="col-span-3 py-16 text-center text-sm text-muted-foreground border border-dashed border-border rounded-2xl">
+                                    <div className="col-span-3 py-20 text-center text-sm text-muted-foreground border border-dashed border-border rounded-2xl">
                                         Sin datos de departamentos
                                     </div>
                                 )}
@@ -894,30 +936,38 @@ function DashboardContent() {
                         </div>
                     )}
 
-                    {/* ── Holded ────────────────────────────────── */}
+                    {/* ── Holded ─────────────────────────────────────────── */}
                     {holdedSummary?.connected && (
-                        <div className="space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-600">
-                            <div className="flex items-center gap-2">
-                                <div className="h-5 w-5 rounded bg-blue-600 flex items-center justify-center text-white text-[9px] font-black">H</div>
-                                <h2 className="text-sm font-semibold text-foreground">Holded</h2>
-                                <span className="text-xs text-muted-foreground">Facturación · Tesorería</span>
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-3">
+                                <div className="h-7 w-7 rounded-xl bg-blue-600 flex items-center justify-center">
+                                    <span className="text-white text-[11px] font-black">H</span>
+                                </div>
+                                <div>
+                                    <h2 className="text-base font-bold tracking-tight text-foreground leading-none">Holded</h2>
+                                    <p className="text-xs text-muted-foreground mt-0.5">Facturación · Tesorería</p>
+                                </div>
                             </div>
-                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                                 {[
-                                    { label: 'Facturas Pendientes', value: holdedSummary.invoices_pending?.total || 0, sub: `${holdedSummary.invoices_pending?.count || 0} sin vencer`, icon: FileText, color: 'text-amber-500', bg: 'bg-amber-500/8', click: () => openHoldedDetail('pending') },
-                                    { label: 'Facturas Vencidas', value: holdedSummary.invoices_overdue?.total || 0, sub: `${holdedSummary.invoices_overdue?.count || 0} vencidas`, icon: AlertCircle, color: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-500' : 'text-emerald-500', bg: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'bg-red-500/8' : 'bg-emerald-500/8', valueColor: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-600' : 'text-emerald-600', click: () => openHoldedDetail('overdue') },
-                                    { label: 'Estimado por Recibir', value: holdedSummary.invoices_estimado?.total || 0, sub: `${holdedSummary.invoices_estimado?.count || 0} facturas`, icon: TrendingUp, color: 'text-violet-500', bg: 'bg-violet-500/8' },
-                                    { label: 'Saldo en Caja', value: holdedSummary.treasury_balance || 0, sub: 'Total en tesorería', icon: Landmark, color: 'text-blue-500', bg: 'bg-blue-500/8' },
-                                ].map(({ label, value, sub, icon: Icon, color, bg, valueColor, click }) => (
-                                    <div key={label} className={`card-premium bg-card rounded-xl border border-border/60 p-4 ${click ? 'cursor-pointer' : ''}`} onClick={click}>
-                                        <div className="flex items-start justify-between mb-3">
-                                            <p className="text-[11px] font-medium text-muted-foreground leading-tight">{label}</p>
-                                            <div className={`h-7 w-7 rounded-lg ${bg} ${color} flex items-center justify-center shrink-0`}>
-                                                <Icon size={13} />
+                                    { label: 'Pendientes', value: holdedSummary.invoices_pending?.total || 0, sub: `${holdedSummary.invoices_pending?.count || 0} sin vencer`, icon: FileText, iconBg: 'bg-amber-50 dark:bg-amber-950/30', iconColor: 'text-amber-500', click: () => openHoldedDetail('pending') },
+                                    { label: 'Vencidas', value: holdedSummary.invoices_overdue?.total || 0, sub: `${holdedSummary.invoices_overdue?.count || 0} facturas`, icon: AlertCircle, iconBg: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'bg-red-50 dark:bg-red-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30', iconColor: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-500' : 'text-emerald-500', valueColor: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-600' : '', click: () => openHoldedDetail('overdue') },
+                                    { label: 'Por Recibir', value: holdedSummary.invoices_estimado?.total || 0, sub: `${holdedSummary.invoices_estimado?.count || 0} facturas`, icon: TrendingUp, iconBg: 'bg-violet-50 dark:bg-violet-950/30', iconColor: 'text-violet-500' },
+                                    { label: 'Saldo en Caja', value: holdedSummary.treasury_balance || 0, sub: 'Total en tesorería', icon: Landmark, iconBg: 'bg-blue-50 dark:bg-blue-950/30', iconColor: 'text-blue-500' },
+                                ].map(({ label, value, sub, icon: Icon, iconBg, iconColor, valueColor, click }) => (
+                                    <div
+                                        key={label}
+                                        className={`card-executive bg-card rounded-2xl border border-border p-5 ${click ? 'cursor-pointer' : ''}`}
+                                        onClick={click}
+                                    >
+                                        <div className="flex items-start justify-between mb-4">
+                                            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+                                            <div className={`h-8 w-8 rounded-xl ${iconBg} ${iconColor} flex items-center justify-center shrink-0`}>
+                                                <Icon size={14} />
                                             </div>
                                         </div>
-                                        <p className={`text-lg font-bold tabular ${valueColor || ''}`}>{formatCurrency(value)}</p>
-                                        <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
+                                        <p className={`text-xl font-bold tabular leading-none ${valueColor || 'text-foreground'}`}>{formatCurrency(value)}</p>
+                                        <p className="text-[11px] text-muted-foreground mt-2">{sub}</p>
                                     </div>
                                 ))}
                             </div>
@@ -929,45 +979,36 @@ function DashboardContent() {
             {/* Holded Invoice Detail Modal */}
             {holdedDetailType && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setHoldedDetailType(null)}>
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" />
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
                     <div
-                        className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 slide-in-from-bottom-4 duration-300"
+                        className="relative bg-card rounded-2xl shadow-2xl border border-border w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col"
                         onClick={e => e.stopPropagation()}
                     >
-                        {/* Header */}
-                        <div className={`flex items-center justify-between px-6 py-4 border-b rounded-t-2xl ${holdedDetailType === 'overdue'
-                            ? 'bg-gradient-to-r from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20'
-                            : 'bg-gradient-to-r from-orange-50 to-orange-100/50 dark:from-orange-950/30 dark:to-orange-900/20'
-                            }`}>
+                        <div className="flex items-center justify-between px-6 py-5 border-b border-border">
                             <div className="flex items-center gap-3">
-                                <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${holdedDetailType === 'overdue'
-                                    ? 'bg-red-100 dark:bg-red-900/40 text-red-600'
-                                    : 'bg-orange-100 dark:bg-orange-900/40 text-orange-600'
-                                    }`}>
+                                <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${holdedDetailType === 'overdue' ? 'bg-red-50 text-red-600 dark:bg-red-950/30' : 'bg-amber-50 text-amber-600 dark:bg-amber-950/30'}`}>
                                     {holdedDetailType === 'overdue' ? <AlertCircle size={18} /> : <FileText size={18} />}
                                 </div>
                                 <div>
-                                    <h3 className="text-base font-bold text-foreground">
+                                    <h3 className="text-sm font-bold text-foreground">
                                         {holdedDetailType === 'overdue' ? 'Facturas Vencidas' : 'Facturas Pendientes'}
                                     </h3>
-                                    <p className="text-[11px] text-muted-foreground">
-                                        {holdedDetailType === 'overdue' ? 'Facturas con fecha de vencimiento pasada' : 'Facturas aún no vencidas pendientes de cobro'}
+                                    <p className="text-xs text-muted-foreground">
+                                        {holdedDetailType === 'overdue' ? 'Con fecha de vencimiento pasada' : 'Pendientes de cobro sin vencer'}
                                     </p>
                                 </div>
                             </div>
                             <button
                                 onClick={() => setHoldedDetailType(null)}
-                                className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+                                className="h-8 w-8 rounded-lg hover:bg-muted flex items-center justify-center transition-colors"
                             >
-                                <X size={18} className="text-muted-foreground" />
+                                <X size={16} className="text-muted-foreground" />
                             </button>
                         </div>
-
-                        {/* Content */}
                         <div className="overflow-y-auto flex-1">
                             {holdedDetailLoading ? (
                                 <div className="flex items-center justify-center py-16">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+                                    <div className="h-8 w-8 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
                                 </div>
                             ) : holdedDetailInvoices.length === 0 ? (
                                 <div className="py-16 text-center text-sm text-muted-foreground">
@@ -977,29 +1018,24 @@ function DashboardContent() {
                                 <table className="w-full text-sm">
                                     <thead>
                                         <tr className="border-b bg-muted/30">
-                                            <th className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground">Nº</th>
-                                            <th className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground">Cliente</th>
-                                            <th className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground">Vencimiento</th>
-                                            <th className="px-5 py-3 text-right text-xs font-semibold text-muted-foreground">Total</th>
+                                            <th className="px-5 py-3 text-left text-xs font-bold text-muted-foreground">Nº</th>
+                                            <th className="px-5 py-3 text-left text-xs font-bold text-muted-foreground">Cliente</th>
+                                            <th className="px-5 py-3 text-left text-xs font-bold text-muted-foreground">Vencimiento</th>
+                                            <th className="px-5 py-3 text-right text-xs font-bold text-muted-foreground">Total</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y">
+                                    <tbody>
                                         {holdedDetailInvoices.map((inv: any, i: number) => {
                                             const now = Math.floor(Date.now() / 1000);
                                             const isOverdue = inv.dueDate && inv.dueDate < now;
                                             return (
-                                                <tr key={inv.id || i} className="hover:bg-muted/20 transition-colors">
-                                                    <td className="px-5 py-3 font-mono font-semibold text-foreground text-xs">
-                                                        {inv.docNumber || '-'}
-                                                    </td>
-                                                    <td className="px-5 py-3 text-foreground text-xs max-w-[220px] truncate">
-                                                        {inv.contactName || '-'}
-                                                    </td>
+                                                <tr key={inv.id || i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                                                    <td className="px-5 py-3 font-mono text-xs font-bold text-foreground">{inv.docNumber || '-'}</td>
+                                                    <td className="px-5 py-3 text-xs text-foreground max-w-[200px] truncate">{inv.contactName || '-'}</td>
                                                     <td className={`px-5 py-3 text-xs ${isOverdue ? 'text-red-600 font-semibold' : 'text-muted-foreground'}`}>
                                                         {inv.dueDate ? new Date(inv.dueDate * 1000).toLocaleDateString('es-ES') : '-'}
-                                                        {isOverdue && <span className="ml-1">⚠</span>}
                                                     </td>
-                                                    <td className="px-5 py-3 text-right font-semibold tabular-nums text-foreground text-xs">
+                                                    <td className="px-5 py-3 text-right text-xs font-bold tabular text-foreground">
                                                         {inv.total != null ? `${Number(inv.total).toFixed(2)} €` : '-'}
                                                     </td>
                                                 </tr>
@@ -1007,9 +1043,11 @@ function DashboardContent() {
                                         })}
                                     </tbody>
                                     <tfoot>
-                                        <tr className="border-t bg-muted/30 font-bold">
-                                            <td className="px-5 py-3 text-xs" colSpan={3}>Total ({holdedDetailInvoices.length} factura{holdedDetailInvoices.length !== 1 ? 's' : ''})</td>
-                                            <td className="px-5 py-3 text-right tabular-nums text-xs">
+                                        <tr className="border-t bg-muted/30">
+                                            <td className="px-5 py-3 text-xs font-bold" colSpan={3}>
+                                                Total ({holdedDetailInvoices.length} factura{holdedDetailInvoices.length !== 1 ? 's' : ''})
+                                            </td>
+                                            <td className="px-5 py-3 text-right text-xs font-bold tabular">
                                                 {holdedDetailInvoices.reduce((s: number, inv: any) => s + (inv.total || 0), 0).toFixed(2)} €
                                             </td>
                                         </tr>
@@ -1024,17 +1062,13 @@ function DashboardContent() {
             {dashboardTab === 'detalle' && (
                 <Suspense fallback={
                     <div className="flex items-center justify-center h-96">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                        <div className="h-8 w-8 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
                     </div>
                 }>
-                    <DashboardDetalle
-                        year={year}
-                        activeMonths={activeMonths}
-                        timePeriod={timePeriod}
-                    />
+                    <DashboardDetalle year={year} activeMonths={activeMonths} timePeriod={timePeriod} />
                 </Suspense>
             )}
 
-        </div >
+        </div>
     );
 }
