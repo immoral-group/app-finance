@@ -611,12 +611,10 @@ export default function PLMatrix() {
     const saveMutation = useMutation({
         mutationFn: adminApi.savePLMatrixCell,
         onSuccess: () => {
-            // Optimistic update in handleCellChange already reflects the saved value.
-            // Cache is invalidated on tab switch (handleTabChange) so fresh server
-            // data is always fetched when returning to this tab.
+            queryClient.invalidateQueries({ queryKey: ['pl-matrix', year] });
         },
-        onError: () => {
-            toast.error('Error al guardar');
+        onError: (err: any) => {
+            toast.error(err?.message || 'Error al guardar');
         }
     });
 
