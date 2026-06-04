@@ -1,8 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsApi, Payment, Beneficiary } from '@/lib/api/payments';
 import { payrollApi, Employee } from '@/lib/api/payroll';
-import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
@@ -362,172 +361,198 @@ export default function Payments() {
 
     const isPending = createPaymentMut.isPending || updatePaymentMut.isPending || createBeneficiaryMut.isPending || updateBeneficiaryMut.isPending;
 
+    // ── Synchronized horizontal scrollbars (top mirror + bottom) ──
+    const topScrollRef = useRef<HTMLDivElement>(null);
+    const tableScrollRef = useRef<HTMLDivElement>(null);
+    const innerTableRef = useRef<HTMLTableElement>(null);
+    const [tableScrollWidth, setTableScrollWidth] = useState(0);
+
+    useEffect(() => {
+        const update = () => {
+            if (innerTableRef.current) setTableScrollWidth(innerTableRef.current.scrollWidth);
+        };
+        update();
+        const ro = new ResizeObserver(update);
+        if (innerTableRef.current) ro.observe(innerTableRef.current);
+        return () => ro.disconnect();
+    }, [filteredPayments.length, tab]);
+
+    const syncFromTop = () => {
+        if (tableScrollRef.current && topScrollRef.current) {
+            tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+        }
+    };
+    const syncFromBottom = () => {
+        if (tableScrollRef.current && topScrollRef.current) {
+            topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+        }
+    };
+
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="space-y-6 pb-8">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Payments</h1>
-                    <p className="text-muted-foreground mt-1 text-sm">Gestión de pagos y beneficiarios</p>
+                    <h1 className="text-2xl font-bold tracking-tight text-foreground">Payments</h1>
+                    <p className="text-sm text-muted-foreground mt-0.5">Gestión de pagos y beneficiarios</p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Button variant="outline" size="icon" onClick={handlePrevMonth}><ChevronLeft size={16} /></Button>
-                    <div className="flex items-center px-4 py-2 font-semibold bg-white border rounded-md min-w-0 sm:min-w-[180px] justify-center text-sm">
+                <div className="flex items-center gap-1.5">
+                    <Button variant="outline" size="icon" className="h-9 w-9" onClick={handlePrevMonth}><ChevronLeft size={15} /></Button>
+                    <div className="flex items-center px-4 h-9 font-semibold bg-card border border-border rounded-xl min-w-[160px] justify-center text-sm">
                         {MONTHS[month - 1]} {year}
                     </div>
-                    <Button variant="outline" size="icon" onClick={handleNextMonth}><ChevronRight size={16} /></Button>
+                    <Button variant="outline" size="icon" className="h-9 w-9" onClick={handleNextMonth}><ChevronRight size={15} /></Button>
                 </div>
             </div>
 
-            <div className="flex gap-2 border-b pb-1">
+            {/* Tabs — segmented control */}
+            <div className="inline-flex bg-muted rounded-xl p-1">
                 {([
                     { key: 'payments', label: 'Pagos', icon: Table2 },
                     { key: 'beneficiaries', label: 'Beneficiarios', icon: Users },
                 ] as const).map(t => (
                     <button
                         key={t.key}
-                        className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-md transition-colors ${tab === t.key
-                            ? 'bg-primary text-primary-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all ${tab === t.key
+                            ? 'bg-white dark:bg-card text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
                             }`}
                         onClick={() => setTab(t.key)}
                     >
-                        <t.icon size={16} />
+                        <t.icon size={14} />
                         {t.label}
                     </button>
                 ))}
             </div>
 
             {tab === 'payments' && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                <div className="space-y-4">
 
-                    {/* Alerta de Programados (Cintillo) */}
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-blue-900 p-4 rounded-lg flex items-start gap-3 w-full shadow-sm">
-                        <AlertCircle className="w-5 h-5 mt-0.5 text-blue-600 shrink-0" />
-                        <div className="w-full">
-                            <h4 className="font-semibold text-sm flex items-center gap-2">
-                                Próximos pagos programados este mes
-                                <Badge variant="secondary" className="bg-blue-100 text-blue-800 hover:bg-blue-100">{programados.length}</Badge>
-                            </h4>
-                            {programados.length > 0 ? (
-                                <div className="mt-3 flex flex-wrap gap-2 w-full max-h-[120px] overflow-y-auto pr-2 custom-scrollbar">
-                                    {programados.map(p => (
-                                        <div key={p.id} className="bg-white border border-blue-100 px-3 py-1.5 rounded-md text-sm flex items-center gap-2 shadow-sm">
-                                            <span className="font-medium text-blue-950">{p.beneficiary_name}</span>
-                                            <span className="text-muted-foreground/40">|</span>
-                                            <span className="font-bold text-blue-700">{formatCurrencyWithDecimals(p.total_amount, p.currency)}</span>
-                                            {p.due_date && <span className="text-xs text-blue-600/70">Vence: {format(new Date(p.due_date), 'dd/MM/yy')}</span>}
-                                        </div>
-                                    ))}
+                    {/* Programados */}
+                    {programados.length > 0 && (
+                        <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
+                            <div className="flex items-center gap-2 mb-3">
+                                <div className="h-7 w-7 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center">
+                                    <AlertCircle className="w-4 h-4 text-blue-600" />
                                 </div>
-                            ) : (
-                                <p className="text-sm mt-1 text-blue-600/70">No tienes ningún pago en estado "Programado" actualmente.</p>
-                            )}
+                                <h4 className="text-sm font-bold text-foreground">Próximos pagos programados</h4>
+                                <span className="text-[11px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400 px-2 py-0.5 rounded-lg">{programados.length}</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto pr-1">
+                                {programados.map(p => (
+                                    <div key={p.id} className="bg-muted/50 border border-border px-3 py-1.5 rounded-lg text-xs flex items-center gap-2">
+                                        <span className="font-semibold text-foreground">{p.beneficiary_name}</span>
+                                        <span className="font-bold text-blue-600 tabular">{formatCurrencyWithDecimals(p.total_amount, p.currency)}</span>
+                                        {p.due_date && <span className="text-[11px] text-muted-foreground">vence {format(new Date(p.due_date), 'dd/MM/yy')}</span>}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* Toolbar */}
-                    <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4 p-4 bg-card border rounded-lg">
-                        <div className="flex items-center gap-3 flex-wrap flex-1">
+                    <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 p-4 bg-card border border-border rounded-2xl">
+                        <div className="flex items-center gap-2 flex-wrap flex-1">
                             <div className="relative w-56">
-                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                                <Input placeholder="Buscar..." className="pl-9" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                <Input placeholder="Buscar..." className="pl-9 h-9 rounded-xl" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                             </div>
-                            <select className="border rounded-md px-3 py-2 text-sm bg-white" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                            <select className="border border-border rounded-xl px-3 h-9 text-sm bg-background" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
                                 <option value="all">Todos los estados</option>
                                 <option value="pendiente">Pendiente</option>
                                 <option value="programado">Programado</option>
                                 <option value="pagado">Pagado</option>
                             </select>
-                            <select className="border rounded-md px-3 py-2 text-sm bg-white" value={filterType} onChange={e => setFilterType(e.target.value)}>
+                            <select className="border border-border rounded-xl px-3 h-9 text-sm bg-background" value={filterType} onChange={e => setFilterType(e.target.value)}>
                                 <option value="all">Todos los tipos</option>
                                 {PAYMENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                             </select>
                             {uniqueBanks.length > 0 && (
-                                <select className="border rounded-md px-3 py-2 text-sm bg-white" value={filterBank} onChange={e => setFilterBank(e.target.value)}>
+                                <select className="border border-border rounded-xl px-3 h-9 text-sm bg-background" value={filterBank} onChange={e => setFilterBank(e.target.value)}>
                                     <option value="all">Todos los bancos</option>
                                     {uniqueBanks.map(b => <option key={b} value={b}>{b}</option>)}
                                 </select>
                             )}
 
                             {/* Date range filter */}
-                            <div className="flex items-center gap-2 bg-muted/30 border rounded-md px-3 py-1.5 focus-within:ring-1 focus-within:ring-ring focus-within:border-primary transition-all">
+                            <div className="flex items-center gap-2 bg-background border border-border rounded-xl px-3 h-9 focus-within:ring-2 focus-within:ring-primary/20 transition-all">
                                 <CalendarRange className="w-4 h-4 text-primary shrink-0" />
-                                <div className="flex items-center gap-2">
-                                    <div className="flex flex-col">
-                                        <span className="text-[10px] uppercase text-muted-foreground font-semibold leading-none mb-1">Desde fecha</span>
-                                        <input type="date" className="text-sm bg-transparent outline-none cursor-pointer w-[110px]" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
-                                    </div>
-                                    <span className="text-muted-foreground/30 text-xl font-light">-</span>
-                                    <div className="flex flex-col">
-                                        <span className="text-[10px] uppercase text-muted-foreground font-semibold leading-none mb-1">Hasta fecha</span>
-                                        <input type="date" className="text-sm bg-transparent outline-none cursor-pointer w-[110px]" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />
-                                    </div>
-                                </div>
+                                <input type="date" className="text-xs bg-transparent outline-none cursor-pointer w-[105px]" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
+                                <span className="text-muted-foreground/40">–</span>
+                                <input type="date" className="text-xs bg-transparent outline-none cursor-pointer w-[105px]" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />
                                 {(filterDateFrom || filterDateTo) && (
-                                    <button onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }} className="ml-2 text-muted-foreground hover:text-destructive bg-white rounded-full p-1 shadow-sm border transition-colors" title="Limpiar fechas">
-                                        <X size={12} />
+                                    <button onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }} className="text-muted-foreground hover:text-destructive transition-colors" title="Limpiar fechas">
+                                        <X size={13} />
                                     </button>
                                 )}
                             </div>
                         </div>
-                        <Button onClick={() => { setEditingPayment(null); setPaymentForm({ ...emptyPaymentForm }); setShowPaymentForm(true); }} className="gap-2 shrink-0">
-                            <Plus size={16} /> Nuevo Pago
+                        <Button onClick={() => { setEditingPayment(null); setPaymentForm({ ...emptyPaymentForm }); setShowPaymentForm(true); }} className="gap-2 shrink-0 h-9 text-xs font-semibold">
+                            <Plus size={15} /> Nuevo Pago
                         </Button>
                     </div>
 
                     {/* Summary row */}
-                    <div className="flex flex-wrap gap-3 sm:gap-6 text-sm bg-card border rounded-md px-4 py-2 font-medium">
-                        <span className="text-muted-foreground">{filteredPayments.length} pagos listados</span>
-                        <div className="h-5 w-px bg-border" />
-                        <span className="text-green-600 flex items-center gap-2">
-                            <span>Pagado:</span>
-                            {pagadoEUR > 0 && <span>{formatCurrencyWithDecimals(pagadoEUR, 'EUR')}</span>}
-                            {pagadoEUR > 0 && pagadoUSD > 0 && <span className="text-muted-foreground/50">|</span>}
-                            {pagadoUSD > 0 && <span>{formatCurrencyWithDecimals(pagadoUSD, 'USD')}</span>}
-                            {(pagadoEUR > 0 || pagadoUSD > 0) && pagadoCOP > 0 && <span className="text-muted-foreground/50">|</span>}
-                            {pagadoCOP > 0 && <span>{formatCurrencyWithDecimals(pagadoCOP, 'COP')}</span>}
-                            {pagadoEUR === 0 && pagadoUSD === 0 && pagadoCOP === 0 && <span>€0.00</span>}
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm bg-card border border-border rounded-2xl px-5 py-3">
+                        <span className="text-xs font-semibold text-muted-foreground">{filteredPayments.length} pagos listados</span>
+                        <div className="h-4 w-px bg-border" />
+                        <span className="flex items-center gap-2 text-xs">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            <span className="font-semibold text-muted-foreground">Pagado:</span>
+                            <span className="font-bold text-emerald-600 tabular">
+                                {[pagadoEUR > 0 && formatCurrencyWithDecimals(pagadoEUR, 'EUR'), pagadoUSD > 0 && formatCurrencyWithDecimals(pagadoUSD, 'USD'), pagadoCOP > 0 && formatCurrencyWithDecimals(pagadoCOP, 'COP')].filter(Boolean).join('  ·  ') || '€0.00'}
+                            </span>
                         </span>
-                        <div className="h-5 w-px bg-border" />
-                        <span className="text-amber-600 flex items-center gap-2">
-                            <span>Pendiente:</span>
-                            {pendienteEUR > 0 && <span>{formatCurrencyWithDecimals(pendienteEUR, 'EUR')}</span>}
-                            {pendienteEUR > 0 && pendienteUSD > 0 && <span className="text-muted-foreground/50">|</span>}
-                            {pendienteUSD > 0 && <span>{formatCurrencyWithDecimals(pendienteUSD, 'USD')}</span>}
-                            {(pendienteEUR > 0 || pendienteUSD > 0) && pendienteCOP > 0 && <span className="text-muted-foreground/50">|</span>}
-                            {pendienteCOP > 0 && <span>{formatCurrencyWithDecimals(pendienteCOP, 'COP')}</span>}
-                            {pendienteEUR === 0 && pendienteUSD === 0 && pendienteCOP === 0 && <span>€0.00</span>}
+                        <div className="h-4 w-px bg-border" />
+                        <span className="flex items-center gap-2 text-xs">
+                            <span className="h-2 w-2 rounded-full bg-amber-500" />
+                            <span className="font-semibold text-muted-foreground">Pendiente:</span>
+                            <span className="font-bold text-amber-600 tabular">
+                                {[pendienteEUR > 0 && formatCurrencyWithDecimals(pendienteEUR, 'EUR'), pendienteUSD > 0 && formatCurrencyWithDecimals(pendienteUSD, 'USD'), pendienteCOP > 0 && formatCurrencyWithDecimals(pendienteCOP, 'COP')].filter(Boolean).join('  ·  ') || '€0.00'}
+                            </span>
                         </span>
                     </div>
 
-                    {/* Table */}
-                    <Card>
-                        <div className="rounded-md border overflow-x-auto min-h-[400px]">
-                            <table className="w-full text-sm min-w-[900px]">
-                                <thead className="bg-muted/50 border-b">
+                    {/* Table — sticky top scrollbar + sticky header */}
+                    <div className="rounded-2xl border border-border overflow-hidden bg-card shadow-sm">
+                        {/* Top mirror scrollbar (sticky, always reachable) */}
+                        <div
+                            ref={topScrollRef}
+                            onScroll={syncFromTop}
+                            className="overflow-x-auto overflow-y-hidden border-b border-border bg-muted/30"
+                            style={{ height: 12 }}
+                        >
+                            <div style={{ width: tableScrollWidth, height: 1 }} />
+                        </div>
+                        <div
+                            ref={tableScrollRef}
+                            onScroll={syncFromBottom}
+                            className="overflow-auto max-h-[65vh]"
+                        >
+                            <table ref={innerTableRef} className="w-full text-sm min-w-[900px]">
+                                <thead className="sticky top-0 z-20 bg-muted/80 backdrop-blur border-b border-border">
                                     <tr>
-                                        <th className="h-10 px-3 text-left font-medium text-muted-foreground">Tipo</th>
-                                        <th className="h-10 px-3 text-left font-medium text-muted-foreground">Beneficiario</th>
-                                        <th className="h-10 px-3 text-left font-medium text-muted-foreground">Datos Bancarios</th>
-                                        <th className="h-10 px-3 text-left font-medium text-muted-foreground">Banco Emisor</th>
-                                        <th className="h-10 px-3 text-left font-medium text-muted-foreground">Fact. ADMK</th>
-                                        <th className="h-10 px-3 text-left font-medium text-muted-foreground">Fact. Infinite</th>
-                                        <th className="h-10 px-3 text-right font-medium text-muted-foreground">Base Imp.</th>
-                                        <th className="h-10 px-3 text-right font-medium text-muted-foreground">Incentivos</th>
-                                        <th className="h-10 px-3 text-right font-medium text-muted-foreground">Comisión</th>
-                                        <th className="h-10 px-3 text-right font-medium text-muted-foreground">Total EUR</th>
-                                        <th className="h-10 px-3 text-right font-medium text-muted-foreground">Total USD</th>
-                                        <th className="h-10 px-3 text-right font-medium text-muted-foreground">Total COP</th>
-                                        <th className="h-10 px-3 text-center font-medium text-muted-foreground">Estado</th>
-                                        <th className="h-10 px-3 text-center font-medium text-muted-foreground">Fecha Pago</th>
-                                        <th className="h-10 px-3 text-center font-medium text-muted-foreground w-24">Acciones</th>
+                                        <th className="h-11 px-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Tipo</th>
+                                        <th className="h-11 px-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Beneficiario</th>
+                                        <th className="h-11 px-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Datos Bancarios</th>
+                                        <th className="h-11 px-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Banco Emisor</th>
+                                        <th className="h-11 px-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Fact. ADMK</th>
+                                        <th className="h-11 px-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Fact. Infinite</th>
+                                        <th className="h-11 px-3 text-right text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Base Imp.</th>
+                                        <th className="h-11 px-3 text-right text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Incentivos</th>
+                                        <th className="h-11 px-3 text-right text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Comisión</th>
+                                        <th className="h-11 px-3 text-right text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Total EUR</th>
+                                        <th className="h-11 px-3 text-right text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Total USD</th>
+                                        <th className="h-11 px-3 text-right text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Total COP</th>
+                                        <th className="h-11 px-3 text-center text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Estado</th>
+                                        <th className="h-11 px-3 text-center text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Fecha Pago</th>
+                                        <th className="h-11 px-3 text-center text-[11px] font-bold uppercase tracking-wider text-muted-foreground w-24">Acciones</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {loadingPayments ? (
-                                        <tr><td colSpan={15} className="p-8 text-center text-muted-foreground bg-white"><Loader2 className="animate-spin mx-auto w-6 h-6" /></td></tr>
+                                        <tr><td colSpan={15} className="p-12 text-center text-muted-foreground"><Loader2 className="animate-spin mx-auto w-6 h-6" /></td></tr>
                                     ) : filteredPayments.length === 0 ? (
-                                        <tr><td colSpan={15} className="p-8 text-center text-muted-foreground bg-white">No se encontraron pagos.</td></tr>
+                                        <tr><td colSpan={15} className="p-12 text-center text-sm text-muted-foreground">No se encontraron pagos.</td></tr>
                                     ) : (
                                         filteredPayments.map(p => {
                                             const sc = STATUS_CONFIG[p.payment_status] || STATUS_CONFIG.pendiente;
@@ -536,11 +561,11 @@ export default function Payments() {
                                             const totalUSD = p.currency === 'USD' ? p.total_amount : 0;
                                             const totalCOP = p.currency === 'COP' ? p.total_amount : 0;
                                             return (
-                                                <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors">
+                                                <tr key={p.id} className="border-b border-border/60 hover:bg-muted/30 transition-colors">
                                                     <td className="p-3">
                                                         <Badge variant="outline" className="text-xs">{PAYMENT_TYPES.find(t => t.value === p.payment_type)?.label || p.payment_type}</Badge>
                                                     </td>
-                                                    <td className="p-3 font-medium">
+                                                    <td className="p-3 font-semibold">
                                                         <span>{p.beneficiary_name || '—'}</span>
                                                         {p.beneficiary_name && <CopyButton text={p.beneficiary_name} />}
                                                     </td>
@@ -554,13 +579,13 @@ export default function Payments() {
                                                             </div>
                                                         ) : '—'}
                                                     </td>
-                                                    <td className="p-3 text-muted-foreground">{p.issuing_bank || '—'}</td>
+                                                    <td className="p-3 text-muted-foreground text-xs">{p.issuing_bank || '—'}</td>
                                                     <td className="p-3 text-xs text-muted-foreground">{p.amount_admk || '—'}</td>
                                                     <td className="p-3 text-xs text-muted-foreground">{p.amount_infinite || '—'}</td>
-                                                    <td className="p-3 text-right">{p.base_amount ? formatCurrencyWithDecimals(p.base_amount, p.currency) : '—'}</td>
-                                                    <td className="p-3 text-right text-emerald-600/80">{p.incentives_amount ? formatCurrencyWithDecimals(p.incentives_amount, p.currency) : '—'}</td>
-                                                    <td className="p-3 text-right text-rose-600/80">{p.commission_amount ? formatCurrencyWithDecimals(p.commission_amount, p.currency) : '—'}</td>
-                                                    <td className="p-3 text-right font-bold">
+                                                    <td className="p-3 text-right tabular">{p.base_amount ? formatCurrencyWithDecimals(p.base_amount, p.currency) : '—'}</td>
+                                                    <td className="p-3 text-right tabular text-emerald-600/80">{p.incentives_amount ? formatCurrencyWithDecimals(p.incentives_amount, p.currency) : '—'}</td>
+                                                    <td className="p-3 text-right tabular text-rose-600/80">{p.commission_amount ? formatCurrencyWithDecimals(p.commission_amount, p.currency) : '—'}</td>
+                                                    <td className="p-3 text-right font-bold tabular">
                                                         {totalEUR > 0 ? (
                                                             <span className="flex items-center justify-end">
                                                                 {formatCurrencyWithDecimals(totalEUR)}
@@ -568,7 +593,7 @@ export default function Payments() {
                                                             </span>
                                                         ) : '—'}
                                                     </td>
-                                                    <td className="p-3 text-right font-bold text-blue-600">
+                                                    <td className="p-3 text-right font-bold tabular text-blue-600">
                                                         {totalUSD > 0 ? (
                                                             <span className="flex items-center justify-end">
                                                                 {formatCurrencyWithDecimals(totalUSD, 'USD')}
@@ -576,7 +601,7 @@ export default function Payments() {
                                                             </span>
                                                         ) : '—'}
                                                     </td>
-                                                    <td className="p-3 text-right font-bold text-orange-700">
+                                                    <td className="p-3 text-right font-bold tabular text-orange-700">
                                                         {totalCOP > 0 ? (
                                                             <span className="flex items-center justify-end">
                                                                 {formatCurrencyWithDecimals(totalCOP, 'COP')}
@@ -593,13 +618,13 @@ export default function Payments() {
                                                                     statusMut.mutate({ id: p.id, status: 'pagado' });
                                                                 }
                                                             }}
-                                                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium cursor-pointer transition-colors ${sc.bg} ${sc.color} hover:opacity-80`}
+                                                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition-colors ${sc.bg} ${sc.color} hover:opacity-80`}
                                                         >
                                                             {p.payment_status === 'pagado' && <Check size={12} />}
                                                             {sc.label}
                                                         </button>
                                                     </td>
-                                                    <td className="p-3 text-center text-xs text-muted-foreground">
+                                                    <td className="p-3 text-center text-xs text-muted-foreground tabular">
                                                         {p.payment_date ? format(new Date(p.payment_date), 'dd/MM/yy') : '—'}
                                                     </td>
                                                     <td className="p-3">
@@ -622,42 +647,42 @@ export default function Payments() {
                                 </tbody>
                             </table>
                         </div>
-                    </Card>
+                    </div>
                 </div>
             )}
 
             {/* TAB: BENEFICIARIES */}
             {tab === 'beneficiaries' && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                        <p className="text-muted-foreground">{beneficiaries.length} beneficiarios registrados</p>
-                        <Button onClick={() => { setEditingBeneficiary(null); setBeneficiaryForm({ name: '', type: 'transfer', bank_details: '', preferred_payment_method: '', notes: '' }); setShowBeneficiaryForm(true); }} className="gap-2">
-                            <Plus size={16} /> Nuevo Beneficiario
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <p className="text-xs font-semibold text-muted-foreground">{beneficiaries.length} beneficiarios registrados</p>
+                        <Button onClick={() => { setEditingBeneficiary(null); setBeneficiaryForm({ name: '', type: 'transfer', bank_details: '', preferred_payment_method: '', notes: '' }); setShowBeneficiaryForm(true); }} className="gap-2 h-9 text-xs font-semibold">
+                            <Plus size={15} /> Nuevo Beneficiario
                         </Button>
                     </div>
 
-                    <Card>
-                        <div className="rounded-md border overflow-x-auto">
+                    <div className="rounded-2xl border border-border overflow-hidden bg-card shadow-sm">
+                        <div className="overflow-x-auto">
                             <table className="w-full text-sm min-w-[600px]">
-                                <thead className="bg-muted/50 border-b">
+                                <thead className="bg-muted/80 border-b border-border">
                                     <tr>
-                                        <th className="h-10 px-4 text-left font-medium text-muted-foreground">Nombre</th>
-                                        <th className="h-10 px-4 text-center font-medium text-muted-foreground">Tipo</th>
-                                        <th className="h-10 px-4 text-left font-medium text-muted-foreground">Datos Bancarios</th>
-                                        <th className="h-10 px-4 text-left font-medium text-muted-foreground">Método de Pago</th>
-                                        <th className="h-10 px-4 text-left font-medium text-muted-foreground">Notas</th>
-                                        <th className="h-10 px-4 text-center font-medium text-muted-foreground w-24">Acciones</th>
+                                        <th className="h-11 px-4 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Nombre</th>
+                                        <th className="h-11 px-4 text-center text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Tipo</th>
+                                        <th className="h-11 px-4 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Datos Bancarios</th>
+                                        <th className="h-11 px-4 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Método de Pago</th>
+                                        <th className="h-11 px-4 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Notas</th>
+                                        <th className="h-11 px-4 text-center text-[11px] font-bold uppercase tracking-wider text-muted-foreground w-24">Acciones</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {loadingBeneficiaries ? (
-                                        <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">Cargando...</td></tr>
+                                        <tr><td colSpan={6} className="p-12 text-center text-muted-foreground"><Loader2 className="animate-spin mx-auto w-6 h-6" /></td></tr>
                                     ) : beneficiaries.length === 0 ? (
-                                        <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No hay beneficiarios registrados.</td></tr>
+                                        <tr><td colSpan={6} className="p-12 text-center text-sm text-muted-foreground">No hay beneficiarios registrados.</td></tr>
                                     ) : (
                                         beneficiaries.map(b => (
-                                            <tr key={b.id} className={`border-b hover:bg-muted/30 transition-colors ${!b.is_active ? 'opacity-50' : ''}`}>
-                                                <td className="p-4 font-medium">{b.name}</td>
+                                            <tr key={b.id} className={`border-b border-border/60 hover:bg-muted/30 transition-colors ${!b.is_active ? 'opacity-50' : ''}`}>
+                                                <td className="p-4 font-semibold">{b.name}</td>
                                                 <td className="p-4 text-center">
                                                     <Badge variant="outline" className="text-xs">
                                                         {BENEFICIARY_TYPES.find(t => t.value === b.type)?.label || b.type}
@@ -682,7 +707,7 @@ export default function Payments() {
                                 </tbody>
                             </table>
                         </div>
-                    </Card>
+                    </div>
                 </div>
             )}
 

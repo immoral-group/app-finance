@@ -718,77 +718,89 @@ function DashboardContent() {
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 
                             {/* Facturación */}
-                            <div className="card-executive bg-card rounded-2xl border border-border p-6 flex flex-col gap-4">
-                                <div className="flex items-center justify-between">
-                                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Facturación</p>
-                                    <div className="h-8 w-8 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center">
-                                        <Wallet size={15} className="text-blue-600 dark:text-blue-400" />
+                            <div className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
+                                <div className="h-1 w-full bg-blue-500" />
+                                <div className="p-6 flex flex-col gap-4">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Facturación</p>
+                                        <div className="h-8 w-8 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center">
+                                            <Wallet size={15} className="text-blue-600 dark:text-blue-400" />
+                                        </div>
                                     </div>
-                                </div>
-                                <div>
-                                    <p className="text-3xl font-bold tracking-tight tabular leading-none">{formatCurrency(plKpis.totalBilling)}</p>
-                                </div>
-                                <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
-                                    <span className="text-xs text-muted-foreground">Ingresos brutos</span>
-                                    <span className="text-[11px] font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                    <div>
+                                        <p className="text-3xl font-bold tracking-tight tabular leading-none">{formatCurrency(plKpis.totalBilling)}</p>
+                                    </div>
+                                    <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
+                                        <span className="text-xs text-muted-foreground">Ingresos brutos</span>
+                                        <span className="text-[11px] font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                    </div>
                                 </div>
                             </div>
 
                             {/* Gastos */}
-                            <div className="card-executive bg-card rounded-2xl border border-border p-6 flex flex-col gap-4">
-                                <div className="flex items-center justify-between">
-                                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Gastos</p>
-                                    <div className="h-8 w-8 rounded-xl bg-red-50 dark:bg-red-950/30 flex items-center justify-center">
-                                        <TrendingDown size={15} className="text-red-500" />
+                            <div className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
+                                <div className="h-1 w-full bg-red-500" />
+                                <div className="p-6 flex flex-col gap-4">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Gastos</p>
+                                        <div className="h-8 w-8 rounded-xl bg-red-50 dark:bg-red-950/30 flex items-center justify-center">
+                                            <TrendingDown size={15} className="text-red-500" />
+                                        </div>
                                     </div>
-                                </div>
-                                <div>
-                                    <p className="text-3xl font-bold tracking-tight tabular leading-none">{formatCurrency(plKpis.totalExpenses)}</p>
-                                </div>
-                                <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
-                                    <span className="text-xs text-muted-foreground">Costes operativos</span>
-                                    <span className="text-[11px] font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                    <div>
+                                        <p className="text-3xl font-bold tracking-tight tabular leading-none">{formatCurrency(plKpis.totalExpenses)}</p>
+                                    </div>
+                                    <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
+                                        <span className="text-xs text-muted-foreground">Costes operativos</span>
+                                        <span className="text-[11px] font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                    </div>
                                 </div>
                             </div>
 
                             {/* Resultado */}
-                            <div className="card-executive bg-card rounded-2xl border border-border p-6 flex flex-col gap-4">
-                                <div className="flex items-center justify-between">
-                                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Resultado</p>
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.netMargin >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
-                                        <TrendingUp size={15} className={plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-500'} />
+                            <div className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
+                                <div className={`h-1 w-full ${plKpis.netMargin >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                <div className="p-6 flex flex-col gap-4">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Resultado</p>
+                                        <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.netMargin >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
+                                            <TrendingUp size={15} className={plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-500'} />
+                                        </div>
                                     </div>
-                                </div>
-                                <div>
-                                    <p className={`text-3xl font-bold tracking-tight tabular leading-none ${plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                        {plKpis.netMargin >= 0 ? '+' : ''}{formatCurrency(plKpis.netMargin)}
-                                    </p>
-                                </div>
-                                <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
-                                    <span className="text-xs text-muted-foreground">Beneficio neto</span>
-                                    <span className="text-[11px] font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                    <div>
+                                        <p className={`text-3xl font-bold tracking-tight tabular leading-none ${plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            {plKpis.netMargin >= 0 ? '+' : ''}{formatCurrency(plKpis.netMargin)}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
+                                        <span className="text-xs text-muted-foreground">Beneficio neto</span>
+                                        <span className="text-[11px] font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                    </div>
                                 </div>
                             </div>
 
                             {/* Margen % */}
-                            <div className="card-executive bg-card rounded-2xl border border-border p-6 flex flex-col gap-4">
-                                <div className="flex items-center justify-between">
-                                    <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Margen</p>
-                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.marginPercentage >= 0 ? 'bg-violet-50 dark:bg-violet-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
-                                        <BarChart3 size={15} className={plKpis.marginPercentage >= 0 ? 'text-violet-600' : 'text-red-500'} />
+                            <div className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
+                                <div className={`h-1 w-full ${plKpis.marginPercentage >= 0 ? 'bg-violet-500' : 'bg-red-500'}`} />
+                                <div className="p-6 flex flex-col gap-4">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Margen</p>
+                                        <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.marginPercentage >= 0 ? 'bg-violet-50 dark:bg-violet-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
+                                            <BarChart3 size={15} className={plKpis.marginPercentage >= 0 ? 'text-violet-600' : 'text-red-500'} />
+                                        </div>
                                     </div>
-                                </div>
-                                <div>
-                                    <p className={`text-3xl font-bold tracking-tight tabular leading-none ${plKpis.marginPercentage >= 0 ? 'text-violet-600' : 'text-red-600'}`}>
-                                        {plKpis.marginPercentage.toFixed(1)}%
-                                    </p>
-                                </div>
-                                <div className="border-t border-border pt-3 mt-auto">
-                                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full rounded-full transition-all duration-700 ${plKpis.marginPercentage >= 0 ? 'bg-violet-500' : 'bg-red-500'}`}
-                                            style={{ width: `${Math.min(100, Math.max(0, Math.abs(plKpis.marginPercentage)))}%` }}
-                                        />
+                                    <div>
+                                        <p className={`text-3xl font-bold tracking-tight tabular leading-none ${plKpis.marginPercentage >= 0 ? 'text-violet-600' : 'text-red-600'}`}>
+                                            {plKpis.marginPercentage.toFixed(1)}%
+                                        </p>
+                                    </div>
+                                    <div className="border-t border-border pt-3 mt-auto">
+                                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-700 ${plKpis.marginPercentage >= 0 ? 'bg-violet-500' : 'bg-red-500'}`}
+                                                style={{ width: `${Math.min(100, Math.max(0, Math.abs(plKpis.marginPercentage)))}%` }}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
