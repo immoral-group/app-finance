@@ -160,5 +160,12 @@
     transform: translateY(-1px);
   }
 
-  .card-premium { @apply card-executive; }
+  .card-premium {
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  .card-premium:hover {
+    box-shadow: 0 8px 24px -4px rgb(0 0 0 / 0.10), 0 2px 8px -2px rgb(0 0 0 / 0.05);
+    transform: translateY(-1px);
+  }
 }
