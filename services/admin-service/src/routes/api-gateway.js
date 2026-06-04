@@ -10,6 +10,7 @@ import plRoutes from './pl.js';
 import paymentRoutes from './payments.js';
 import settingsRoutes from './settings.js';
 import usersRoutes from './users.js';
+import budgetRequestsRoutes from './budget-requests.js';
 
 const router = express.Router();
 
@@ -62,6 +63,14 @@ router.use('/payments', requireScope('payments:read'), paymentRoutes);
 // ── Users ────────────────────────────────────────
 router.use('/users', requireScope('users:read'), usersRoutes);
 
+// ── Budget Requests ───────────────────────────────
+// Scope: budget-requests:read
+// Endpoints útiles para Brian:
+//   GET /api/budget-requests/summary?year=2026
+//   GET /api/budget-requests/dept/Immoralia?year=2026&status=pending
+//   GET /api/budget-requests?year=2026&dept=Imcontent&status=approved
+router.use('/budget-requests', requireScope('budget-requests:read'), budgetRequestsRoutes);
+
 // ── API Info ─────────────────────────────────────
 router.get('/', (req, res) => {
     res.json({
@@ -71,6 +80,20 @@ router.get('/', (req, res) => {
         api_key_id: req.apiKeyId,
         scopes: req.apiKeyPermissions,
         documentation: '/developers/docs',
+        endpoints: {
+            billing: 'GET /api/billing',
+            clients: 'GET /api/clients',
+            dashboard: 'GET /api/dashboard',
+            expenses: 'GET /api/expenses',
+            pl: 'GET /api/pl',
+            payments: 'GET /api/payments',
+            users: 'GET /api/users',
+            budget_requests: {
+                summary: 'GET /api/budget-requests/summary?year=',
+                by_dept: 'GET /api/budget-requests/dept/:dept?year=&status=',
+                list: 'GET /api/budget-requests?year=&dept=&status=',
+            },
+        },
     });
 });
 

@@ -90,6 +90,112 @@ function fmtEur(val) {
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 /**
+ * GET /budget-requests/summary?year=
+ * Resumen agregado por depto y estado — ideal para Brian
+ */
+router.get('/summary', async (req, res) => {
+    const { year } = req.query;
+    try {
+        let q = supabase.from('budget_requests').select('*');
+        if (year) q = q.eq('fiscal_year', parseInt(year));
+
+        const { data, error } = await q.order('created_at', { ascending: false });
+        if (error) throw error;
+
+        const rows = data || [];
+
+        // Agrupar por depto
+        const byDept = {};
+        rows.forEach(r => {
+            if (!byDept[r.dept]) {
+                byDept[r.dept] = { dept: r.dept, total: 0, pending: 0, approved: 0, rejected: 0, requests: [] };
+            }
+            byDept[r.dept].total++;
+            byDept[r.dept][r.status]++;
+            byDept[r.dept].requests.push({
+                id: r.id,
+                category: r.category,
+                item: r.item,
+                month: MONTHS[r.month_idx],
+                month_idx: r.month_idx,
+                fiscal_year: r.fiscal_year,
+                current_value: r.current_value,
+                requested_value: r.requested_value,
+                difference: r.requested_value - r.current_value,
+                reason: r.reason || null,
+                status: r.status,
+                review_notes: r.review_notes || null,
+                requested_by_email: r.requested_by_email || null,
+                reviewed_by_email: r.reviewed_by_email || null,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            });
+        });
+
+        res.json({
+            fiscal_year: year ? parseInt(year) : null,
+            total_requests: rows.length,
+            pending: rows.filter(r => r.status === 'pending').length,
+            approved: rows.filter(r => r.status === 'approved').length,
+            rejected: rows.filter(r => r.status === 'rejected').length,
+            by_dept: Object.values(byDept),
+        });
+    } catch (err) {
+        console.error('[BUDGET-REQ] SUMMARY error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * GET /budget-requests/dept/:dept?year=&status=
+ * Todas las solicitudes de un departamento específico con detalle completo
+ */
+router.get('/dept/:dept', async (req, res) => {
+    const { dept } = req.params;
+    const { year, status } = req.query;
+    try {
+        let q = supabase.from('budget_requests').select('*').eq('dept', dept);
+        if (year) q = q.eq('fiscal_year', parseInt(year));
+        if (status) q = q.eq('status', status);
+        q = q.order('created_at', { ascending: false });
+
+        const { data, error } = await q;
+        if (error) throw error;
+
+        const rows = data || [];
+        res.json({
+            dept,
+            fiscal_year: year ? parseInt(year) : null,
+            status_filter: status || 'all',
+            total: rows.length,
+            pending: rows.filter(r => r.status === 'pending').length,
+            approved: rows.filter(r => r.status === 'approved').length,
+            rejected: rows.filter(r => r.status === 'rejected').length,
+            requests: rows.map(r => ({
+                id: r.id,
+                category: r.category,
+                item: r.item,
+                month: MONTHS[r.month_idx],
+                month_idx: r.month_idx,
+                fiscal_year: r.fiscal_year,
+                current_value: r.current_value,
+                requested_value: r.requested_value,
+                difference: r.requested_value - r.current_value,
+                reason: r.reason || null,
+                status: r.status,
+                review_notes: r.review_notes || null,
+                requested_by_email: r.requested_by_email || null,
+                reviewed_by_email: r.reviewed_by_email || null,
+                created_at: r.created_at,
+            })),
+        });
+    } catch (err) {
+        console.error('[BUDGET-REQ] DEPT GET error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
  * GET /budget-requests?year=&dept=&status=
  */
 router.get('/', async (req, res) => {
