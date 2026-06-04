@@ -608,77 +608,53 @@ function DashboardContent() {
     if (isLoading) {
         return (
             <div className="flex items-center justify-center h-96">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                <div className="flex flex-col items-center gap-3">
+                    <div className="h-10 w-10 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
+                    <p className="text-sm text-muted-foreground">Cargando datos…</p>
+                </div>
             </div>
         );
     }
 
-    // Period label for KPIs
     const periodLabel = timePeriod === 'monthly'
         ? MONTHS[selectedMonth]
         : timePeriod === 'quarterly'
             ? QUARTERS[selectedQuarter].label
-            : 'YTD';
+            : 'Anual';
 
     return (
-        <div className="space-y-6" >
-            {/* Header with Dashboard tabs */}
-            <div className="flex items-end justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-3">
-                    <div className="h-11 w-11 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                        <LayoutDashboard size={22} />
-                    </div>
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight leading-tight">Dashboard</h1>
-                        <p className="text-sm text-muted-foreground">Resumen del ejercicio {year}</p>
-                    </div>
+        <div className="space-y-7">
+            {/* ── Header ─────────────────────────────────────── */}
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                    <h1 className="text-xl font-semibold tracking-tight text-foreground">Dashboard</h1>
+                    <p className="text-sm text-muted-foreground mt-0.5">Ejercicio fiscal {year}</p>
                 </div>
-                {isSuperAdmin() && (
-                    <Button
-                        variant={isConfiguring ? "secondary" : "outline"}
-                        onClick={() => setIsConfiguring(!isConfiguring)}
-                        className="gap-2 rounded-xl"
-                    >
-                        <Settings2 size={16} />
-                        {isConfiguring ? 'Listo' : 'Personalizar'}
-                    </Button>
-                )}
-            </div>
-
-            {/* Controls bar: tabs (left) + period selector (right) */}
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-                {/* Sub-module tabs: General / Detalle — segmented pill */}
-                <div className="inline-flex gap-1 bg-muted/60 rounded-xl p-1">
-                    <button
-                        className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${dashboardTab === 'general'
-                            ? 'bg-white text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                        onClick={() => setDashboardTab('general')}
-                    >
-                        <LayoutDashboard size={16} />
-                        General
-                    </button>
-                    <button
-                        className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${dashboardTab === 'detalle'
-                            ? 'bg-white text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                        onClick={() => setDashboardTab('detalle')}
-                    >
-                        <BarChart3 size={16} />
-                        Detalle
-                    </button>
-                </div>
-
-                {/* Time Period Selector */}
-                <div className="flex items-center gap-2 flex-wrap">
-                    <div className="inline-flex gap-1 bg-muted/60 rounded-xl p-1">
-                        {([['monthly', 'Mensual'], ['quarterly', 'Trimestral'], ['annual', 'Anual']] as const).map(([key, label]) => (
+                <div className="flex items-center gap-2">
+                    {/* Tabs — segmented control */}
+                    <div className="inline-flex bg-muted rounded-lg p-0.5 gap-0.5">
+                        {([['general', 'General', LayoutDashboard], ['detalle', 'Análisis', BarChart3]] as const).map(([key, label, Icon]) => (
                             <button
                                 key={key}
-                                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${timePeriod === key
-                                    ? 'bg-white shadow-sm text-foreground'
+                                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${dashboardTab === key
+                                    ? 'bg-card text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                    }`}
+                                onClick={() => setDashboardTab(key as DashboardTab)}
+                            >
+                                <Icon size={13} />
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Period picker */}
+                    <div className="inline-flex bg-muted rounded-lg p-0.5 gap-0.5">
+                        {([['monthly', 'Mes'], ['quarterly', 'Trim.'], ['annual', 'Año']] as const).map(([key, label]) => (
+                            <button
+                                key={key}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${timePeriod === key
+                                    ? 'bg-card text-foreground shadow-sm'
                                     : 'text-muted-foreground hover:text-foreground'
                                     }`}
                                 onClick={() => setTimePeriod(key as TimePeriod)}
@@ -690,373 +666,261 @@ function DashboardContent() {
 
                     {timePeriod === 'monthly' && (
                         <select
-                            className="border rounded-xl px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            className="h-8 border border-border rounded-lg px-2.5 text-xs bg-card focus:outline-none focus:ring-1 focus:ring-primary/40"
                             value={selectedMonth}
                             onChange={e => setSelectedMonth(Number(e.target.value))}
                         >
-                            {MONTHS.map((m, i) => (
-                                <option key={i} value={i}>{m}</option>
-                            ))}
+                            {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
                         </select>
                     )}
 
                     {timePeriod === 'quarterly' && (
                         <select
-                            className="border rounded-xl px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            className="h-8 border border-border rounded-lg px-2.5 text-xs bg-card focus:outline-none focus:ring-1 focus:ring-primary/40"
                             value={selectedQuarter}
                             onChange={e => setSelectedQuarter(Number(e.target.value))}
                         >
                             {QUARTERS.map((q, i) => (
-                                <option key={i} value={i}>{q.label} ({MONTHS[q.months[0]]}–{MONTHS[q.months[2]]})</option>
+                                <option key={i} value={i}>{q.label} · {MONTHS[q.months[0]]}–{MONTHS[q.months[2]]}</option>
                             ))}
                         </select>
+                    )}
+
+                    {isSuperAdmin() && (
+                        <Button
+                            variant={isConfiguring ? 'secondary' : 'outline'}
+                            size="sm"
+                            onClick={() => setIsConfiguring(!isConfiguring)}
+                            className="gap-1.5 h-8 text-xs"
+                        >
+                            <Settings2 size={13} />
+                            {isConfiguring ? 'Listo' : 'Widgets'}
+                        </Button>
                     )}
                 </div>
             </div>
 
             {isConfiguring && (
-                <Card className="bg-muted/50 border-dashed">
-                    <CardContent className="p-4 flex flex-wrap gap-4 items-center">
-                        <span className="text-sm font-medium">Toggle Widgets:</span>
-                        <div className="flex gap-4">
-                            <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-primary">
-                                <input
-                                    type="checkbox"
-                                    checked={visibleWidgets.kpis}
-                                    onChange={() => toggleWidget('kpis')}
-                                    className="rounded border-gray-300"
-                                /> General KPIs
-                            </label>
-                            <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-primary">
-                                <input
-                                    type="checkbox"
-                                    checked={visibleWidgets.departments}
-                                    onChange={() => toggleWidget('departments')}
-                                    className="rounded border-gray-300"
-                                /> Departments
-                            </label>
-                        </div>
-                    </CardContent>
-                </Card>
+                <div className="flex items-center gap-4 px-4 py-3 bg-muted/60 rounded-xl border border-border/60 text-xs">
+                    <span className="font-medium text-muted-foreground">Mostrar secciones:</span>
+                    {(['kpis', 'departments'] as WidgetType[]).map(w => (
+                        <label key={w} className="flex items-center gap-1.5 cursor-pointer text-foreground hover:text-primary transition-colors">
+                            <input type="checkbox" checked={visibleWidgets[w]} onChange={() => toggleWidget(w)} className="rounded border-border" />
+                            {w === 'kpis' ? 'KPIs' : 'Departamentos'}
+                        </label>
+                    ))}
+                </div>
             )}
 
             {dashboardTab === 'general' && (
                 <>
-                    {/* KPI Cards — from PL matrix */}
-                    {
-                        visibleWidgets.kpis && (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-                                    <CardContent className="p-6">
-                                        <div className="flex items-start justify-between">
-                                            <div className="space-y-1">
-                                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Facturación</p>
-                                                <span className="text-[11px] text-muted-foreground/70">{periodLabel}</span>
-                                            </div>
-                                            <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                                                <Wallet className="h-5 w-5" />
-                                            </div>
-                                        </div>
-                                        <h2 className="text-3xl font-bold tracking-tight mt-4">{formatCurrency(plKpis.totalBilling)}</h2>
-                                        <p className="text-xs text-muted-foreground mt-1">Ingresos brutos</p>
-                                    </CardContent>
-                                </Card>
+                    {/* ── KPI Cards ─────────────────────────────── */}
+                    {visibleWidgets.kpis && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-1 duration-400">
 
-                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-                                    <CardContent className="p-6">
-                                        <div className="flex items-start justify-between">
-                                            <div className="space-y-1">
-                                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Gastos</p>
-                                                <span className="text-[11px] text-muted-foreground/70">{periodLabel}</span>
-                                            </div>
-                                            <div className="h-10 w-10 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center">
-                                                <TrendingDown className="h-5 w-5" />
-                                            </div>
-                                        </div>
-                                        <h2 className="text-3xl font-bold tracking-tight mt-4">{formatCurrency(plKpis.totalExpenses)}</h2>
-                                        <p className="text-xs text-muted-foreground mt-1">Costes operativos</p>
-                                    </CardContent>
-                                </Card>
-
-                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-                                    <CardContent className="p-6">
-                                        <div className="flex items-start justify-between">
-                                            <div className="space-y-1">
-                                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Margen Neto</p>
-                                                <span className="text-[11px] text-muted-foreground/70">{periodLabel}</span>
-                                            </div>
-                                            <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${plKpis.netMargin >= 0 ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'}`}>
-                                                <TrendingUp className="h-5 w-5" />
-                                            </div>
-                                        </div>
-                                        <h2 className={`text-3xl font-bold tracking-tight mt-4 ${plKpis.netMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                            {formatCurrency(plKpis.netMargin)}
-                                        </h2>
-                                        <div className="flex items-center gap-1.5 mt-1">
-                                            <span className={`inline-flex items-center text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${plKpis.netMargin >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                {plKpis.marginPercentage.toFixed(1)}%
-                                            </span>
-                                            <span className="text-xs text-muted-foreground">de margen</span>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-
-                            </div>
-                        )
-                    }
-
-
-
-                    {/* Department Profitability — from PL matrix */}
-                    {
-                        visibleWidgets.departments && (
-                            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-700">
-                                <div className="flex flex-col items-end gap-3 flex-wrap">
-                                    <div className="flex gap-2">
-                                        <Button
-                                            variant={deptFilter === 'main' ? 'default' : 'outline'}
-                                            size="sm"
-                                            onClick={() => setDeptFilter('main')}
-                                        >
-                                            Hubs
-                                        </Button>
-                                        <Button
-                                            variant={deptFilter === 'verticals' ? 'default' : 'outline'}
-                                            size="sm"
-                                            onClick={() => setDeptFilter('verticals')}
-                                        >
-                                            Verticales
-                                        </Button>
-                                        <Button
-                                            variant={deptFilter === 'all' ? 'default' : 'outline'}
-                                            size="sm"
-                                            onClick={() => setDeptFilter('all')}
-                                        >
-                                            Todos
-                                        </Button>
+                            {/* Facturación */}
+                            <div className="card-premium bg-card rounded-2xl border border-border/60 p-5">
+                                <div className="flex items-center justify-between mb-4">
+                                    <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Facturación</span>
+                                    <div className="h-8 w-8 rounded-xl bg-primary/8 text-primary flex items-center justify-center">
+                                        <Wallet size={15} />
                                     </div>
+                                </div>
+                                <p className="text-2xl font-bold tracking-tight tabular">{formatCurrency(plKpis.totalBilling)}</p>
+                                <div className="flex items-center gap-1.5 mt-2">
+                                    <span className="text-[11px] text-muted-foreground">Ingresos brutos</span>
+                                    <span className="ml-auto text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                </div>
+                            </div>
+
+                            {/* Gastos */}
+                            <div className="card-premium bg-card rounded-2xl border border-border/60 p-5">
+                                <div className="flex items-center justify-between mb-4">
+                                    <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Gastos</span>
+                                    <div className="h-8 w-8 rounded-xl bg-red-500/8 text-red-500 flex items-center justify-center">
+                                        <TrendingDown size={15} />
+                                    </div>
+                                </div>
+                                <p className="text-2xl font-bold tracking-tight tabular">{formatCurrency(plKpis.totalExpenses)}</p>
+                                <div className="flex items-center gap-1.5 mt-2">
+                                    <span className="text-[11px] text-muted-foreground">Costes operativos</span>
+                                    <span className="ml-auto text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                </div>
+                            </div>
+
+                            {/* Margen Neto */}
+                            <div className="card-premium bg-card rounded-2xl border border-border/60 p-5">
+                                <div className="flex items-center justify-between mb-4">
+                                    <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Margen Neto</span>
+                                    <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.netMargin >= 0 ? 'bg-emerald-500/8 text-emerald-600' : 'bg-red-500/8 text-red-600'}`}>
+                                        <TrendingUp size={15} />
+                                    </div>
+                                </div>
+                                <p className={`text-2xl font-bold tracking-tight tabular ${plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                    {formatCurrency(plKpis.netMargin)}
+                                </p>
+                                <div className="flex items-center gap-1.5 mt-2">
+                                    <span className={`inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-md ${plKpis.netMargin >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                                        {plKpis.marginPercentage.toFixed(1)}% margen
+                                    </span>
+                                    <span className="ml-auto text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{periodLabel}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ── Department Cards ──────────────────────── */}
+                    {visibleWidgets.departments && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                            {/* Toolbar */}
+                            <div className="flex items-center justify-between gap-3 flex-wrap">
+                                <h2 className="text-sm font-semibold text-foreground">Rendimiento por departamento</h2>
+                                <div className="flex items-center gap-2 flex-wrap">
                                     {deptFilter === 'main' && (
-                                        <div className="flex flex-wrap gap-2 justify-end w-full animate-in fade-in slide-in-from-top-1 duration-300">
+                                        <div className="flex flex-wrap gap-1.5 animate-in fade-in duration-200">
                                             {HUB_OPTIONAL.map(v => (
-                                                <label key={v} className={`flex items-center gap-1.5 text-xs cursor-pointer px-3 py-1.5 rounded-full transition-colors border ${visibleVerticals.has(v) ? 'bg-primary/10 border-primary/30 text-primary font-medium' : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'}`}>
-                                                    <input
-                                                        type="checkbox"
-                                                        className="sr-only"
-                                                        checked={visibleVerticals.has(v)}
-                                                        onChange={(e) => {
-                                                            const newSet = new Set(visibleVerticals);
-                                                            if (e.target.checked) newSet.add(v);
-                                                            else newSet.delete(v);
-                                                            setVisibleVerticals(next => {
-                                                                const s = new Set(next);
-                                                                if (e.target.checked) s.add(v);
-                                                                else s.delete(v);
-                                                                return s;
-                                                            });
-                                                        }}
-                                                    />
+                                                <label key={v} className={`flex items-center gap-1.5 text-xs cursor-pointer px-2.5 py-1 rounded-lg transition-all border ${visibleVerticals.has(v) ? 'bg-primary/10 border-primary/20 text-primary font-medium' : 'border-border text-muted-foreground hover:text-foreground hover:border-border/80'}`}>
+                                                    <input type="checkbox" className="sr-only" checked={visibleVerticals.has(v)} onChange={(e) => setVisibleVerticals(prev => { const s = new Set(prev); e.target.checked ? s.add(v) : s.delete(v); return s; })} />
                                                     {v}
                                                 </label>
                                             ))}
                                         </div>
                                     )}
+                                    <div className="inline-flex bg-muted rounded-lg p-0.5 gap-0.5">
+                                        {([['main', 'Hubs'], ['verticals', 'Verticales'], ['all', 'Todos']] as const).map(([key, label]) => (
+                                            <button key={key} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${deptFilter === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} onClick={() => setDeptFilter(key)}>
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    {deptPerformance
-                                        .filter(dept => {
-                                            if (deptFilter === 'all') return true;
-                                            if (deptFilter === 'main') {
-                                                return HUB_CORE.includes(dept.name) || (HUB_OPTIONAL.includes(dept.name) && visibleVerticals.has(dept.name));
-                                            }
-                                            if (deptFilter === 'verticals') {
-                                                return VERTICAL_ONLY.includes(dept.name);
-                                            }
-                                            return false;
-                                        })
-                                        .sort((a, b) => b.income - a.income)
-                                        .map(dept => {
-                                            // Compute dynamic margin based on Group % toggle
-                                            const isVertical = VERTICAL_ONLY.includes(dept.name) || HUB_OPTIONAL.includes(dept.name);
-                                            const isImmoral = dept.key === 'Immoral';
-                                            const isGroupVisible = isImmoral ? false : (!isVertical || showGroupForCards.has(dept.key));
-                                            // Dynamic resultado & margin: include Group cost only when visible
-                                            const dynamicResultado = isImmoral
-                                                ? dept.margin
-                                                : isGroupVisible
-                                                    ? dept.margin  // income - directExpenses - groupCost
-                                                    : dept.income - dept.directExpenses; // income - directExpenses only
-                                            const dynamicMarginPct = dept.income > 0 ? (dynamicResultado / dept.income) * 100 : 0;
+                            </div>
 
-                                            return (
-                                                <Card key={dept.key} className="rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-                                                    <CardHeader className="pb-3">
-                                                        <CardTitle className="text-base font-bold flex justify-between items-center">
-                                                            <span className="flex items-center gap-2">
-                                                                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: DEPT_DOT_COLORS[dept.name] || '#6b7280' }} />
-                                                                {dept.name}
-                                                            </span>
-                                                            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${dynamicResultado >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                                {dynamicMarginPct.toFixed(1)}% margen
-                                                            </span>
-                                                        </CardTitle>
-                                                    </CardHeader>
-                                                    <CardContent>
-                                                        <div className="space-y-4">
-                                                            {/* Facturación */}
-                                                            <div className="flex justify-between items-center border-b pb-2">
-                                                                <span className="text-sm font-medium text-gray-500">Facturación</span>
-                                                                <span className="text-lg font-bold text-gray-900">{formatCurrency(dept.income)}</span>
-                                                            </div>
+                            {/* Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {deptPerformance
+                                    .filter(dept => {
+                                        if (deptFilter === 'all') return true;
+                                        if (deptFilter === 'main') return HUB_CORE.includes(dept.name) || (HUB_OPTIONAL.includes(dept.name) && visibleVerticals.has(dept.name));
+                                        return VERTICAL_ONLY.includes(dept.name);
+                                    })
+                                    .sort((a, b) => b.income - a.income)
+                                    .map(dept => {
+                                        const isVertical = VERTICAL_ONLY.includes(dept.name) || HUB_OPTIONAL.includes(dept.name);
+                                        const isImmoral = dept.key === 'Immoral';
+                                        const isGroupVisible = isImmoral ? false : (!isVertical || showGroupForCards.has(dept.key));
+                                        const dynamicResultado = isImmoral ? dept.margin : isGroupVisible ? dept.margin : dept.income - dept.directExpenses;
+                                        const dynamicMarginPct = dept.income > 0 ? (dynamicResultado / dept.income) * 100 : 0;
+                                        const accentColor = DEPT_DOT_COLORS[dept.name] || '#6366f1';
 
-                                                            {/* Expenses Breakdown */}
-                                                            <div className="space-y-1 text-sm">
-                                                                {dept.categories.map(cat => {
-                                                                    const val = dept.breakdown[cat.key] || 0;
-                                                                    return (
-                                                                        <div key={cat.label} className="flex justify-between text-muted-foreground">
-                                                                            <span>{cat.label}</span>
-                                                                            <span>{val > 0 ? formatCurrency(val) : '—'}</span>
-                                                                        </div>
-                                                                    );
-                                                                })}
-                                                            </div>
+                                        return (
+                                            <div key={dept.key} className="card-premium bg-card rounded-2xl border border-border/60 overflow-hidden">
+                                                {/* Card top accent bar */}
+                                                <div className="h-0.5 w-full" style={{ backgroundColor: accentColor, opacity: 0.7 }} />
 
-                                                            {/* Group % — hidden for verticals by default, toggleable ON/OFF */}
-                                                            {!isImmoral && (() => {
-                                                                return (
-                                                                    <>
-                                                                        {isGroupVisible ? (
-                                                                            <div
-                                                                                className={`flex justify-between text-sm text-indigo-600 border-t pt-2 ${isVertical ? 'cursor-pointer hover:bg-indigo-50/50 -mx-1 px-1 rounded transition-colors' : ''}`}
-                                                                                onClick={isVertical ? (e) => {
-                                                                                    e.stopPropagation();
-                                                                                    setShowGroupForCards(prev => {
-                                                                                        const next = new Set(prev);
-                                                                                        next.delete(dept.key);
-                                                                                        return next;
-                                                                                    });
-                                                                                } : undefined}
-                                                                                title={isVertical ? 'Click para ocultar Group %' : undefined}
-                                                                            >
-                                                                                <span className="font-medium">Group % <span className="text-indigo-400 font-normal">({dept.groupPctDisplay}%)</span></span>
-                                                                                <span className="font-medium">{dept.groupCost > 0 ? formatCurrency(dept.groupCost) : '—'}</span>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div className="flex justify-center border-t pt-1">
-                                                                                <button
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        setShowGroupForCards(prev => {
-                                                                                            const next = new Set(prev);
-                                                                                            next.add(dept.key);
-                                                                                            return next;
-                                                                                        });
-                                                                                    }}
-                                                                                    className="text-gray-300 hover:text-indigo-500 transition-colors p-0.5 rounded-full hover:bg-indigo-50"
-                                                                                    title="Mostrar Group %"
-                                                                                >
-                                                                                    <MoreHorizontal size={16} />
-                                                                                </button>
-                                                                            </div>
-                                                                        )}
-                                                                    </>
-                                                                );
-                                                            })()}
-
-                                                            {/* Resultado — dynamically computed based on Group visibility */}
-                                                            <div className="pt-2 border-t">
-                                                                <div className="flex justify-between items-center">
-                                                                    <span className="font-bold text-gray-900">Resultado</span>
-                                                                    <span className={`text-xl font-bold ${dynamicResultado >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                                        {formatCurrency(dynamicResultado)}
-                                                                    </span>
-                                                                </div>
-                                                            </div>
+                                                <div className="p-5">
+                                                    {/* Header row */}
+                                                    <div className="flex items-center justify-between mb-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: accentColor }} />
+                                                            <span className="text-sm font-semibold text-foreground">{dept.name}</span>
                                                         </div>
-                                                    </CardContent>
-                                                </Card>
-                                            );
-                                        })}
-                                    {deptPerformance.length === 0 && (
-                                        <Card className="col-span-3 p-6 text-center text-muted-foreground border-dashed">
-                                            No department data available.
-                                        </Card>
-                                    )}
-                                </div>
-                            </div>
-                        )
-                    }
+                                                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${dynamicResultado >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                                                            {dynamicMarginPct.toFixed(1)}%
+                                                        </span>
+                                                    </div>
 
-                    {/* Holded SL — Financial Overview */}
+                                                    {/* Facturación — hero number */}
+                                                    <div className="mb-4 pb-4 border-b border-border/60">
+                                                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-1">Facturación</p>
+                                                        <p className="text-xl font-bold tabular text-foreground">{formatCurrency(dept.income)}</p>
+                                                    </div>
+
+                                                    {/* Expenses breakdown */}
+                                                    <div className="space-y-1.5 mb-4">
+                                                        {dept.categories.map(cat => {
+                                                            const val = dept.breakdown[cat.key] || 0;
+                                                            return (
+                                                                <div key={cat.key} className="flex justify-between items-center">
+                                                                    <span className="text-xs text-muted-foreground">{cat.label}</span>
+                                                                    <span className="text-xs font-medium tabular text-foreground/80">{val > 0 ? formatCurrency(val) : <span className="text-muted-foreground/40">—</span>}</span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+
+                                                    {/* Group % toggle */}
+                                                    {!isImmoral && (
+                                                        <div className="border-t border-border/60 pt-3">
+                                                            {isGroupVisible ? (
+                                                                <div
+                                                                    className={`flex justify-between items-center text-xs text-primary/80 ${isVertical ? 'cursor-pointer hover:text-primary' : ''}`}
+                                                                    onClick={isVertical ? () => setShowGroupForCards(prev => { const n = new Set(prev); n.delete(dept.key); return n; }) : undefined}
+                                                                    title={isVertical ? 'Click para ocultar Group %' : undefined}
+                                                                >
+                                                                    <span>Group % <span className="opacity-60">({dept.groupPctDisplay}%)</span></span>
+                                                                    <span className="font-medium tabular">{dept.groupCost > 0 ? formatCurrency(dept.groupCost) : '—'}</span>
+                                                                </div>
+                                                            ) : (
+                                                                <button
+                                                                    className="w-full flex justify-center text-muted-foreground/30 hover:text-primary/60 transition-colors"
+                                                                    onClick={() => setShowGroupForCards(prev => { const n = new Set(prev); n.add(dept.key); return n; })}
+                                                                    title="Mostrar Group %"
+                                                                >
+                                                                    <MoreHorizontal size={14} />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Resultado */}
+                                                    <div className="mt-3 pt-3 border-t border-border/60">
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-xs font-semibold text-foreground/70 uppercase tracking-wider">Resultado</span>
+                                                            <span className={`text-base font-bold tabular ${dynamicResultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                                {formatCurrency(dynamicResultado)}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                {deptPerformance.length === 0 && (
+                                    <div className="col-span-3 py-16 text-center text-sm text-muted-foreground border border-dashed border-border rounded-2xl">
+                                        Sin datos de departamentos
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ── Holded ────────────────────────────────── */}
                     {holdedSummary?.connected && (
-                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-700">
-                            <div className="flex items-center gap-3">
-                                <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white font-bold text-[10px]">H</div>
-                                <h2 className="text-lg font-bold text-foreground">Holded Immoral</h2>
-                                <span className="text-xs text-muted-foreground">Facturación y Tesorería</span>
+                        <div className="space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-600">
+                            <div className="flex items-center gap-2">
+                                <div className="h-5 w-5 rounded bg-blue-600 flex items-center justify-center text-white text-[9px] font-black">H</div>
+                                <h2 className="text-sm font-semibold text-foreground">Holded</h2>
+                                <span className="text-xs text-muted-foreground">Facturación · Tesorería</span>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 cursor-pointer" onClick={() => openHoldedDetail('pending')}>
-                                    <CardContent className="p-5">
-                                        <div className="flex items-start justify-between">
-                                            <p className="text-xs font-medium text-muted-foreground">Facturas Pendientes</p>
-                                            <div className="h-9 w-9 rounded-xl bg-orange-500/10 text-orange-500 flex items-center justify-center">
-                                                <FileText className="h-4 w-4" />
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                                {[
+                                    { label: 'Facturas Pendientes', value: holdedSummary.invoices_pending?.total || 0, sub: `${holdedSummary.invoices_pending?.count || 0} sin vencer`, icon: FileText, color: 'text-amber-500', bg: 'bg-amber-500/8', click: () => openHoldedDetail('pending') },
+                                    { label: 'Facturas Vencidas', value: holdedSummary.invoices_overdue?.total || 0, sub: `${holdedSummary.invoices_overdue?.count || 0} vencidas`, icon: AlertCircle, color: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-500' : 'text-emerald-500', bg: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'bg-red-500/8' : 'bg-emerald-500/8', valueColor: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-600' : 'text-emerald-600', click: () => openHoldedDetail('overdue') },
+                                    { label: 'Estimado por Recibir', value: holdedSummary.invoices_estimado?.total || 0, sub: `${holdedSummary.invoices_estimado?.count || 0} facturas`, icon: TrendingUp, color: 'text-violet-500', bg: 'bg-violet-500/8' },
+                                    { label: 'Saldo en Caja', value: holdedSummary.treasury_balance || 0, sub: 'Total en tesorería', icon: Landmark, color: 'text-blue-500', bg: 'bg-blue-500/8' },
+                                ].map(({ label, value, sub, icon: Icon, color, bg, valueColor, click }) => (
+                                    <div key={label} className={`card-premium bg-card rounded-xl border border-border/60 p-4 ${click ? 'cursor-pointer' : ''}`} onClick={click}>
+                                        <div className="flex items-start justify-between mb-3">
+                                            <p className="text-[11px] font-medium text-muted-foreground leading-tight">{label}</p>
+                                            <div className={`h-7 w-7 rounded-lg ${bg} ${color} flex items-center justify-center shrink-0`}>
+                                                <Icon size={13} />
                                             </div>
                                         </div>
-                                        <h2 className="text-2xl font-bold mt-3">{formatCurrency(holdedSummary.invoices_pending?.total || 0)}</h2>
-                                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                                            {holdedSummary.invoices_pending?.count || 0} factura{(holdedSummary.invoices_pending?.count || 0) !== 1 ? 's' : ''} aún no vencidas
-                                        </p>
-                                    </CardContent>
-                                </Card>
-
-                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 cursor-pointer" onClick={() => openHoldedDetail('overdue')}>
-                                    <CardContent className="p-5">
-                                        <div className="flex items-start justify-between">
-                                            <p className="text-xs font-medium text-muted-foreground">Facturas Vencidas</p>
-                                            <div className="h-9 w-9 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center">
-                                                <AlertCircle className="h-4 w-4" />
-                                            </div>
-                                        </div>
-                                        <h2 className={`text-2xl font-bold mt-3 ${(holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                            {formatCurrency(holdedSummary.invoices_overdue?.total || 0)}
-                                        </h2>
-                                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                                            {holdedSummary.invoices_overdue?.count || 0} vencida{(holdedSummary.invoices_overdue?.count || 0) !== 1 ? 's' : ''}
-                                        </p>
-                                    </CardContent>
-                                </Card>
-
-                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-                                    <CardContent className="p-5">
-                                        <div className="flex items-start justify-between">
-                                            <p className="text-xs font-medium text-muted-foreground">Estimado por Recibir</p>
-                                            <div className="h-9 w-9 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
-                                                <TrendingUp className="h-4 w-4" />
-                                            </div>
-                                        </div>
-                                        <h2 className="text-2xl font-bold mt-3">{formatCurrency(holdedSummary.invoices_estimado?.total || 0)}</h2>
-                                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                                            {holdedSummary.invoices_estimado?.count || 0} factura{(holdedSummary.invoices_estimado?.count || 0) !== 1 ? 's' : ''} (pendientes + vencidas)
-                                        </p>
-                                    </CardContent>
-                                </Card>
-
-                                <Card className="bg-white rounded-2xl border-border/60 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-                                    <CardContent className="p-5">
-                                        <div className="flex items-start justify-between">
-                                            <p className="text-xs font-medium text-muted-foreground">Saldo en Caja</p>
-                                            <div className="h-9 w-9 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
-                                                <Landmark className="h-4 w-4" />
-                                            </div>
-                                        </div>
-                                        <h2 className="text-2xl font-bold mt-3">{formatCurrency(holdedSummary.treasury_balance || 0)}</h2>
-                                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                                            Total en tesorería
-                                        </p>
-                                    </CardContent>
-                                </Card>
+                                        <p className={`text-lg font-bold tabular ${valueColor || ''}`}>{formatCurrency(value)}</p>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     )}

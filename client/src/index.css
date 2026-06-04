@@ -4,37 +4,37 @@
 
 @layer base {
   :root {
-    /* Light — minimalista, limpio */
-    --background: 220 20% 97%;
-    --foreground: 220 25% 10%;
+    /* Light — premium fintech SaaS */
+    --background: 220 25% 97%;
+    --foreground: 222 30% 10%;
     --card: 0 0% 100%;
-    --card-foreground: 220 25% 10%;
+    --card-foreground: 222 30% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 220 25% 10%;
-    --primary: 230 80% 55%;
+    --popover-foreground: 222 30% 10%;
+    --primary: 231 78% 54%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 15% 92%;
-    --secondary-foreground: 220 25% 20%;
-    --muted: 220 15% 93%;
-    --muted-foreground: 220 12% 50%;
-    --accent: 230 70% 95%;
-    --accent-foreground: 230 80% 40%;
-    --destructive: 0 75% 55%;
+    --secondary: 220 16% 93%;
+    --secondary-foreground: 222 25% 22%;
+    --muted: 220 16% 94%;
+    --muted-foreground: 220 13% 52%;
+    --accent: 231 70% 95%;
+    --accent-foreground: 231 78% 42%;
+    --destructive: 0 72% 52%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 15% 88%;
-    --input: 220 15% 88%;
-    --ring: 230 80% 55%;
-    --radius: 0.625rem;
+    --border: 220 16% 90%;
+    --input: 220 16% 90%;
+    --ring: 231 78% 54%;
+    --radius: 0.75rem;
 
-    /* Sidebar light */
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 220 20% 20%;
-    --sidebar-primary: 230 80% 55%;
+    /* Sidebar light — slightly off-white for depth */
+    --sidebar-background: 222 25% 99%;
+    --sidebar-foreground: 222 22% 22%;
+    --sidebar-primary: 231 78% 54%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 230 70% 95%;
-    --sidebar-accent-foreground: 230 80% 40%;
-    --sidebar-border: 220 15% 90%;
-    --sidebar-ring: 230 80% 55%;
+    --sidebar-accent: 231 70% 95%;
+    --sidebar-accent-foreground: 231 78% 42%;
+    --sidebar-border: 220 16% 92%;
+    --sidebar-ring: 231 78% 54%;
   }
 
   .dark {
@@ -46,7 +46,6 @@
     --popover: 232 25% 13%;
     --popover-foreground: 220 15% 88%;
     --primary: 195 100% 50%;
-    /* neon cyan */
     --primary-foreground: 232 28% 7%;
     --secondary: 232 20% 18%;
     --secondary-foreground: 220 15% 80%;
@@ -60,7 +59,6 @@
     --input: 232 18% 20%;
     --ring: 195 100% 50%;
 
-    /* Sidebar dark */
     --sidebar-background: 232 30% 6%;
     --sidebar-foreground: 220 12% 72%;
     --sidebar-primary: 195 100% 50%;
@@ -80,171 +78,84 @@
   body {
     @apply bg-background text-foreground;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     transition: background-color 0.3s ease, color 0.3s ease;
-    /* iOS safe area — respeta notch, status bar y home indicator */
     padding-top: env(safe-area-inset-top);
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
     padding-bottom: env(safe-area-inset-bottom);
   }
 
-  /* ── Dark mode: Override hardcoded bg-white / bg-gray-* in modals and tables ── */
+  /* Tabular numbers for financial data */
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  /* ── Dark mode overrides ── */
   .dark .bg-white {
     background-color: hsl(var(--card)) !important;
     color: hsl(var(--card-foreground));
   }
-
-  .dark .bg-gray-50 {
-    background-color: hsl(var(--muted)) !important;
-  }
-
-  .dark .bg-gray-100 {
-    background-color: hsl(232 20% 17%) !important;
-  }
-
+  .dark .bg-gray-50 { background-color: hsl(var(--muted)) !important; }
+  .dark .bg-gray-100 { background-color: hsl(232 20% 17%) !important; }
   .dark .border-gray-100,
-  .dark .border-gray-200 {
-    border-color: hsl(var(--border)) !important;
-  }
-
+  .dark .border-gray-200 { border-color: hsl(var(--border)) !important; }
   .dark .text-gray-400,
   .dark .text-gray-500,
-  .dark .text-gray-600 {
-    color: hsl(var(--muted-foreground)) !important;
-  }
-
+  .dark .text-gray-600 { color: hsl(var(--muted-foreground)) !important; }
   .dark .text-gray-700,
   .dark .text-gray-800,
-  .dark .text-gray-900 {
-    color: hsl(var(--foreground)) !important;
-  }
-
-  /* Tables en dark */
-  .dark table thead {
-    background-color: hsl(232 22% 14%);
-  }
-
-  .dark table thead th {
-    color: hsl(var(--muted-foreground));
-    border-bottom-color: hsl(var(--border));
-  }
-
-  .dark table tbody tr {
-    border-bottom-color: hsl(var(--border));
-    color: hsl(var(--foreground));
-  }
-
-  .dark table tbody tr:hover {
-    background-color: hsl(232 20% 14%);
-  }
-
-  /* Badges de colores en dark — más visibles */
-  .dark .bg-green-50 {
-    background-color: hsl(150 40% 12%) !important;
-  }
-
-  .dark .bg-green-100 {
-    background-color: hsl(150 40% 15%) !important;
-  }
-
-  .dark .text-green-700 {
-    color: hsl(142 65% 55%) !important;
-  }
-
-  .dark .border-green-200 {
-    border-color: hsl(142 40% 25%) !important;
-  }
-
-  .dark .bg-red-50 {
-    background-color: hsl(0 40% 12%) !important;
-  }
-
-  .dark .bg-red-100 {
-    background-color: hsl(0 40% 15%) !important;
-  }
-
-  .dark .text-red-700 {
-    color: hsl(0 75% 65%) !important;
-  }
-
-  .dark .border-red-200 {
-    border-color: hsl(0 40% 25%) !important;
-  }
-
-  .dark .bg-blue-50 {
-    background-color: hsl(215 40% 12%) !important;
-  }
-
-  .dark .bg-blue-50\/50 {
-    background-color: hsl(215 40% 10%) !important;
-  }
-
-  .dark .text-blue-900 {
-    color: hsl(195 80% 70%) !important;
-  }
-
-  .dark .text-blue-800 {
-    color: hsl(195 70% 65%) !important;
-  }
-
-  .dark .border-blue-100 {
-    border-color: hsl(215 40% 22%) !important;
-  }
-
-  .dark .bg-amber-50 {
-    background-color: hsl(45 40% 12%) !important;
-  }
-
-  .dark .text-amber-700 {
-    color: hsl(38 90% 60%) !important;
-  }
-
-  /* Select nativo en dark */
+  .dark .text-gray-900 { color: hsl(var(--foreground)) !important; }
+  .dark table thead { background-color: hsl(232 22% 14%); }
+  .dark table thead th { color: hsl(var(--muted-foreground)); border-bottom-color: hsl(var(--border)); }
+  .dark table tbody tr { border-bottom-color: hsl(var(--border)); color: hsl(var(--foreground)); }
+  .dark table tbody tr:hover { background-color: hsl(232 20% 14%); }
+  .dark .bg-green-50 { background-color: hsl(150 40% 12%) !important; }
+  .dark .bg-green-100 { background-color: hsl(150 40% 15%) !important; }
+  .dark .text-green-700 { color: hsl(142 65% 55%) !important; }
+  .dark .border-green-200 { border-color: hsl(142 40% 25%) !important; }
+  .dark .bg-red-50 { background-color: hsl(0 40% 12%) !important; }
+  .dark .bg-red-100 { background-color: hsl(0 40% 15%) !important; }
+  .dark .text-red-700 { color: hsl(0 75% 65%) !important; }
+  .dark .border-red-200 { border-color: hsl(0 40% 25%) !important; }
+  .dark .bg-blue-50 { background-color: hsl(215 40% 12%) !important; }
+  .dark .bg-blue-50\/50 { background-color: hsl(215 40% 10%) !important; }
+  .dark .text-blue-900 { color: hsl(195 80% 70%) !important; }
+  .dark .text-blue-800 { color: hsl(195 70% 65%) !important; }
+  .dark .border-blue-100 { border-color: hsl(215 40% 22%) !important; }
+  .dark .bg-amber-50 { background-color: hsl(45 40% 12%) !important; }
+  .dark .text-amber-700 { color: hsl(38 90% 60%) !important; }
   .dark select {
     background-color: hsl(var(--input));
     color: hsl(var(--foreground));
     border-color: hsl(var(--border));
   }
-
-  .dark select option {
-    background-color: hsl(232 25% 13%);
-    color: hsl(var(--foreground));
-  }
-
-  /* Input nativo en dark */
+  .dark select option { background-color: hsl(232 25% 13%); color: hsl(var(--foreground)); }
   .dark input[type="date"],
   .dark input[type="number"],
   .dark input[type="text"],
   .dark input[type="email"],
-  .dark input[type="password"] {
-    color-scheme: dark;
-  }
+  .dark input[type="password"] { color-scheme: dark; }
 
-  /* Scrollbar custom */
-  ::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
-  }
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
 
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
-    border-radius: 9999px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground));
-  }
-
-  /* Neon helpers para dark */
+  /* ── Neon dark helpers ── */
   .dark .neon-glow {
     box-shadow: 0 0 20px hsl(195 100% 50% / 0.3), 0 0 40px hsl(195 100% 50% / 0.1);
   }
+  .dark .neon-text { text-shadow: 0 0 20px hsl(195 100% 50% / 0.6); }
 
-  .dark .neon-text {
-    text-shadow: 0 0 20px hsl(195 100% 50% / 0.6);
+  /* ── Premium card shadow ── */
+  .card-premium {
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  .card-premium:hover {
+    box-shadow: 0 8px 24px -4px rgb(0 0 0 / 0.10), 0 2px 8px -2px rgb(0 0 0 / 0.06);
+    transform: translateY(-1px);
   }
 }
