@@ -104,56 +104,81 @@ router.get('/kpis/:year', async (req, res) => {
             'BUDGET_NUTFRUIT': 'IMCONT'
         };
 
-        // 2. Calculate INCOME (Revenue) - STRICT P&L LOGIC
-        const mbMap = {};
+        // 2. Calculate INCOME (Revenue)
+        const currentYear = new Date().getFullYear();
+        const isPastYear = parseInt(year) < currentYear;
 
-        // 2a. Process Monthly Billings (for Paid Media)
-        const monthlyBillings = await supabase
-            .from('monthly_billing')
-            .select('id, fee_paid, client_id, client:clients(vertical:verticals(name))')
-            .eq('fiscal_year', year);
+        if (isPastYear) {
+            // Años pasados: los ingresos están en actual_revenue
+            const { data: arData } = await supabase
+                .from('actual_revenue')
+                .select('amount, description, department_id, departments(code), service:services(code)')
+                .eq('fiscal_year', year);
 
-        if (monthlyBillings.data) {
-            monthlyBillings.data.forEach(mb => {
-                mbMap[mb.id] = mb;
-                const feePaid = Number(mb.fee_paid || 0);
-                if (feePaid > 0) {
-                    const vertical = mb.client?.vertical?.name || '';
-                    if (vertical.toLowerCase() === 'imfilms') {
-                        // Imfilms revenue goes to BOTH Imfilms card AND Immedia card
-                        deptStats['IMFILMS'].income += feePaid;
-                        deptStats['IMMED'].income += feePaid;
-                    } else {
-                        deptStats['IMMED'].income += feePaid;
+            // Mapeo de nombre de descripción / código de servicio → bucket
+            const descToBucket = {
+                'Paid General': 'IMMED', 'Paid imfilms': 'IMMED', 'Setup inicial': 'IMMED',
+                'Branding': 'IMCONT', 'Diseño': 'IMCONT', 'Contenido con IA': 'IMCONT',
+                'RRSS': 'IMCONT', 'Estrategia Digital': 'IMCONT', 'Influencers': 'IMCONT',
+                'Diseño de Landing': 'IMCONT', 'Budget Nutfruit': 'IMCONT',
+                'Setup inicial IA': 'IMMOR', 'Automation': 'IMMOR', 'Consultoría': 'IMMOR',
+                'Web dev': 'IMSEO', 'CRM': 'IMSEO', 'SEO': 'IMSEO',
+                'Setup inicial (ims)': 'IMSALES', 'Captación': 'IMSALES',
+                'Otros servicios': 'IMMORAL', 'Otras comisiones': 'IMMORAL',
+            };
+
+            (arData || []).forEach(r => {
+                const amount = Number(r.amount || 0);
+                if (!amount) return;
+                const svcCode = r.service?.code;
+                const desc = r.description;
+                // Intentar por código de servicio primero, luego por descripción, luego por dept
+                let bucket = svcCode && serviceMapping[svcCode]
+                    ? serviceMapping[svcCode]
+                    : (desc && descToBucket[desc])
+                        ? descToBucket[desc]
+                        : getBucket(r.departments?.code);
+                if (deptStats[bucket]) deptStats[bucket].income += amount;
+            });
+        } else {
+            // Año actual / futuro: ingresos desde monthly_billing y billing_details
+            const mbMap = {};
+            const monthlyBillings = await supabase
+                .from('monthly_billing')
+                .select('id, fee_paid, client_id, client:clients(vertical:verticals(name))')
+                .eq('fiscal_year', year);
+
+            if (monthlyBillings.data) {
+                monthlyBillings.data.forEach(mb => {
+                    mbMap[mb.id] = mb;
+                    const feePaid = Number(mb.fee_paid || 0);
+                    if (feePaid > 0) {
+                        const vertical = mb.client?.vertical?.name || '';
+                        if (vertical.toLowerCase() === 'imfilms') {
+                            deptStats['IMFILMS'].income += feePaid;
+                            deptStats['IMMED'].income += feePaid;
+                        } else {
+                            deptStats['IMMED'].income += feePaid;
+                        }
                     }
-                }
-            });
-        }
+                });
+            }
 
-        // 2b. Process Billing Details (for other services)
-        const { data: billDetails } = await supabase
-            .from('billing_details')
-            .select(`
-                amount,
-                department_id,
-                departments (code),
-                services (code),
-                monthly_billing!inner (fiscal_year)
-            `)
-            .eq('monthly_billing.fiscal_year', year);
+            const { data: billDetails } = await supabase
+                .from('billing_details')
+                .select(`amount, department_id, departments (code), services (code), monthly_billing!inner (fiscal_year)`)
+                .eq('monthly_billing.fiscal_year', year);
 
-        if (billDetails) {
-            billDetails.forEach(d => {
-                const svcCode = d.services?.code;
-                if (!svcCode) return;
-
-                if (svcCode === 'PAID_MEDIA_STRATEGY') return;
-
-                const targetBucket = serviceMapping[svcCode];
-                if (targetBucket && deptStats[targetBucket]) {
-                    deptStats[targetBucket].income += Number(d.amount || 0);
-                }
-            });
+            if (billDetails) {
+                billDetails.forEach(d => {
+                    const svcCode = d.services?.code;
+                    if (!svcCode || svcCode === 'PAID_MEDIA_STRATEGY') return;
+                    const targetBucket = serviceMapping[svcCode];
+                    if (targetBucket && deptStats[targetBucket]) {
+                        deptStats[targetBucket].income += Number(d.amount || 0);
+                    }
+                });
+            }
         }
 
         // 3. Process EXPENSES (Actual Expenses + Payroll)
