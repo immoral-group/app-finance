@@ -528,6 +528,9 @@ router.get('/matrix/:year', async (req, res) => {
 
             let revenueEditable = false;
 
+            // extraRevByDept tracks custom service names (not in hardcoded revenueData) per dept
+            const extraRevByDept = {};
+
             if (isPastYear) {
                 // PAST YEARS: Read manual revenue from actual_revenue table
                 revenueEditable = true;
@@ -541,12 +544,20 @@ router.get('/matrix/:year', async (req, res) => {
 
                 manualRevenue?.forEach(rev => {
                     // Prefer description (P&L display name saved at write time) over service table name
-                    // (service.name is the long DB name e.g. "Gestión de RRSS" which won't match revenueData key "RRSS")
-                    const serviceName = rev.description || rev.service?.name || 'Otros';
+                    const serviceName = rev.description || rev.service?.name || 'Otros servicios';
                     const monthIdx = rev.fiscal_month - 1;
                     const val = Number(rev.amount || 0);
                     if (revenueData[serviceName] !== undefined) {
                         revenueData[serviceName][monthIdx] += val;
+                    } else {
+                        // Dynamic service not in hardcoded structure — track it for inclusion in allRows
+                        const deptName = deptMap[rev.department_id] || 'Immoral';
+                        if (!revenueData[serviceName]) revenueData[serviceName] = Array(12).fill(0);
+                        revenueData[serviceName][monthIdx] += val;
+                        if (!extraRevByDept[deptName]) extraRevByDept[deptName] = [];
+                        if (!extraRevByDept[deptName].includes(serviceName)) {
+                            extraRevByDept[deptName].push(serviceName);
+                        }
                     }
                 });
             } else {
@@ -638,6 +649,12 @@ router.get('/matrix/:year', async (req, res) => {
                 }));
             };
 
+            // Build extra rows for custom services saved in actual_revenue (past years only)
+            const extraRows = [];
+            Object.entries(extraRevByDept).forEach(([dept, serviceNames]) => {
+                buildDeptRows(dept, serviceNames).forEach(r => extraRows.push(r));
+            });
+
             const allRows = [
                 ...buildDeptRows('Immedia', ['Paid General', 'Paid imfilms', 'Setup inicial']),
                 ...buildDeptRows('Imcontent', ['Branding', 'Diseño', 'Contenido con IA', 'RRSS', 'Estrategia Digital', 'Influencers', 'Diseño de Landing']),
@@ -648,6 +665,7 @@ router.get('/matrix/:year', async (req, res) => {
                 ...buildDeptRows('Imcontent', ['Budget Nutfruit']),
                 ...buildDeptRows('Imsales', ['Setup inicial (ims)']),
                 ...buildDeptRows('Imsales', ['Captación']),
+                ...extraRows,
             ];
 
             let ingresoSubtotal = Array(12).fill(0);
