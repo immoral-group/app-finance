@@ -478,7 +478,29 @@ export const adminApi = {
         fetchApi(`/budget-requests/${id}`, { method: 'DELETE' }),
     deleteAllDeptBudgetRequests: (data: { fiscal_year: number; dept: string }) =>
         fetchApi('/budget-requests/dept', { method: 'DELETE', body: JSON.stringify(data) }),
+
+    // ── Nutfruit Budget ────────────────────────────────────────────────────────
+    getNutfruitBudget: (year: number) =>
+        fetchApi<{ rows: NutfruitRow[] }>(`/nutfruit/${year}`),
+    saveNutfruitCell: (data: { year: number; row_id: string; month_idx: number; value: number }) =>
+        fetchApi<{ success: boolean }>('/nutfruit/save', { method: 'POST', body: JSON.stringify(data) }),
+    addNutfruitRow: (data: { year: number; item_name: string }) =>
+        fetchApi<{ success: boolean; row: NutfruitRow }>('/nutfruit/rows', { method: 'POST', body: JSON.stringify(data) }),
+    deleteNutfruitRow: (id: string) =>
+        fetchApi<{ success: boolean }>(`/nutfruit/rows/${id}`, { method: 'DELETE' }),
 };
+
+export interface NutfruitRow {
+    id: string;
+    fiscal_year: number;
+    row_type: 'revenue' | 'expense';
+    item_name: string;
+    sort_order: number;
+    is_fixed: boolean;
+    jan: number; feb: number; mar: number; apr: number;
+    may: number; jun: number; jul: number; aug: number;
+    sep: number; oct: number; nov: number; dec: number;
+}
 
 export interface BudgetRequest {
     id: string;

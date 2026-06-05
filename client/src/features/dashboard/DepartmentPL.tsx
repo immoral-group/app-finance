@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { CommentModal } from '@/features/pl/PLMatrix';
 import { useUrlState } from '@/hooks/useUrlState';
+import NutfruitBudget from './NutfruitBudget';
 
 // Premium tooltip shared across all dashboard charts
 function PremiumTooltip({ active, payload, label, formatter }: any) {
@@ -2268,6 +2269,11 @@ export default function DepartmentPL() {
             <div className="space-y-4 -mx-6 -mt-6">
                 {renderHeader(`${deptLabel.toUpperCase()} — DASHBOARD ${year}`)}
                 {renderDashboardTab()}
+                {deptCode === 'imcontent' && (
+                    <div className="px-4 pb-2">
+                        <NutfruitBudget year={year} />
+                    </div>
+                )}
                 {isLoading && (
                     <div className="fixed inset-0 bg-white/50 flex items-center justify-center z-50">
                         <div className="bg-white rounded-lg shadow-lg p-4">Cargando...</div>

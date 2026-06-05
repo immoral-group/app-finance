@@ -29,6 +29,7 @@ import integrationsRoutes from './routes/integrations.js';
 import changelogRoutes from './routes/changelog.js';
 import imsalesRoutes from './routes/imsales.js';
 import budgetRequestsRoutes from './routes/budget-requests.js';
+import nutfruitRoutes from './routes/nutfruit.js';
 
 dotenv.config();
 
@@ -68,6 +69,7 @@ app.use('/changelog', changelogRoutes);
 // Imsales billing
 app.use('/imsales', imsalesRoutes);
 app.use('/budget-requests', budgetRequestsRoutes);
+app.use('/nutfruit', nutfruitRoutes);
 
 
 // Health Check
