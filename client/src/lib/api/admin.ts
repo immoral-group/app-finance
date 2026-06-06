@@ -488,7 +488,29 @@ export const adminApi = {
         fetchApi<{ success: boolean; row: NutfruitRow }>('/nutfruit/rows', { method: 'POST', body: JSON.stringify(data) }),
     deleteNutfruitRow: (id: string) =>
         fetchApi<{ success: boolean }>(`/nutfruit/rows/${id}`, { method: 'DELETE' }),
+
+    // ── ICEX Budget ────────────────────────────────────────────────────────────
+    getIcexBudget: (year: number) =>
+        fetchApi<{ rows: IcexRow[] }>(`/icex/${year}`),
+    saveIcexCell: (data: { year: number; row_id: string; month_idx: number; value: number }) =>
+        fetchApi<{ success: boolean }>('/icex/save', { method: 'POST', body: JSON.stringify(data) }),
+    addIcexRow: (data: { year: number; item_name: string }) =>
+        fetchApi<{ success: boolean; row: IcexRow }>('/icex/rows', { method: 'POST', body: JSON.stringify(data) }),
+    deleteIcexRow: (id: string) =>
+        fetchApi<{ success: boolean }>(`/icex/rows/${id}`, { method: 'DELETE' }),
 };
+
+export interface IcexRow {
+    id: string;
+    fiscal_year: number;
+    row_type: 'revenue' | 'expense';
+    item_name: string;
+    sort_order: number;
+    is_fixed: boolean;
+    jan: number; feb: number; mar: number; apr: number;
+    may: number; jun: number; jul: number; aug: number;
+    sep: number; oct: number; nov: number; dec: number;
+}
 
 export interface NutfruitRow {
     id: string;

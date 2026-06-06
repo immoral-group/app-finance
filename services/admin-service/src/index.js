@@ -30,6 +30,7 @@ import changelogRoutes from './routes/changelog.js';
 import imsalesRoutes from './routes/imsales.js';
 import budgetRequestsRoutes from './routes/budget-requests.js';
 import nutfruitRoutes from './routes/nutfruit.js';
+import icexRoutes from './routes/icex.js';
 
 dotenv.config();
 
@@ -70,6 +71,7 @@ app.use('/changelog', changelogRoutes);
 app.use('/imsales', imsalesRoutes);
 app.use('/budget-requests', budgetRequestsRoutes);
 app.use('/nutfruit', nutfruitRoutes);
+app.use('/icex', icexRoutes);
 
 
 // Health Check

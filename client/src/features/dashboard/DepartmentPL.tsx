@@ -13,6 +13,7 @@ import {
 import { CommentModal } from '@/features/pl/PLMatrix';
 import { useUrlState } from '@/hooks/useUrlState';
 import NutfruitBudget from './NutfruitBudget';
+import IcexBudget from './IcexBudget';
 
 // Premium tooltip shared across all dashboard charts
 function PremiumTooltip({ active, payload, label, formatter }: any) {
@@ -1556,6 +1557,9 @@ export default function DepartmentPL() {
 
                 {/* === NUTFRUIT BUDGET (Imcontent only) === */}
                 {deptCode === 'imcontent' && <NutfruitBudget year={year} />}
+
+                {/* === ICEX BUDGET (Immedia only) === */}
+                {deptCode === 'immedia' && <IcexBudget year={year} />}
 
                 {/* === CHARTS GRID (AFTER SUMMARY TABLE) === */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
