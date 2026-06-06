@@ -1554,6 +1554,9 @@ export default function DepartmentPL() {
                     </div>
                 </div>
 
+                {/* === NUTFRUIT BUDGET (Imcontent only) === */}
+                {deptCode === 'imcontent' && <NutfruitBudget year={year} />}
+
                 {/* === CHARTS GRID (AFTER SUMMARY TABLE) === */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     {/* Chart 1: Ventas vs Gastos */}
@@ -2269,11 +2272,6 @@ export default function DepartmentPL() {
             <div className="space-y-4 -mx-6 -mt-6">
                 {renderHeader(`${deptLabel.toUpperCase()} — DASHBOARD ${year}`)}
                 {renderDashboardTab()}
-                {deptCode === 'imcontent' && (
-                    <div className="px-4 pb-2">
-                        <NutfruitBudget year={year} />
-                    </div>
-                )}
                 {isLoading && (
                     <div className="fixed inset-0 bg-white/50 flex items-center justify-center z-50">
                         <div className="bg-white rounded-lg shadow-lg p-4">Cargando...</div>
