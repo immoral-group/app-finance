@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, NutfruitRow } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Plus, Trash2, ChevronDown, ChevronUp, TrendingUp, TrendingDown } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Construction, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -138,7 +138,13 @@ export default function NutfruitBudget({ year }: { year: number }) {
                         <span className="text-base">🥜</span>
                     </div>
                     <div className="text-left">
-                        <p className="text-sm font-bold text-amber-900">Nutfruit Budget</p>
+                        <div className="flex items-center gap-2">
+                            <p className="text-sm font-bold text-amber-900">Nutfruit Budget</p>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-orange-100 text-orange-700 border border-orange-200">
+                                <Construction size={9} />
+                                En construcción
+                            </span>
+                        </div>
                         <p className="text-[11px] text-amber-600 mt-0.5">Seguimiento paralelo de ingresos y gastos · {year}</p>
                     </div>
                     {!open && totalRev > 0 && (
@@ -158,6 +164,17 @@ export default function NutfruitBudget({ year }: { year: number }) {
             {/* Body */}
             {open && (
                 <div className="bg-card">
+                    {/* Banner de aviso */}
+                    <div className="flex items-start gap-3 px-5 py-3.5 bg-orange-50/80 border-b border-orange-100">
+                        <AlertTriangle size={15} className="text-orange-500 mt-0.5 shrink-0" />
+                        <p className="text-xs text-orange-800 leading-relaxed">
+                            <span className="font-bold">Módulo en construcción.</span>{' '}
+                            Los datos mostrados pueden estar incompletos o pendientes de validación.
+                            Antes de tomar decisiones basadas en esta información, por favor
+                            <span className="font-semibold"> verifica los datos con el departamento Imcontent</span>.
+                        </p>
+                    </div>
+
                     {isLoading ? (
                         <div className="p-10 text-center">
                             <div className="h-6 w-6 rounded-full border-2 border-amber-300 border-t-amber-600 animate-spin mx-auto mb-2" />
