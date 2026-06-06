@@ -171,7 +171,7 @@ export default function NutfruitBudget({ year }: { year: number }) {
                             <span className="font-bold">Módulo en construcción.</span>{' '}
                             Los datos mostrados pueden estar incompletos o pendientes de validación.
                             Antes de tomar decisiones basadas en esta información, por favor
-                            <span className="font-semibold"> verifica los datos con el departamento Imcontent</span>.
+                            <span className="font-semibold"> espera que finanzas y Imcontent verifiquen y actualicen los datos</span>.
                         </p>
                     </div>
 
