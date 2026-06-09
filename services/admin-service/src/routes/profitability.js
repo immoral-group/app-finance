@@ -120,7 +120,42 @@ router.get('/clickup/lists/:spaceId', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GET /profitability/clickup/lists-with-time/:year
+// GET /profitability/clickup/debug-entries/:year/:month
+// Devuelve hasta 50 entradas crudas de ClickUp para ese mes, para diagnóstico.
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/clickup/debug-entries/:year/:month', async (req, res) => {
+    try {
+        const { token: CLICKUP_TOKEN, teamId: TEAM_ID } = getClickUpConfig();
+        if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
+
+        const year = parseInt(req.params.year);
+        const month = parseInt(req.params.month); // 1-based
+        const startTs = new Date(`${year}-${String(month).padStart(2,'0')}-01T00:00:00Z`).getTime();
+        const endTs   = new Date(year, month, 0, 23, 59, 59).getTime(); // last day of month
+
+        const data = await cuFetch(`/team/${TEAM_ID}/time_entries`, {
+            start_date: startTs,
+            end_date: endTs,
+        });
+
+        const entries = (data.data || []).slice(0, 50).map(e => ({
+            id: e.id,
+            user: e.user?.username,
+            duration_h: Math.round(Number(e.duration || 0) / 3_600_000 * 100) / 100,
+            task: e.task?.name,
+            list_id: e.task_location?.list_id || e.task?.list?.id,
+            list_name: e.task_location?.list_name || e.task?.list?.name,
+            space_name: e.task_location?.space_name,
+            start: new Date(Number(e.start)).toISOString(),
+        }));
+
+        res.json({ total: data.data?.length || 0, month, year, entries });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
 // Devuelve TODAS las listas del workspace que tienen tiempo registrado en el año.
 // (Esto es lo que alimenta los dashboards de ClickUp por cliente)
 // ──────────────────────────────────────────────────────────────────────────────
