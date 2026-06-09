@@ -502,6 +502,8 @@ export const adminApi = {
     // ── Rentabilidad por Cuenta ────────────────────────────────────────────────
     getProfitabilityAccounts: (year: number) =>
         fetchApi<ProfitabilityResponse>(`/profitability/accounts/${year}`),
+    getProfitabilityAutoMapping: (year: number) =>
+        fetchApi<AutoMappingResponse>(`/profitability/auto-mapping/${year}`),
     getProfitabilityUserMappings: () =>
         fetchApi<{ mappings: UserMapping[] }>('/profitability/user-mappings'),
     saveProfitabilityUserMappings: (mappings: Partial<UserMapping>[]) =>
@@ -600,6 +602,22 @@ export interface AccountProfitability {
 export interface ProfitabilityResponse {
     year: number;
     accounts: AccountProfitability[];
+}
+
+export interface AutoMappingEntry {
+    clickup_user_id: string;
+    clickup_username: string;
+    email: string;
+    matched_employee: string | null;
+    department: string | null;
+    cost_per_hour: number;
+    source: 'matched' | 'override' | 'unmatched';
+}
+
+export interface AutoMappingResponse {
+    year: number;
+    mappings: AutoMappingEntry[];
+    dept_averages: Record<string, number>;
 }
 
 export interface BudgetRequest {

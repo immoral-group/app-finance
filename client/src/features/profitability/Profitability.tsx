@@ -200,7 +200,7 @@ export default function Profitability() {
     const red = accounts.filter(a => (a.total_margin_pct ?? 100) < 40).length;
 
     if (showSetup) {
-        return <ProfitabilitySetup onBack={() => setShowSetup(false)} />;
+        return <ProfitabilitySetup onBack={() => setShowSetup(false)} year={year} />;
     }
 
     return (

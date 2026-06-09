@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, UserMapping, ClientList, ClickUpMember, ClickUpSpace, ClickUpList } from '@/lib/api/admin';
-import { ArrowLeft, Plus, Trash2, Save, RefreshCw, ChevronDown } from 'lucide-react';
+import { adminApi, ClientList, ClickUpSpace, ClickUpList, AutoMappingEntry } from '@/lib/api/admin';
+import { ArrowLeft, Plus, Trash2, Save, ChevronDown, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -16,141 +16,135 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     );
 }
 
-// ── User Mappings ──────────────────────────────────────────────────────────────
-function UserMappingsSection() {
+// ── Auto-Mapping (read-only + override opcional) ──────────────────────────────
+function AutoMappingSection({ year }: { year: number }) {
     const qc = useQueryClient();
-    const { data: mappingsData } = useQuery({
-        queryKey: ['profitability-user-mappings'],
-        queryFn: adminApi.getProfitabilityUserMappings,
-    });
-    const { data: membersData, isLoading: loadingMembers } = useQuery({
-        queryKey: ['clickup-members'],
-        queryFn: adminApi.getClickUpMembers,
-        staleTime: 10 * 60_000,
+    const [overrides, setOverrides] = useState<Record<string, number>>({});
+    const [editing, setEditing] = useState<string | null>(null);
+
+    const { data, isLoading } = useQuery({
+        queryKey: ['profitability-auto-mapping', year],
+        queryFn: () => adminApi.getProfitabilityAutoMapping(year),
     });
 
-    const [rows, setRows] = useState<UserMapping[]>([]);
-    const [initialized, setInitialized] = useState(false);
-
-    if (mappingsData && !initialized) {
-        setRows(mappingsData.mappings || []);
-        setInitialized(true);
-    }
-
-    const saveMutation = useMutation({
-        mutationFn: () => adminApi.saveProfitabilityUserMappings(rows),
+    const saveOverride = useMutation({
+        mutationFn: (uid: string) => {
+            const entry = data!.mappings.find(m => m.clickup_user_id === uid)!;
+            return adminApi.saveProfitabilityUserMappings([{
+                clickup_user_id: uid,
+                display_name: entry.clickup_username,
+                email: entry.email,
+                cost_per_hour: overrides[uid],
+                department: entry.department || undefined,
+            }]);
+        },
         onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ['profitability-user-mappings'] });
-            toast.success('Mappings guardados');
+            qc.invalidateQueries({ queryKey: ['profitability-auto-mapping', year] });
+            qc.invalidateQueries({ queryKey: ['profitability-accounts', year] });
+            toast.success('Override guardado');
+            setEditing(null);
         },
         onError: () => toast.error('Error al guardar'),
     });
 
-    const addFromClickUp = (member: ClickUpMember) => {
-        if (rows.find(r => r.clickup_user_id === String(member.id))) return;
-        setRows(prev => [...prev, {
-            clickup_user_id: String(member.id),
-            display_name: member.username,
-            email: member.email,
-            cost_per_hour: 0,
-        }]);
-    };
+    if (isLoading) return <Section title="Coste por hora (auto)"><p className="text-xs text-muted-foreground text-center py-4">Calculando…</p></Section>;
 
-    const removeRow = (uid: string) => setRows(prev => prev.filter(r => r.clickup_user_id !== uid));
-
-    const updateCost = (uid: string, val: string) => {
-        setRows(prev => prev.map(r => r.clickup_user_id === uid ? { ...r, cost_per_hour: parseFloat(val) || 0 } : r));
-    };
-    const updateDept = (uid: string, val: string) => {
-        setRows(prev => prev.map(r => r.clickup_user_id === uid ? { ...r, department: val } : r));
-    };
-
-    const members = membersData?.members ?? [];
-    const unmapped = members.filter(m => !rows.find(r => r.clickup_user_id === String(m.id)));
+    const mappings = data?.mappings ?? [];
+    const matched = mappings.filter(m => m.source === 'matched').length;
+    const overridden = mappings.filter(m => m.source === 'override').length;
+    const unmatched = mappings.filter(m => m.source === 'unmatched').length;
 
     return (
-        <Section title="Coste por hora — Usuarios ClickUp">
-            {loadingMembers && <p className="text-xs text-muted-foreground mb-3 flex items-center gap-1.5"><RefreshCw size={12} className="animate-spin" /> Cargando miembros de ClickUp…</p>}
-
-            {unmapped.length > 0 && (
-                <div className="mb-4">
-                    <p className="text-xs text-muted-foreground mb-2">Añadir usuario de ClickUp:</p>
-                    <div className="flex flex-wrap gap-1.5">
-                        {unmapped.map(m => (
-                            <button
-                                key={m.id}
-                                onClick={() => addFromClickUp(m)}
-                                className="flex items-center gap-1 px-2 py-1 rounded-full border border-border/60 bg-muted/40 hover:bg-muted text-xs text-foreground transition-colors"
-                            >
-                                <Plus size={10} />
-                                {m.username}
-                            </button>
-                        ))}
-                    </div>
+        <Section title="Coste por hora (calculado automáticamente)">
+            <div className="bg-muted/30 border border-border/50 rounded-lg p-3 mb-4 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5 mb-1.5 text-foreground font-medium">
+                    <Sparkles size={12} className="text-primary" />
+                    Cálculo automático
                 </div>
-            )}
+                <p>El coste/hora se calcula desde los salarios en <strong>actual_expenses</strong> ÷ (160h × meses activos). Los usuarios ClickUp se cruzan con los empleados de Finance por nombre. Puedes anular cualquier valor con un override manual.</p>
+                <div className="mt-2 flex gap-3 text-[10px]">
+                    <span className="flex items-center gap-1"><CheckCircle2 size={10} className="text-emerald-500" /> {matched} auto-detectados</span>
+                    {overridden > 0 && <span className="flex items-center gap-1"><Sparkles size={10} className="text-blue-500" /> {overridden} override</span>}
+                    {unmatched > 0 && <span className="flex items-center gap-1"><AlertCircle size={10} className="text-amber-500" /> {unmatched} sin match</span>}
+                </div>
+            </div>
 
-            {rows.length > 0 ? (
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                        <thead>
-                            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
-                                <th className="pb-2 text-left font-medium">Usuario</th>
-                                <th className="pb-2 text-left font-medium">Email</th>
-                                <th className="pb-2 text-left font-medium">Departamento</th>
-                                <th className="pb-2 text-right font-medium">€/hora</th>
-                                <th className="pb-2 w-8" />
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {rows.map(r => (
-                                <tr key={r.clickup_user_id} className="border-b border-border/30">
-                                    <td className="py-2 pr-3 font-medium text-foreground">{r.display_name}</td>
-                                    <td className="py-2 pr-3 text-muted-foreground text-xs">{r.email || '—'}</td>
-                                    <td className="py-2 pr-3">
-                                        <input
-                                            value={r.department || ''}
-                                            onChange={e => updateDept(r.clickup_user_id, e.target.value)}
-                                            placeholder="ej. Immedia"
-                                            className="w-28 px-2 py-1 text-xs rounded border border-border/60 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                                        />
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+                            <th className="pb-2 text-left font-medium">Usuario ClickUp</th>
+                            <th className="pb-2 text-left font-medium">Empleado Finance</th>
+                            <th className="pb-2 text-left font-medium">Depto</th>
+                            <th className="pb-2 text-right font-medium">€/hora</th>
+                            <th className="pb-2 text-center font-medium">Fuente</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {mappings.map(m => {
+                            const isEditing = editing === m.clickup_user_id;
+                            const currentOverride = overrides[m.clickup_user_id];
+                            return (
+                                <tr key={m.clickup_user_id} className="border-b border-border/30">
+                                    <td className="py-2 pr-3 font-medium text-foreground text-xs">{m.clickup_username}</td>
+                                    <td className="py-2 pr-3 text-muted-foreground text-xs">{m.matched_employee || '—'}</td>
+                                    <td className="py-2 pr-3 text-muted-foreground text-xs">{m.department || '—'}</td>
+                                    <td className="py-2 pr-3 text-right tabular-nums">
+                                        {isEditing ? (
+                                            <div className="flex items-center justify-end gap-1">
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    step={0.5}
+                                                    autoFocus
+                                                    defaultValue={m.cost_per_hour}
+                                                    onChange={e => setOverrides(p => ({ ...p, [m.clickup_user_id]: parseFloat(e.target.value) || 0 }))}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') saveOverride.mutate(m.clickup_user_id);
+                                                        if (e.key === 'Escape') setEditing(null);
+                                                    }}
+                                                    className="w-16 px-1.5 py-0.5 text-xs rounded border border-primary bg-background focus:outline-none text-right"
+                                                />
+                                                <button
+                                                    onClick={() => saveOverride.mutate(m.clickup_user_id)}
+                                                    className="p-1 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded"
+                                                >
+                                                    <Save size={11} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                onClick={() => { setEditing(m.clickup_user_id); setOverrides(p => ({ ...p, [m.clickup_user_id]: m.cost_per_hour })); }}
+                                                className="hover:text-primary transition-colors text-foreground font-medium"
+                                                title="Click para overridear"
+                                            >
+                                                {m.cost_per_hour > 0 ? `${m.cost_per_hour.toFixed(2)} €` : '—'}
+                                            </button>
+                                        )}
                                     </td>
-                                    <td className="py-2 pr-3 text-right">
-                                        <input
-                                            type="number"
-                                            min={0}
-                                            step={0.5}
-                                            value={r.cost_per_hour}
-                                            onChange={e => updateCost(r.clickup_user_id, e.target.value)}
-                                            className="w-20 px-2 py-1 text-xs rounded border border-border/60 bg-background focus:outline-none focus:ring-1 focus:ring-primary text-right"
-                                        />
-                                    </td>
-                                    <td className="py-2">
-                                        <button onClick={() => removeRow(r.clickup_user_id)} className="p-1 hover:text-red-500 text-muted-foreground transition-colors">
-                                            <Trash2 size={13} />
-                                        </button>
+                                    <td className="py-2 text-center">
+                                        {m.source === 'matched' && (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[9px] font-medium">
+                                                <CheckCircle2 size={9} /> auto
+                                            </span>
+                                        )}
+                                        {m.source === 'override' && (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-[9px] font-medium">
+                                                <Sparkles size={9} /> manual
+                                            </span>
+                                        )}
+                                        {m.source === 'unmatched' && (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[9px] font-medium">
+                                                <AlertCircle size={9} /> sin match
+                                            </span>
+                                        )}
                                     </td>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            ) : (
-                <p className="text-xs text-muted-foreground py-4 text-center">No hay usuarios configurados. Añade usuarios de ClickUp arriba.</p>
-            )}
-
-            {rows.length > 0 && (
-                <div className="mt-4 flex justify-end">
-                    <button
-                        onClick={() => saveMutation.mutate()}
-                        disabled={saveMutation.isPending}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                    >
-                        <Save size={12} />
-                        {saveMutation.isPending ? 'Guardando…' : 'Guardar'}
-                    </button>
-                </div>
-            )}
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
         </Section>
     );
 }
@@ -322,7 +316,7 @@ function ClientListsSection() {
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
-export function ProfitabilitySetup({ onBack }: { onBack: () => void }) {
+export function ProfitabilitySetup({ onBack, year }: { onBack: () => void; year: number }) {
     return (
         <div className="space-y-6">
             <div className="flex items-center gap-3">
@@ -334,11 +328,11 @@ export function ProfitabilitySetup({ onBack }: { onBack: () => void }) {
                 </button>
                 <div>
                     <h1 className="text-xl font-bold text-foreground tracking-tight">Configurar Rentabilidad</h1>
-                    <p className="text-xs text-muted-foreground mt-0.5">Mapea usuarios ClickUp y listas de trabajo a clientes</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Coste/hora calculado automáticamente · solo configura el mapeo cliente→lista ClickUp</p>
                 </div>
             </div>
 
-            <UserMappingsSection />
+            <AutoMappingSection year={year} />
             <ClientListsSection />
         </div>
     );
