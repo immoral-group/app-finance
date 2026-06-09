@@ -323,6 +323,22 @@ router.get('/docs', async (req, res) => {
                     { method: 'GET', path: '/users', description: 'List all users' },
                 ],
             },
+            {
+                name: 'Rentabilidad por Cuenta',
+                scope: 'profitability:read',
+                endpoints: [
+                    { method: 'GET', path: '/profitability/accounts/{year}', description: 'Rentabilidad por cliente: horas ClickUp × coste/hora vs facturación. Devuelve margen %, beneficio bruto, horas y desglose por mes y por miembro del equipo.', params: ['year (int)'] },
+                    { method: 'GET', path: '/profitability/auto-mapping/{year}', description: 'Mapeo automático ClickUp ↔ empleados Finance con coste/hora calculado desde actual_expenses.', params: ['year (int)'] },
+                    { method: 'GET', path: '/profitability/clickup/lists-with-time/{year}', description: 'Listas de ClickUp con horas registradas en el año (auto-descubrimiento).', params: ['year (int)'] },
+                    { method: 'GET', path: '/profitability/clickup/spaces', description: 'Spaces del workspace ClickUp.' },
+                    { method: 'GET', path: '/profitability/clickup/lists/{spaceId}', description: 'Listas (con folders) dentro de un space.', params: ['spaceId (string)'] },
+                    { method: 'GET', path: '/profitability/clickup/members', description: 'Miembros del workspace ClickUp.' },
+                    { method: 'GET', path: '/profitability/client-lists', description: 'Mapeo cliente Finance → lista(s) ClickUp.' },
+                    { method: 'PUT', path: '/profitability/client-lists', description: 'Upsert mapeo cliente Finance ↔ lista ClickUp (superadmin).' },
+                    { method: 'GET', path: '/profitability/user-mappings', description: 'Overrides manuales de coste/hora por usuario ClickUp.' },
+                    { method: 'PUT', path: '/profitability/user-mappings', description: 'Upsert override manual de coste/hora (superadmin).' },
+                ],
+            },
         ],
     };
 

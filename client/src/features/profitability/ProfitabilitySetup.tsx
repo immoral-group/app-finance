@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, ClientList, ClickUpSpace, ClickUpList, AutoMappingEntry } from '@/lib/api/admin';
+import { adminApi, ClientList, ClickUpSpace, ClickUpList } from '@/lib/api/admin';
 import { ArrowLeft, Plus, Trash2, Save, ChevronDown, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -83,7 +83,6 @@ function AutoMappingSection({ year }: { year: number }) {
                     <tbody>
                         {mappings.map(m => {
                             const isEditing = editing === m.clickup_user_id;
-                            const currentOverride = overrides[m.clickup_user_id];
                             return (
                                 <tr key={m.clickup_user_id} className="border-b border-border/30">
                                     <td className="py-2 pr-3 font-medium text-foreground text-xs">{m.clickup_username}</td>
@@ -150,22 +149,30 @@ function AutoMappingSection({ year }: { year: number }) {
 }
 
 // ── Client Lists ───────────────────────────────────────────────────────────────
-function ClientListsSection() {
+function ClientListsSection({ year }: { year: number }) {
     const qc = useQueryClient();
     const [selectedSpace, setSelectedSpace] = useState<string>('');
+    const [showAutoDiscover, setShowAutoDiscover] = useState(true);
     const [rows, setRows] = useState<ClientList[]>([]);
     const [initialized, setInitialized] = useState(false);
+
+    const { data: autoListsData, isLoading: loadingAuto } = useQuery({
+        queryKey: ['clickup-lists-with-time', year],
+        queryFn: () => adminApi.getClickUpListsWithTime(year),
+        staleTime: 5 * 60_000,
+    });
 
     const { data: spacesData } = useQuery({
         queryKey: ['clickup-spaces'],
         queryFn: adminApi.getClickUpSpaces,
+        enabled: !showAutoDiscover,
         staleTime: 10 * 60_000,
     });
 
     const { data: listsData } = useQuery({
         queryKey: ['clickup-lists', selectedSpace],
         queryFn: () => adminApi.getClickUpLists(selectedSpace),
-        enabled: !!selectedSpace,
+        enabled: !!selectedSpace && !showAutoDiscover,
         staleTime: 5 * 60_000,
     });
 
@@ -209,46 +216,106 @@ function ClientListsSection() {
     const lists = listsData?.lists ?? [];
     const clients = clientsRaw?.clients ?? [];
 
+    const autoLists = autoListsData?.lists ?? [];
+
     return (
         <Section title="Listas ClickUp → Cliente Finance">
             <div className="space-y-4">
-                {/* Space selector */}
-                <div className="flex items-center gap-3">
-                    <label className="text-xs text-muted-foreground whitespace-nowrap">Space ClickUp:</label>
-                    <div className="relative">
-                        <select
-                            value={selectedSpace}
-                            onChange={e => setSelectedSpace(e.target.value)}
-                            className="appearance-none px-3 pr-7 py-1.5 text-xs rounded-lg border border-border/60 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                        >
-                            <option value="">— seleccionar —</option>
-                            {spaces.map((s: ClickUpSpace) => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                        </select>
-                        <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    </div>
+                {/* Toggle: auto-discover vs manual */}
+                <div className="flex items-center gap-2 text-xs">
+                    <button
+                        onClick={() => setShowAutoDiscover(true)}
+                        className={cn(
+                            'px-3 py-1.5 rounded-lg font-medium transition-colors',
+                            showAutoDiscover ? 'bg-primary text-primary-foreground' : 'border border-border/60 text-muted-foreground hover:bg-muted/60'
+                        )}
+                    >
+                        <Sparkles size={11} className="inline mr-1" /> Auto-descubrir (con horas {year})
+                    </button>
+                    <button
+                        onClick={() => setShowAutoDiscover(false)}
+                        className={cn(
+                            'px-3 py-1.5 rounded-lg font-medium transition-colors',
+                            !showAutoDiscover ? 'bg-primary text-primary-foreground' : 'border border-border/60 text-muted-foreground hover:bg-muted/60'
+                        )}
+                    >
+                        Explorar por Space
+                    </button>
                 </div>
 
-                {/* Lists to add */}
-                {lists.length > 0 && (
+                {/* Auto-discover: lists with time logged */}
+                {showAutoDiscover && (
                     <div>
-                        <p className="text-xs text-muted-foreground mb-2">Añadir lista:</p>
-                        <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-                            {lists
-                                .filter((l: ClickUpList) => !rows.find(r => r.clickup_list_id === l.id))
-                                .map((l: ClickUpList) => (
-                                    <button
-                                        key={l.id}
-                                        onClick={() => addList(l)}
-                                        className="flex items-center gap-1 px-2 py-1 rounded-full border border-border/60 bg-muted/40 hover:bg-muted text-xs text-foreground transition-colors"
-                                    >
-                                        <Plus size={10} />
-                                        {l.folder ? `${l.folder} / ` : ''}{l.name}
-                                    </button>
-                                ))}
-                        </div>
+                        {loadingAuto && <p className="text-xs text-muted-foreground py-2">Buscando listas con horas registradas en {year}…</p>}
+                        {!loadingAuto && autoLists.length === 0 && (
+                            <p className="text-xs text-muted-foreground py-2">No se han encontrado listas con horas registradas en {year}.</p>
+                        )}
+                        {autoLists.length > 0 && (
+                            <>
+                                <p className="text-xs text-muted-foreground mb-2">
+                                    {autoLists.length} listas con horas registradas en {year}. Click para añadir:
+                                </p>
+                                <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+                                    {autoLists
+                                        .filter(l => !rows.find(r => r.clickup_list_id === l.id))
+                                        .map(l => (
+                                            <button
+                                                key={l.id}
+                                                onClick={() => addList({ id: l.id, name: l.name, folder: l.folder })}
+                                                className="flex items-center gap-1 px-2 py-1 rounded-full border border-border/60 bg-muted/40 hover:bg-muted text-xs text-foreground transition-colors"
+                                                title={`${l.entry_count} entradas · ${l.space}${l.folder ? ' / ' + l.folder : ''}`}
+                                            >
+                                                <Plus size={10} />
+                                                {l.name}
+                                                <span className="text-[9px] text-muted-foreground ml-1">{l.total_hours}h</span>
+                                            </button>
+                                        ))}
+                                </div>
+                            </>
+                        )}
                     </div>
+                )}
+
+                {/* Manual: space selector */}
+                {!showAutoDiscover && (
+                    <>
+                        <div className="flex items-center gap-3">
+                            <label className="text-xs text-muted-foreground whitespace-nowrap">Space ClickUp:</label>
+                            <div className="relative">
+                                <select
+                                    value={selectedSpace}
+                                    onChange={e => setSelectedSpace(e.target.value)}
+                                    className="appearance-none px-3 pr-7 py-1.5 text-xs rounded-lg border border-border/60 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                                >
+                                    <option value="">— seleccionar —</option>
+                                    {spaces.map((s: ClickUpSpace) => (
+                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                    ))}
+                                </select>
+                                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                            </div>
+                        </div>
+
+                        {lists.length > 0 && (
+                            <div>
+                                <p className="text-xs text-muted-foreground mb-2">Añadir lista:</p>
+                                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                                    {lists
+                                        .filter((l: ClickUpList) => !rows.find(r => r.clickup_list_id === l.id))
+                                        .map((l: ClickUpList) => (
+                                            <button
+                                                key={l.id}
+                                                onClick={() => addList(l)}
+                                                className="flex items-center gap-1 px-2 py-1 rounded-full border border-border/60 bg-muted/40 hover:bg-muted text-xs text-foreground transition-colors"
+                                            >
+                                                <Plus size={10} />
+                                                {l.folder ? `${l.folder} / ` : ''}{l.name}
+                                            </button>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
+                    </>
                 )}
 
                 {/* Mapping table */}
@@ -333,7 +400,7 @@ export function ProfitabilitySetup({ onBack, year }: { onBack: () => void; year:
             </div>
 
             <AutoMappingSection year={year} />
-            <ClientListsSection />
+            <ClientListsSection year={year} />
         </div>
     );
 }

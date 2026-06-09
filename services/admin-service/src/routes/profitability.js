@@ -73,6 +73,62 @@ router.get('/clickup/lists/:spaceId', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// GET /profitability/clickup/lists-with-time/:year
+// Devuelve TODAS las listas del workspace que tienen tiempo registrado en el año.
+// (Esto es lo que alimenta los dashboards de ClickUp por cliente)
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/clickup/lists-with-time/:year', async (req, res) => {
+    try {
+        const { token: CLICKUP_TOKEN, teamId: TEAM_ID } = getClickUpConfig();
+        if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
+
+        const year = parseInt(req.params.year);
+        const startTs = new Date(`${year}-01-01T00:00:00Z`).getTime();
+        const endTs = new Date(`${year}-12-31T23:59:59Z`).getTime();
+
+        // Workspace-level time entries: una sola llamada devuelve TODO
+        const data = await cuFetch(`/team/${TEAM_ID}/time_entries`, {
+            start_date: startTs,
+            end_date: endTs,
+        });
+
+        const entries = data.data || [];
+
+        // Agrupar por list_id
+        const listMap = {};
+        for (const e of entries) {
+            const listId = e.task_location?.list_id || e.task?.list?.id;
+            const listName = e.task_location?.list_name || e.task?.list?.name || 'Sin lista';
+            const spaceName = e.task_location?.space_name || e.task?.space?.name || '';
+            const folderName = e.task_location?.folder_name || e.task?.folder?.name || '';
+            if (!listId) continue;
+
+            if (!listMap[listId]) {
+                listMap[listId] = {
+                    id: listId,
+                    name: listName,
+                    space: spaceName,
+                    folder: folderName === 'hidden' ? null : folderName,
+                    total_hours: 0,
+                    entry_count: 0,
+                };
+            }
+            listMap[listId].total_hours += Number(e.duration || 0) / 3_600_000;
+            listMap[listId].entry_count++;
+        }
+
+        const lists = Object.values(listMap)
+            .map(l => ({ ...l, total_hours: Math.round(l.total_hours * 10) / 10 }))
+            .sort((a, b) => b.total_hours - a.total_hours);
+
+        res.json({ year, lists, total_entries: entries.length });
+    } catch (err) {
+        console.error('[profitability] lists-with-time error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // GET /profitability/clickup/members  — miembros del workspace
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/clickup/members', async (req, res) => {
@@ -381,32 +437,24 @@ router.get('/accounts/:year', async (req, res) => {
             .select('amount, client_id, clients(id, name), monthly_billing!inner(fiscal_year, fiscal_month)')
             .eq('monthly_billing.fiscal_year', year);
 
-        // 4. Time entries por lista
-        const listIds = [...new Set(clientListRows.map(r => r.clickup_list_id))];
+        // 4. Time entries: una sola llamada workspace-wide (lo que usan los dashboards de ClickUp)
         const startTs = new Date(`${year}-01-01T00:00:00Z`).getTime();
         const endTs = new Date(`${year}-12-31T23:59:59Z`).getTime();
 
+        const allEntriesResp = await cuFetch(`/team/${TEAM_ID}/time_entries`, {
+            start_date: startTs,
+            end_date: endTs,
+        });
+        const allEntries = allEntriesResp.data || [];
+
+        // Agrupar entries por list_id
         const timeEntriesByList = {};
-        await Promise.all(listIds.map(async (listId) => {
-            try {
-                let page = 0;
-                let allEntries = [];
-                while (true) {
-                    const data = await cuFetch(`/list/${listId}/time_entries`, {
-                        start_date: startTs, end_date: endTs, page,
-                    });
-                    const entries = data.data || [];
-                    allEntries = allEntries.concat(entries);
-                    if (entries.length < 100) break;
-                    page++;
-                    if (page > 20) break;
-                }
-                timeEntriesByList[listId] = allEntries;
-            } catch (e) {
-                console.warn(`[profitability] list ${listId} time_entries error:`, e.message);
-                timeEntriesByList[listId] = [];
-            }
-        }));
+        for (const e of allEntries) {
+            const listId = e.task_location?.list_id || e.task?.list?.id;
+            if (!listId) continue;
+            if (!timeEntriesByList[listId]) timeEntriesByList[listId] = [];
+            timeEntriesByList[listId].push(e);
+        }
 
         // 5. Overrides manuales por clickup_user_id
         const overrideByUid = {};

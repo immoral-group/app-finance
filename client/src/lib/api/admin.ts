@@ -518,6 +518,8 @@ export const adminApi = {
         fetchApi<{ lists: ClickUpList[] }>(`/profitability/clickup/lists/${spaceId}`),
     getClickUpMembers: () =>
         fetchApi<{ members: ClickUpMember[] }>('/profitability/clickup/members'),
+    getClickUpListsWithTime: (year: number) =>
+        fetchApi<{ year: number; lists: ClickUpListWithTime[]; total_entries: number }>(`/profitability/clickup/lists-with-time/${year}`),
 };
 
 export interface IcexRow {
@@ -570,6 +572,15 @@ export interface ClickUpList {
     id: string;
     name: string;
     folder: string | null;
+}
+
+export interface ClickUpListWithTime {
+    id: string;
+    name: string;
+    space: string;
+    folder: string | null;
+    total_hours: number;
+    entry_count: number;
 }
 
 export interface ClickUpMember {
