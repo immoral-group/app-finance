@@ -598,7 +598,7 @@ export interface MonthlyProfitability {
     revenue: number;
     gross_profit: number;
     margin_pct: number | null;
-    members: { name: string; hours: number; labor_cost: number }[];
+    members: { name: string; hours: number; labor_cost: number; cost_per_hour: number; source: string }[];
 }
 
 export interface AccountProfitability {
