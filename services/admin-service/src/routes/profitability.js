@@ -298,10 +298,23 @@ router.put('/client-lists', async (req, res) => {
     try {
         const { client_lists } = req.body;
         if (!Array.isArray(client_lists)) return res.status(400).json({ error: 'client_lists must be an array' });
-        const { error } = await supabase
-            .from('profitability_client_lists')
-            .upsert(client_lists, { onConflict: 'client_id,clickup_list_id' });
-        if (error) throw error;
+
+        // Only keep rows with valid client_id
+        const valid = client_lists.filter(r => r.client_id && r.clickup_list_id);
+
+        // Delete all existing rows, then insert fresh — this respects deletions
+        await supabase.from('profitability_client_lists').delete().not('id', 'is', null);
+
+        if (valid.length > 0) {
+            const toInsert = valid.map(r => ({
+                client_id: r.client_id,
+                clickup_list_id: r.clickup_list_id,
+                clickup_list_name: r.clickup_list_name || null,
+            }));
+            const { error } = await supabase.from('profitability_client_lists').insert(toInsert);
+            if (error) throw error;
+        }
+
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -314,8 +327,9 @@ router.put('/client-lists', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 async function computeRealCostPerPerson(year) {
     const HOURS_PER_PERSON_MONTH = 160;
+    // Use full names where there may be ambiguity (e.g. multiple "Andrés" in ClickUp)
     const PERSONAL_ITEMS = {
-        Immedia: ['Alba', 'Andrés', 'Leidy'],
+        Immedia: ['Alba', 'Andrés Barrios', 'Leidy'],
         Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'],
         Immoralia: ['David', 'Manel', 'Julian'],
     };
@@ -344,9 +358,17 @@ async function computeRealCostPerPerson(year) {
     });
 
     // Reverse: name → dept (lowercase for matching)
+    // For multi-word names (e.g. "Andrés Barrios"), also register the first-name alias
+    // so that expense categories named "Andrés" still resolve correctly.
     const nameToDept = {};
     Object.entries(deptToNames).forEach(([dept, names]) => {
-        names.forEach(n => { nameToDept[n.toLowerCase()] = { canonical: n, dept }; });
+        names.forEach(n => {
+            nameToDept[n.toLowerCase()] = { canonical: n, dept };
+            const firstToken = n.split(/\s+/)[0].toLowerCase();
+            if (firstToken !== n.toLowerCase() && !nameToDept[firstToken]) {
+                nameToDept[firstToken] = { canonical: n, dept };
+            }
+        });
     });
 
     // 3. Fetch personal expenses for the year
@@ -409,24 +431,23 @@ async function computeRealCostPerPerson(year) {
     return { personByName, deptAvg, deptToNames };
 }
 
-// Match ClickUp username → empleado Finance por nombre (token primero, fuzzy)
+// Match ClickUp username → empleado Finance por nombre.
+// Requiere que TODOS los tokens del nombre Finance aparezcan en el nombre ClickUp.
+// Esto evita que "Andrés Peñuela" matchee con Finance "Andrés Barrios".
 function matchClickUpUser(clickupName, personByName) {
     if (!clickupName) return null;
     const lower = clickupName.toLowerCase().trim();
+    const cuTokens = new Set(lower.split(/[\s._-]+/).filter(Boolean));
 
-    // Exact match on full name
+    // Exact match
     if (personByName[lower]) return personByName[lower];
 
-    // Token match (first name or any token)
-    const tokens = lower.split(/[\s._-]+/).filter(Boolean);
-    for (const tk of tokens) {
-        if (personByName[tk]) return personByName[tk];
+    // All Finance name tokens must be present in ClickUp name
+    for (const [key, val] of Object.entries(personByName)) {
+        const keyTokens = key.split(/[\s._-]+/).filter(Boolean);
+        if (keyTokens.length > 0 && keyTokens.every(t => cuTokens.has(t))) return val;
     }
 
-    // Substring match
-    for (const [key, val] of Object.entries(personByName)) {
-        if (lower.includes(key) || key.includes(tokens[0] || '')) return val;
-    }
     return null;
 }
 
@@ -453,11 +474,24 @@ router.get('/accounts/:year', async (req, res) => {
         // 2. Auto-calcular coste/hora real desde actual_expenses
         const { personByName, deptAvg } = await computeRealCostPerPerson(year);
 
-        // 3. Billing data
-        const { data: billingData } = await supabase
-            .from('billing_details')
-            .select('amount, client_id, clients(id, name), monthly_billing!inner(fiscal_year, fiscal_month)')
-            .eq('monthly_billing.fiscal_year', year);
+        // 3. Billing data — monthly_billing has client_id; billing_details are child rows
+        const { data: mbRows } = await supabase
+            .from('monthly_billing')
+            .select('id, client_id, fiscal_month')
+            .eq('fiscal_year', year);
+
+        const mbIds = (mbRows || []).map(r => r.id);
+        const mbIdToInfo = {};
+        (mbRows || []).forEach(r => { mbIdToInfo[r.id] = { client_id: r.client_id, fiscal_month: r.fiscal_month }; });
+
+        let billingDetails = [];
+        if (mbIds.length > 0) {
+            const { data: details } = await supabase
+                .from('billing_details')
+                .select('monthly_billing_id, amount')
+                .in('monthly_billing_id', mbIds);
+            billingDetails = details || [];
+        }
 
         // 4. Time entries: una sola llamada workspace-wide (lo que usan los dashboards de ClickUp)
         const startTs = new Date(`${year}-01-01T00:00:00Z`).getTime();
@@ -543,13 +577,15 @@ router.get('/accounts/:year', async (req, res) => {
 
         // 7. Billing por cliente × mes
         const billingByClientMonth = {};
-        (billingData || []).forEach(b => {
-            const cid = b.client_id || b.clients?.id;
-            if (!cid) return;
-            const m = (b.monthly_billing?.fiscal_month || 1) - 1;
+        for (const d of billingDetails) {
+            const info = mbIdToInfo[d.monthly_billing_id];
+            if (!info) continue;
+            const cid = info.client_id;
+            if (!cid) continue;
+            const m = (info.fiscal_month || 1) - 1;
             if (!billingByClientMonth[cid]) billingByClientMonth[cid] = Array(12).fill(0);
-            billingByClientMonth[cid][m] += Number(b.amount || 0);
-        });
+            billingByClientMonth[cid][m] += Number(d.amount || 0);
+        }
 
         // 8. Construcción del resultado
         const result = Object.entries(clientMonthData).map(([clientId, cd]) => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, ClientList, ClickUpSpace, ClickUpList } from '@/lib/api/admin';
 import { ArrowLeft, Plus, Trash2, Save, ChevronDown, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
@@ -187,15 +187,19 @@ function ClientListsSection({ year }: { year: number }) {
         staleTime: 60_000,
     });
 
-    if (clientListsData && !initialized) {
-        setRows(clientListsData.client_lists || []);
-        setInitialized(true);
-    }
+    useEffect(() => {
+        if (clientListsData && !initialized) {
+            setRows(clientListsData.client_lists || []);
+            setInitialized(true);
+        }
+    }, [clientListsData, initialized]);
 
     const saveMutation = useMutation({
-        mutationFn: () => adminApi.saveProfitabilityClientLists(rows),
+        mutationFn: () => adminApi.saveProfitabilityClientLists(rows.filter(r => !!r.client_id)),
         onSuccess: () => {
+            setInitialized(false);
             qc.invalidateQueries({ queryKey: ['profitability-client-lists'] });
+            qc.invalidateQueries({ queryKey: ['profitability-accounts'] });
             toast.success('Listas guardadas');
         },
         onError: () => toast.error('Error al guardar'),

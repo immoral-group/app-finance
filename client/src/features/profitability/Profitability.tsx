@@ -2,163 +2,108 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi, AccountProfitability } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronDown, ChevronRight, ChevronLeft, TrendingUp, TrendingDown, Clock, DollarSign, Users } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Clock, DollarSign, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-function semaphore(margin: number | null): { color: string; bg: string; label: string } {
-    if (margin === null) return { color: 'text-muted-foreground', bg: 'bg-muted', label: '—' };
-    if (margin >= 60) return { color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-900/30', label: `${margin.toFixed(1)}%` };
-    if (margin >= 40) return { color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-900/30', label: `${margin.toFixed(1)}%` };
-    return { color: 'text-red-600 dark:text-red-400', bg: 'bg-red-100 dark:bg-red-900/30', label: `${margin.toFixed(1)}%` };
+function semaphore(margin: number | null): { color: string; bg: string; dot: string } {
+    if (margin === null) return { color: 'text-muted-foreground', bg: 'bg-muted/40', dot: 'bg-muted-foreground/30' };
+    if (margin >= 60) return { color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-100 dark:bg-emerald-900/40', dot: 'bg-emerald-500' };
+    if (margin >= 40) return { color: 'text-amber-700 dark:text-amber-300', bg: 'bg-amber-100 dark:bg-amber-900/40', dot: 'bg-amber-500' };
+    return { color: 'text-red-700 dark:text-red-300', bg: 'bg-red-100 dark:bg-red-900/40', dot: 'bg-red-500' };
 }
 
 function fmt(n: number) {
     return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n);
 }
 
-function AccountRow({ account }: { account: AccountProfitability }) {
-    const [expanded, setExpanded] = useState(false);
-    const sem = semaphore(account.total_margin_pct);
+// ── Detail panel (modal) for a client × month ────────────────────────────────
+function DetailPanel({
+    account,
+    monthIdx,
+    onClose,
+}: {
+    account: AccountProfitability;
+    monthIdx: number;
+    onClose: () => void;
+}) {
+    const m = account.monthly[monthIdx];
+    const sem = semaphore(m.margin_pct);
 
     return (
-        <>
-            <tr
-                className="border-b border-border/50 hover:bg-muted/30 cursor-pointer transition-colors"
-                onClick={() => setExpanded(e => !e)}
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+            <div
+                className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4"
+                onClick={e => e.stopPropagation()}
             >
-                <td className="px-4 py-3 w-6">
-                    {expanded ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
-                </td>
-                <td className="px-2 py-3 font-medium text-sm text-foreground whitespace-nowrap">
-                    {account.client_name}
-                </td>
-                <td className="px-3 py-3 text-right text-sm tabular-nums text-foreground">
-                    {fmt(account.total_revenue)}
-                </td>
-                <td className="px-3 py-3 text-right text-sm tabular-nums text-muted-foreground">
-                    {fmt(account.total_labor_cost)}
-                </td>
-                <td className="px-3 py-3 text-right text-sm tabular-nums font-semibold text-foreground">
-                    {fmt(account.total_profit)}
-                </td>
-                <td className="px-3 py-3 text-right">
-                    <span className={cn('inline-block px-2 py-0.5 rounded-full text-xs font-semibold tabular-nums', sem.bg, sem.color)}>
-                        {sem.label}
-                    </span>
-                </td>
-                <td className="px-3 py-3 text-right text-sm tabular-nums text-muted-foreground">
-                    {account.total_hours.toFixed(1)}h
-                </td>
-            </tr>
+                {/* Header */}
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">{account.client_name}</p>
+                        <p className="text-lg font-bold text-foreground">{MONTH_NAMES[monthIdx]}</p>
+                    </div>
+                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground transition-colors">
+                        <X size={15} />
+                    </button>
+                </div>
 
-            {expanded && (
-                <tr className="bg-muted/20">
-                    <td colSpan={7} className="px-4 py-4">
-                        <MonthlyBreakdown account={account} />
-                    </td>
-                </tr>
-            )}
-        </>
-    );
-}
-
-function MonthlyBreakdown({ account }: { account: AccountProfitability }) {
-    const [activeMonth, setActiveMonth] = useState<number | null>(null);
-    const activeMonthData = activeMonth !== null ? account.monthly[activeMonth] : null;
-
-    return (
-        <div className="space-y-4">
-            {/* Monthly bar chart / table */}
-            <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                    <thead>
-                        <tr className="text-muted-foreground">
-                            <td className="pb-1.5 pr-3 font-medium">Mes</td>
-                            {MONTH_NAMES.map(m => (
-                                <td key={m} className="pb-1.5 px-1.5 text-center font-medium">{m}</td>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody className="space-y-1">
-                        <tr>
-                            <td className="pr-3 py-1 text-muted-foreground">Facturado</td>
-                            {account.monthly.map((m, i) => (
-                                <td key={i} className="px-1.5 py-1 text-right tabular-nums text-foreground">
-                                    {m.revenue > 0 ? fmt(m.revenue) : <span className="text-muted-foreground/40">—</span>}
-                                </td>
-                            ))}
-                        </tr>
-                        <tr>
-                            <td className="pr-3 py-1 text-muted-foreground">Coste labor</td>
-                            {account.monthly.map((m, i) => (
-                                <td key={i} className="px-1.5 py-1 text-right tabular-nums text-muted-foreground">
-                                    {m.labor_cost > 0 ? fmt(m.labor_cost) : <span className="text-muted-foreground/40">—</span>}
-                                </td>
-                            ))}
-                        </tr>
-                        <tr>
-                            <td className="pr-3 py-1 font-semibold">Margen %</td>
-                            {account.monthly.map((m, i) => {
-                                const s = semaphore(m.margin_pct);
-                                return (
-                                    <td key={i} className="px-1.5 py-1 text-center">
-                                        <button
-                                            onClick={() => setActiveMonth(activeMonth === i ? null : i)}
-                                            className={cn(
-                                                'px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums transition-all',
-                                                s.bg, s.color,
-                                                activeMonth === i && 'ring-2 ring-current ring-offset-1'
-                                            )}
-                                        >
-                                            {m.margin_pct !== null ? `${m.margin_pct.toFixed(0)}%` : '—'}
-                                        </button>
-                                    </td>
-                                );
-                            })}
-                        </tr>
-                        <tr>
-                            <td className="pr-3 py-1 text-muted-foreground">Horas</td>
-                            {account.monthly.map((m, i) => (
-                                <td key={i} className="px-1.5 py-1 text-right tabular-nums text-muted-foreground text-[10px]">
-                                    {m.hours > 0 ? `${m.hours.toFixed(1)}h` : <span className="text-muted-foreground/40">—</span>}
-                                </td>
-                            ))}
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            {/* Drill-down: team members for selected month */}
-            {activeMonthData && activeMonthData.members.length > 0 && (
-                <div className="mt-3 border-t border-border/40 pt-3">
-                    <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                        <Users size={12} />
-                        Equipo en {MONTH_NAMES[activeMonth!]}
-                    </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                        {activeMonthData.members.map(mb => (
-                            <div key={mb.name} className="bg-card border border-border/50 rounded-lg px-3 py-2">
-                                <p className="text-xs font-medium text-foreground truncate">{mb.name}</p>
-                                <p className="text-[10px] text-muted-foreground mt-0.5">
-                                    {mb.hours.toFixed(1)}h · {fmt(mb.labor_cost)}
-                                </p>
-                            </div>
-                        ))}
+                {/* KPIs */}
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-muted/40 rounded-xl px-3 py-2.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Facturado</p>
+                        <p className="text-sm font-bold text-foreground mt-0.5">{fmt(m.revenue)}</p>
+                    </div>
+                    <div className="bg-muted/40 rounded-xl px-3 py-2.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Coste labor</p>
+                        <p className="text-sm font-bold text-foreground mt-0.5">{fmt(m.labor_cost)}</p>
+                    </div>
+                    <div className="bg-muted/40 rounded-xl px-3 py-2.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Beneficio</p>
+                        <p className={cn('text-sm font-bold mt-0.5', m.gross_profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>
+                            {fmt(m.gross_profit)}
+                        </p>
+                    </div>
+                    <div className={cn('rounded-xl px-3 py-2.5', sem.bg)}>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Margen</p>
+                        <p className={cn('text-sm font-bold mt-0.5', sem.color)}>
+                            {m.margin_pct !== null ? `${m.margin_pct.toFixed(1)}%` : '—'}
+                        </p>
                     </div>
                 </div>
-            )}
+
+                {/* Horas + equipo */}
+                <div>
+                    <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5 font-medium">
+                        <Users size={11} /> Equipo · {m.hours.toFixed(1)}h totales
+                    </p>
+                    {m.members.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">Sin horas registradas</p>
+                    ) : (
+                        <div className="space-y-1.5">
+                            {m.members.map(mb => (
+                                <div key={mb.name} className="flex items-center justify-between text-xs">
+                                    <span className="text-foreground font-medium">{mb.name}</span>
+                                    <span className="text-muted-foreground tabular-nums">
+                                        {mb.hours.toFixed(1)}h · {fmt(mb.labor_cost)}
+                                        {mb.cost_per_hour > 0 && (
+                                            <span className="ml-1 text-[9px] opacity-60">@{mb.cost_per_hour.toFixed(0)}€/h</span>
+                                        )}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
 
+// ── Summary card ──────────────────────────────────────────────────────────────
 function SummaryCard({ icon: Icon, label, value, sub }: {
-    icon: React.ElementType;
-    label: string;
-    value: string;
-    sub?: string;
+    icon: React.ElementType; label: string; value: string; sub?: string;
 }) {
     return (
         <div className="bg-card border border-border/60 rounded-xl px-4 py-3 flex items-start gap-3">
@@ -174,12 +119,137 @@ function SummaryCard({ icon: Icon, label, value, sub }: {
     );
 }
 
+// ── Matrix table: clients × months ───────────────────────────────────────────
+function MatrixTable({ accounts }: { accounts: AccountProfitability[] }) {
+    const [detail, setDetail] = useState<{ account: AccountProfitability; month: number } | null>(null);
+
+    // Which months have any data at all?
+    const activeMonths = MONTH_NAMES.map((_, i) =>
+        accounts.some(a => a.monthly[i].revenue > 0 || a.monthly[i].hours > 0)
+    );
+    const visibleMonths = activeMonths.some(Boolean)
+        ? MONTH_NAMES.map((_, i) => i).filter(i => activeMonths[i])
+        : MONTH_NAMES.map((_, i) => i);
+
+    return (
+        <>
+            <div className="bg-card border border-border/60 rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full min-w-[700px]">
+                        <thead className="border-b border-border/50 bg-muted/40">
+                            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                                <th className="px-4 py-3 text-left font-semibold sticky left-0 bg-muted/40 z-10 min-w-[140px]">Cliente</th>
+                                {visibleMonths.map(i => (
+                                    <th key={i} className="px-2 py-3 text-center font-semibold min-w-[60px]">{MONTH_NAMES[i]}</th>
+                                ))}
+                                <th className="px-3 py-3 text-right font-semibold min-w-[90px]">Anual</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {accounts.map(account => {
+                                const annualSem = semaphore(account.total_margin_pct);
+                                return (
+                                    <tr key={account.client_id} className="border-b border-border/30 hover:bg-muted/20 transition-colors">
+                                        <td className="px-4 py-2.5 sticky left-0 bg-card z-10">
+                                            <div className="flex items-center gap-2">
+                                                <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', annualSem.dot)} />
+                                                <span className="text-sm font-medium text-foreground truncate max-w-[120px]">{account.client_name}</span>
+                                            </div>
+                                        </td>
+                                        {visibleMonths.map(i => {
+                                            const m = account.monthly[i];
+                                            const hasData = m.revenue > 0 || m.hours > 0;
+                                            const sem = semaphore(m.margin_pct);
+                                            return (
+                                                <td key={i} className="px-1 py-1.5 text-center">
+                                                    {hasData ? (
+                                                        <button
+                                                            onClick={() => setDetail({ account, month: i })}
+                                                            className={cn(
+                                                                'w-full px-1 py-1.5 rounded-lg text-[11px] font-bold tabular-nums transition-all hover:scale-105 hover:shadow-sm',
+                                                                sem.bg, sem.color
+                                                            )}
+                                                            title={`${account.client_name} ${MONTH_NAMES[i]}: ${m.revenue > 0 ? fmt(m.revenue) : `${m.hours.toFixed(1)}h`}`}
+                                                        >
+                                                            {m.margin_pct !== null ? `${m.margin_pct.toFixed(0)}%` : `${m.hours.toFixed(0)}h`}
+                                                        </button>
+                                                    ) : (
+                                                        <span className="text-[10px] text-muted-foreground/30">—</span>
+                                                    )}
+                                                </td>
+                                            );
+                                        })}
+                                        <td className="px-3 py-2.5 text-right">
+                                            <div className="text-xs">
+                                                <p className="font-semibold text-foreground tabular-nums">{fmt(account.total_revenue)}</p>
+                                                <p className={cn('text-[10px] tabular-nums font-medium', annualSem.color)}>
+                                                    {account.total_margin_pct !== null ? `${account.total_margin_pct.toFixed(1)}%` : '—'}
+                                                </p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                        {accounts.length > 1 && (() => {
+                            const totalByMonth = visibleMonths.map(i => ({
+                                revenue: accounts.reduce((s, a) => s + a.monthly[i].revenue, 0),
+                                labor_cost: accounts.reduce((s, a) => s + a.monthly[i].labor_cost, 0),
+                            }));
+                            const totalRevenue = accounts.reduce((s, a) => s + a.total_revenue, 0);
+                            const totalCost = accounts.reduce((s, a) => s + a.total_labor_cost, 0);
+                            const avgMargin = totalRevenue > 0 ? ((totalRevenue - totalCost) / totalRevenue) * 100 : null;
+                            return (
+                                <tfoot className="border-t border-border/50 bg-muted/30">
+                                    <tr className="text-xs font-semibold">
+                                        <td className="px-4 py-2.5 sticky left-0 bg-muted/30 text-muted-foreground">Total</td>
+                                        {visibleMonths.map((i, idx) => {
+                                            const tb = totalByMonth[idx];
+                                            const hasData = tb.revenue > 0;
+                                            const m = tb.revenue > 0 ? ((tb.revenue - tb.labor_cost) / tb.revenue) * 100 : null;
+                                            const sem = semaphore(m);
+                                            return (
+                                                <td key={i} className="px-1 py-1.5 text-center">
+                                                    {hasData ? (
+                                                        <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-bold', sem.bg, sem.color)}>
+                                                            {m !== null ? `${m.toFixed(0)}%` : '—'}
+                                                        </span>
+                                                    ) : <span className="text-muted-foreground/30 text-[10px]">—</span>}
+                                                </td>
+                                            );
+                                        })}
+                                        <td className="px-3 py-2.5 text-right">
+                                            <p className="text-foreground tabular-nums">{fmt(totalRevenue)}</p>
+                                            {avgMargin !== null && (
+                                                <p className={cn('text-[10px] tabular-nums font-medium', semaphore(avgMargin).color)}>
+                                                    {avgMargin.toFixed(1)}%
+                                                </p>
+                                            )}
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            );
+                        })()}
+                    </table>
+                </div>
+            </div>
+
+            {detail && (
+                <DetailPanel
+                    account={detail.account}
+                    monthIdx={detail.month}
+                    onClose={() => setDetail(null)}
+                />
+            )}
+        </>
+    );
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 export default function Profitability() {
-    const [date, setDate] = useState(new Date());
+    const [year, setYear] = useState(new Date().getFullYear());
     const [showSetup, setShowSetup] = useState(false);
     const { isSuperAdmin } = useAuth();
-
-    const year = date.getFullYear();
 
     const { data, isLoading, error } = useQuery({
         queryKey: ['profitability-accounts', year],
@@ -209,15 +279,15 @@ export default function Profitability() {
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
                 <div>
                     <h1 className="text-xl font-bold text-foreground tracking-tight">Rentabilidad por Cuenta</h1>
-                    <p className="text-xs text-muted-foreground mt-0.5">Margen bruto por cliente basado en horas ClickUp vs facturación</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Margen bruto por cliente · horas ClickUp vs facturación</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1 border border-border/60 rounded-lg bg-card px-1">
-                        <button onClick={() => setDate(d => new Date(d.getFullYear() - 1, 0))} className="h-8 w-8 flex items-center justify-center hover:bg-muted/60 rounded-lg transition-colors">
+                        <button onClick={() => setYear(y => y - 1)} className="h-8 w-8 flex items-center justify-center hover:bg-muted/60 rounded-lg transition-colors">
                             <ChevronLeft size={14} className="text-muted-foreground" />
                         </button>
                         <span className="text-sm font-semibold text-foreground px-2 tabular-nums">{year}</span>
-                        <button onClick={() => setDate(d => new Date(d.getFullYear() + 1, 0))} className="h-8 w-8 flex items-center justify-center hover:bg-muted/60 rounded-lg transition-colors">
+                        <button onClick={() => setYear(y => y + 1)} className="h-8 w-8 flex items-center justify-center hover:bg-muted/60 rounded-lg transition-colors">
                             <ChevronRight size={14} className="text-muted-foreground" />
                         </button>
                     </div>
@@ -234,25 +304,32 @@ export default function Profitability() {
             </div>
 
             {/* Summary cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                <SummaryCard icon={DollarSign} label="Facturado" value={fmt(totalRevenue)} />
-                <SummaryCard icon={TrendingDown} label="Coste labor" value={fmt(totalCost)} />
-                <SummaryCard icon={TrendingUp} label="Beneficio bruto" value={fmt(totalProfit)} />
-                <SummaryCard
-                    icon={TrendingUp}
-                    label="Margen medio"
-                    value={avgMargin !== null ? `${avgMargin.toFixed(1)}%` : '—'}
-                    sub={`${green} verde · ${yellow} amarillo · ${red} rojo`}
-                />
-                <SummaryCard icon={Clock} label="Horas totales" value={`${totalHours.toFixed(0)}h`} sub={`${accounts.length} cuentas`} />
-            </div>
+            {(accounts.length > 0 || isLoading) && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                    <SummaryCard icon={DollarSign} label="Facturado" value={isLoading ? '…' : fmt(totalRevenue)} />
+                    <SummaryCard icon={TrendingDown} label="Coste labor" value={isLoading ? '…' : fmt(totalCost)} />
+                    <SummaryCard icon={TrendingUp} label="Beneficio bruto" value={isLoading ? '…' : fmt(totalProfit)} />
+                    <SummaryCard
+                        icon={TrendingUp}
+                        label="Margen medio"
+                        value={isLoading ? '…' : avgMargin !== null ? `${avgMargin.toFixed(1)}%` : '—'}
+                        sub={!isLoading ? `${green} verde · ${yellow} amarillo · ${red} rojo` : undefined}
+                    />
+                    <SummaryCard
+                        icon={Clock}
+                        label="Horas totales"
+                        value={isLoading ? '…' : `${totalHours.toFixed(0)}h`}
+                        sub={!isLoading ? `${accounts.length} cuentas` : undefined}
+                    />
+                </div>
+            )}
 
             {/* No config warning */}
             {!isLoading && accounts.length === 0 && !error && (
                 <div className="border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 rounded-xl p-5 text-center">
                     <p className="text-sm font-medium text-amber-700 dark:text-amber-300">Sin datos configurados</p>
                     <p className="text-xs text-amber-600/80 dark:text-amber-400/70 mt-1">
-                        Primero configura el mapeo de usuarios ClickUp y asigna listas a cada cliente.
+                        Configura el mapeo de listas ClickUp → clientes para ver la rentabilidad.
                     </p>
                     {isSuperAdmin() && (
                         <button
@@ -274,77 +351,31 @@ export default function Profitability() {
                 </div>
             )}
 
-            {/* Main table */}
-            {accounts.length > 0 && (
+            {/* Loading skeleton */}
+            {isLoading && (
                 <div className="bg-card border border-border/60 rounded-xl overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="border-b border-border/50 bg-muted/40">
-                                <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                                    <th className="px-4 py-3 w-6" />
-                                    <th className="px-2 py-3 text-left font-semibold">Cliente</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Facturado</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Coste labor</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Beneficio</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Margen</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Horas</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {isLoading
-                                    ? Array.from({ length: 6 }).map((_, i) => (
-                                        <tr key={i} className="border-b border-border/30">
-                                            {Array.from({ length: 7 }).map((_, j) => (
-                                                <td key={j} className="px-3 py-3">
-                                                    <div className="h-4 bg-muted rounded animate-pulse" />
-                                                </td>
-                                            ))}
-                                        </tr>
-                                    ))
-                                    : accounts.map(account => (
-                                        <AccountRow key={account.client_id} account={account} />
-                                    ))
-                                }
-                            </tbody>
-                            {accounts.length > 0 && (
-                                <tfoot className="border-t border-border/50 bg-muted/30">
-                                    <tr className="text-sm font-semibold">
-                                        <td />
-                                        <td className="px-2 py-3 text-foreground">Total</td>
-                                        <td className="px-3 py-3 text-right tabular-nums text-foreground">{fmt(totalRevenue)}</td>
-                                        <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{fmt(totalCost)}</td>
-                                        <td className="px-3 py-3 text-right tabular-nums text-foreground">{fmt(totalProfit)}</td>
-                                        <td className="px-3 py-3 text-right">
-                                            {avgMargin !== null && (
-                                                <span className={cn('inline-block px-2 py-0.5 rounded-full text-xs font-semibold', semaphore(avgMargin).bg, semaphore(avgMargin).color)}>
-                                                    {avgMargin.toFixed(1)}%
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{totalHours.toFixed(1)}h</td>
-                                    </tr>
-                                </tfoot>
-                            )}
-                        </table>
+                    <div className="p-4 space-y-2">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                            <div key={i} className="h-9 bg-muted rounded-lg animate-pulse" />
+                        ))}
                     </div>
                 </div>
             )}
 
-            {/* Semaphore legend */}
-            <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    Verde ≥ 60%
-                </span>
-                <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500" />
-                    Amarillo 40–59%
-                </span>
-                <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" />
-                    Rojo &lt; 40%
-                </span>
-            </div>
+            {/* Matrix */}
+            {!isLoading && accounts.length > 0 && (
+                <MatrixTable accounts={accounts} />
+            )}
+
+            {/* Legend */}
+            {accounts.length > 0 && (
+                <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500" /> Verde ≥ 60%</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500" /> Amarillo 40–59%</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" /> Rojo &lt; 40%</span>
+                    <span className="text-muted-foreground/60">· Click en celda para ver detalle del mes</span>
+                </div>
+            )}
         </div>
     );
 }
