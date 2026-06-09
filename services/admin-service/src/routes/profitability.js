@@ -29,6 +29,37 @@ async function cuFetch(path, params = {}) {
     return res.json();
 }
 
+// Strip diacritics so "andrés" and "andres" match
+function norm(s) {
+    return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+// Fetch ALL time entries from a workspace. ClickUp's /time_entries returns only
+// the authenticated user's entries unless `assignee` is passed with member IDs.
+// We also paginate in 90-day windows to be safe.
+async function fetchAllWorkspaceTimeEntries(teamId, year) {
+    const teamData = await cuFetch(`/team/${teamId}`);
+    const memberIds = (teamData.team?.members || []).map(m => m.user.id).join(',');
+
+    const yearStart = new Date(`${year}-01-01T00:00:00Z`).getTime();
+    const yearEnd = new Date(`${year}-12-31T23:59:59Z`).getTime();
+
+    const all = [];
+    // Pagination by ~30-day windows (ClickUp caps the window in some accounts)
+    const WINDOW_MS = 30 * 24 * 3600 * 1000;
+    for (let ws = yearStart; ws <= yearEnd; ws += WINDOW_MS) {
+        const we = Math.min(ws + WINDOW_MS - 1, yearEnd);
+        const data = await cuFetch(`/team/${teamId}/time_entries`, {
+            start_date: ws,
+            end_date: we,
+            assignee: memberIds,
+        });
+        const entries = data.data || [];
+        all.push(...entries);
+    }
+    return all;
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /profitability/clickup/status  — health check de la conexión a ClickUp
 // ──────────────────────────────────────────────────────────────────────────────
@@ -105,16 +136,8 @@ router.get('/clickup/lists-with-time/:year', async (req, res) => {
         if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
 
         const year = parseInt(req.params.year);
-        const startTs = new Date(`${year}-01-01T00:00:00Z`).getTime();
-        const endTs = new Date(`${year}-12-31T23:59:59Z`).getTime();
-
-        // Workspace-level time entries: una sola llamada devuelve TODO
-        const data = await cuFetch(`/team/${TEAM_ID}/time_entries`, {
-            start_date: startTs,
-            end_date: endTs,
-        });
-
-        const entries = data.data || [];
+        // Workspace-level time entries: todos los assignees, paginado por mes
+        const entries = await fetchAllWorkspaceTimeEntries(TEAM_ID, year);
 
         // Agrupar por list_id
         const listMap = {};
@@ -212,15 +235,26 @@ router.get('/auto-mapping/:year', async (req, res) => {
             let source = 'unmatched';
             let matched_employee = null;
             let department = null;
+            let yearly_cost = null;
+            let months_active = null;
+            let formula = null;
 
             if (override !== undefined && override > 0) {
                 cost_per_hour = override;
                 source = 'override';
+                formula = `Override manual: ${override.toFixed(2)} €/h`;
+                if (match) {
+                    matched_employee = match.canonical;
+                    department = match.dept;
+                }
             } else if (match && match.cost_per_hour > 0) {
                 cost_per_hour = match.cost_per_hour;
                 source = 'matched';
                 matched_employee = match.canonical;
                 department = match.dept;
+                yearly_cost = Math.round(match.yearly_cost * 100) / 100;
+                months_active = match.months_active;
+                formula = `${yearly_cost.toLocaleString('es-ES')} € ÷ (160h × ${months_active} meses) = ${cost_per_hour.toFixed(2)} €/h`;
             }
 
             return {
@@ -230,6 +264,9 @@ router.get('/auto-mapping/:year', async (req, res) => {
                 matched_employee,
                 department,
                 cost_per_hour: Math.round(cost_per_hour * 100) / 100,
+                yearly_cost,
+                months_active,
+                formula,
                 source,
             };
         });
@@ -357,15 +394,15 @@ async function computeRealCostPerPerson(year) {
         if (!deptToNames[cr.dept].includes(cr.item_name)) deptToNames[cr.dept].push(cr.item_name);
     });
 
-    // Reverse: name → dept (lowercase for matching)
+    // Reverse: normalized name → dept (no accents for matching)
     // For multi-word names (e.g. "Andrés Barrios"), also register the first-name alias
     // so that expense categories named "Andrés" still resolve correctly.
     const nameToDept = {};
     Object.entries(deptToNames).forEach(([dept, names]) => {
         names.forEach(n => {
-            nameToDept[n.toLowerCase()] = { canonical: n, dept };
-            const firstToken = n.split(/\s+/)[0].toLowerCase();
-            if (firstToken !== n.toLowerCase() && !nameToDept[firstToken]) {
+            nameToDept[norm(n)] = { canonical: n, dept };
+            const firstToken = norm(n).split(/\s+/)[0];
+            if (firstToken && firstToken !== norm(n) && !nameToDept[firstToken]) {
                 nameToDept[firstToken] = { canonical: n, dept };
             }
         });
@@ -385,8 +422,7 @@ async function computeRealCostPerPerson(year) {
     (expenses || []).forEach(exp => {
         const deptName = deptIdMap[exp.department_id];
         const catName = exp.category?.name || '';
-        const isPersonal = exp.description === 'personal';
-        const lookup = nameToDept[catName.toLowerCase()];
+        const lookup = nameToDept[norm(catName)];
 
         if (!lookup) return; // not a known person
         // require dept matches (avoid Imcontent's "Bruno" expense leaking into Immedia)
@@ -408,11 +444,13 @@ async function computeRealCostPerPerson(year) {
     Object.entries(personYearly).forEach(([name, info]) => {
         const monthsActive = personMonths[name].size || 1;
         const totalHours = HOURS_PER_PERSON_MONTH * monthsActive;
-        personByName[name.toLowerCase()] = {
+        personByName[norm(name)] = {
             canonical: name,
             dept: info.dept,
             cost_per_hour: totalHours > 0 ? info.cost / totalHours : 0,
             yearly_cost: info.cost,
+            months_active: monthsActive,
+            hours_used: totalHours,
         };
     });
 
@@ -436,13 +474,12 @@ async function computeRealCostPerPerson(year) {
 // Esto evita que "Andrés Peñuela" matchee con Finance "Andrés Barrios".
 function matchClickUpUser(clickupName, personByName) {
     if (!clickupName) return null;
-    const lower = clickupName.toLowerCase().trim();
+    const lower = norm(clickupName);
     const cuTokens = new Set(lower.split(/[\s._-]+/).filter(Boolean));
 
-    // Exact match
     if (personByName[lower]) return personByName[lower];
 
-    // All Finance name tokens must be present in ClickUp name
+    // All Finance name tokens must be present in ClickUp name (acentos ignorados)
     for (const [key, val] of Object.entries(personByName)) {
         const keyTokens = key.split(/[\s._-]+/).filter(Boolean);
         if (keyTokens.length > 0 && keyTokens.every(t => cuTokens.has(t))) return val;
@@ -493,15 +530,8 @@ router.get('/accounts/:year', async (req, res) => {
             billingDetails = details || [];
         }
 
-        // 4. Time entries: una sola llamada workspace-wide (lo que usan los dashboards de ClickUp)
-        const startTs = new Date(`${year}-01-01T00:00:00Z`).getTime();
-        const endTs = new Date(`${year}-12-31T23:59:59Z`).getTime();
-
-        const allEntriesResp = await cuFetch(`/team/${TEAM_ID}/time_entries`, {
-            start_date: startTs,
-            end_date: endTs,
-        });
-        const allEntries = allEntriesResp.data || [];
+        // 4. Time entries: workspace-wide, todos los assignees, paginado por mes
+        const allEntries = await fetchAllWorkspaceTimeEntries(TEAM_ID, year);
 
         // Agrupar entries por list_id
         const timeEntriesByList = {};

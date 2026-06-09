@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, ClientList, ClickUpSpace, ClickUpList } from '@/lib/api/admin';
-import { ArrowLeft, Plus, Trash2, Save, ChevronDown, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Save, ChevronDown, CheckCircle2, AlertCircle, Sparkles, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -61,7 +61,7 @@ function AutoMappingSection({ year }: { year: number }) {
                     <Sparkles size={12} className="text-primary" />
                     Cálculo automático
                 </div>
-                <p>El coste/hora se calcula desde los salarios en <strong>actual_expenses</strong> ÷ (160h × meses activos). Los usuarios ClickUp se cruzan con los empleados de Finance por nombre. Puedes anular cualquier valor con un override manual.</p>
+                <p>El coste/hora se calcula desde los salarios reales registrados en <strong>Gastos Reales (actual_expenses)</strong> del año <strong>{year}</strong>, dividido entre (160h × meses con salario registrado). Los usuarios ClickUp se cruzan con los empleados de Finance por nombre (acentos ignorados). Pasa el ratón por el icono <Info size={10} className="inline mx-0.5" /> para ver la fórmula exacta de cada empleado.</p>
                 <div className="mt-2 flex gap-3 text-[10px]">
                     <span className="flex items-center gap-1"><CheckCircle2 size={10} className="text-emerald-500" /> {matched} auto-detectados</span>
                     {overridden > 0 && <span className="flex items-center gap-1"><Sparkles size={10} className="text-blue-500" /> {overridden} override</span>}
@@ -89,6 +89,11 @@ function AutoMappingSection({ year }: { year: number }) {
                                     <td className="py-2 pr-3 text-muted-foreground text-xs">{m.matched_employee || '—'}</td>
                                     <td className="py-2 pr-3 text-muted-foreground text-xs">{m.department || '—'}</td>
                                     <td className="py-2 pr-3 text-right tabular-nums">
+                                        {m.formula && !isEditing && (
+                                            <div className="inline-flex items-center gap-1 mr-1 text-muted-foreground/70" title={m.formula}>
+                                                <Info size={10} />
+                                            </div>
+                                        )}
                                         {isEditing ? (
                                             <div className="flex items-center justify-end gap-1">
                                                 <input

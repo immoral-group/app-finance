@@ -624,6 +624,9 @@ export interface AutoMappingEntry {
     matched_employee: string | null;
     department: string | null;
     cost_per_hour: number;
+    yearly_cost: number | null;
+    months_active: number | null;
+    formula: string | null;
     source: 'matched' | 'override' | 'unmatched';
 }
 
