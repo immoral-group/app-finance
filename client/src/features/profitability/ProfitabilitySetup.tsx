@@ -186,13 +186,10 @@ function ClientListsSection({ year }: { year: number }) {
     const saveMutation = useMutation({
         mutationFn: () => {
             const rows = Object.entries(assignments)
-                .filter(([, folderId]) => !!folderId)
-                .map(([clientId, folderId]) => {
-                    const match = data?.client_matches.find(cm => cm.client_id === clientId);
-                    const name = match
-                        ? (data?.folders.find(f => `folder:${f.id}` === folderId)?.name || folderId)
-                        : folderId;
-                    return { client_id: clientId, clickup_list_id: folderId, clickup_list_name: name };
+                .filter(([, tid]) => !!tid)
+                .map(([clientId, tid]) => {
+                    const t = targets.find(tg => tg.id === tid);
+                    return { client_id: clientId, clickup_list_id: tid, clickup_list_name: t?.name || tid };
                 });
             return adminApi.saveProfitabilityClientLists(rows);
         },
@@ -205,7 +202,7 @@ function ClientListsSection({ year }: { year: number }) {
         onError: () => toast.error('Error al guardar'),
     });
 
-    const folders = data?.folders ?? [];
+    const targets = data?.targets ?? [];
     const matches = data?.client_matches ?? [];
     const configured = matches.filter(cm => assignments[cm.client_id]);
     const missing = matches.filter(cm => !assignments[cm.client_id]);
@@ -242,7 +239,7 @@ function ClientListsSection({ year }: { year: number }) {
                         <tbody>
                             {matches.map(cm => {
                                 const selected = assignments[cm.client_id] || '';
-                                const folder = folders.find(f => `folder:${f.id}` === selected);
+                                const target = targets.find(t => t.id === selected);
                                 const isAuto = cm.suggested?.id === selected && cm.configured.length === 0;
                                 const isSaved = cm.configured.some(c => c.id === selected);
                                 return (
@@ -254,20 +251,22 @@ function ClientListsSection({ year }: { year: number }) {
                                                     value={selected}
                                                     onChange={e => setAssignments(prev => ({ ...prev, [cm.client_id]: e.target.value }))}
                                                     className={cn(
-                                                        'appearance-none w-52 px-2 pr-6 py-1 text-xs rounded border bg-background focus:outline-none focus:ring-1 focus:ring-primary',
+                                                        'appearance-none w-64 px-2 pr-6 py-1 text-xs rounded border bg-background focus:outline-none focus:ring-1 focus:ring-primary',
                                                         !selected ? 'border-amber-400/60 text-muted-foreground' : 'border-border/60 text-foreground'
                                                     )}
                                                 >
                                                     <option value="">— sin asignar —</option>
-                                                    {folders.map(f => (
-                                                        <option key={f.id} value={`folder:${f.id}`}>{f.name} ({f.total_hours.toFixed(1)}h)</option>
+                                                    {targets.map(t => (
+                                                        <option key={t.id} value={t.id}>
+                                                            {t.type === 'folder' ? '📁 ' : '📋 '}{t.name} · {t.total_hours.toFixed(1)}h ({t.sub})
+                                                        </option>
                                                     ))}
                                                 </select>
                                                 <ChevronDown size={10} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                                             </div>
                                         </td>
                                         <td className="py-2 pr-4 text-right text-xs tabular-nums text-muted-foreground">
-                                            {folder ? `${folder.total_hours.toFixed(1)}h` : '—'}
+                                            {target ? `${target.total_hours.toFixed(1)}h` : '—'}
                                         </td>
                                         <td className="py-2 text-center">
                                             {isSaved && <CheckCircle2 size={13} className="text-emerald-500 mx-auto" />}

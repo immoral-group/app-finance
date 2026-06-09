@@ -512,6 +512,7 @@ export const adminApi = {
         fetchApi<{
             year: number;
             folders: ClickUpFolderWithTime[];
+            targets: Array<{ id: string; name: string; space: string; total_hours: number; type: 'folder' | 'list'; sub: string }>;
             client_matches: Array<{
                 client_id: string;
                 client_name: string;

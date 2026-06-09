@@ -267,22 +267,42 @@ router.get('/auto-match-clients/:year', async (req, res) => {
 
         const year = parseInt(req.params.year);
 
-        // 1. Carpetas ClickUp con horas este año
+        // 1. Carpetas Y listas ClickUp con horas este año
         const entries = await fetchAllWorkspaceTimeEntries(TEAM_ID, year);
         const folderMap = {};
+        const listMap = {};
         for (const e of entries) {
             const loc = e.task_location || {};
             const folderId   = String(loc.folder_id || e.task?.folder?.id || '');
             const folderName = loc.folder_name || e.task?.folder?.name || '';
+            const listId     = String(loc.list_id   || e.task?.list?.id   || '');
+            const listName   = loc.list_name   || e.task?.list?.name   || '';
             const spaceName  = loc.space_name  || e.task?.space?.name  || '';
-            if (!folderId || folderName === 'hidden' || !folderName) continue;
-            if (!folderMap[folderId]) folderMap[folderId] = { id: folderId, name: folderName, space: spaceName, total_hours: 0 };
-            folderMap[folderId].total_hours += Number(e.duration || 0) / 3_600_000;
+            const hours = Number(e.duration || 0) / 3_600_000;
+
+            if (folderId && folderName && folderName !== 'hidden') {
+                if (!folderMap[folderId]) folderMap[folderId] = { id: folderId, name: folderName, space: spaceName, total_hours: 0, type: 'folder' };
+                folderMap[folderId].total_hours += hours;
+            }
+            if (listId) {
+                if (!listMap[listId]) listMap[listId] = { id: listId, name: listName || `Lista ${listId}`, space: spaceName, folder: folderName === 'hidden' ? null : folderName, total_hours: 0, type: 'list' };
+                listMap[listId].total_hours += hours;
+            }
         }
         const folders = Object.values(folderMap)
             .map(f => ({ ...f, total_hours: Math.round(f.total_hours * 100) / 100 }))
             .filter(f => f.total_hours > 0)
             .sort((a, b) => b.total_hours - a.total_hours);
+        const lists = Object.values(listMap)
+            .map(l => ({ ...l, total_hours: Math.round(l.total_hours * 100) / 100 }))
+            .filter(l => l.total_hours > 0)
+            .sort((a, b) => b.total_hours - a.total_hours);
+
+        // Unified "targets" the user can pick: folders first (broader) + lists not inside any matched folder
+        const targets = [
+            ...folders.map(f => ({ id: `folder:${f.id}`, name: f.name, space: f.space, total_hours: f.total_hours, type: 'folder', sub: 'Carpeta' })),
+            ...lists.map(l => ({ id: l.id, name: l.name, space: l.space, total_hours: l.total_hours, type: 'list', sub: l.folder ? `Lista · ${l.folder}` : 'Lista' })),
+        ];
 
         // 2. Clientes Finance
         const { data: clients } = await supabase.from('clients').select('id, name').order('name');
@@ -301,28 +321,31 @@ router.get('/auto-match-clients/:year', async (req, res) => {
             const cn = norm(c.name);
             const tokens = cn.split(/[\s._-]+/).filter(t => t.length > 2);
             let best = null; let bestScore = 0;
-            for (const f of folders) {
-                const fn = norm(f.name);
+            for (const t of targets) {
+                const fn = norm(t.name);
                 let score = 0;
                 if (fn === cn) score = 100;
                 else if (fn.includes(cn) || cn.includes(fn)) score = 90;
                 else {
-                    const matched = tokens.filter(t => fn.includes(t));
+                    const matched = tokens.filter(tok => fn.includes(tok));
                     score = tokens.length > 0 ? (matched.length / tokens.length) * 80 : 0;
                 }
-                if (score > bestScore) { bestScore = score; best = f; }
+                // Carpetas con mismo score ganan a listas (más amplio)
+                if (score > bestScore || (score === bestScore && t.type === 'folder' && best?.type !== 'folder')) {
+                    bestScore = score; best = t;
+                }
             }
             return {
                 client_id: c.id,
                 client_name: c.name,
                 configured,
                 suggested: best && bestScore >= 60
-                    ? { id: `folder:${best.id}`, name: best.name, total_hours: best.total_hours, score: Math.round(bestScore) }
+                    ? { id: best.id, name: best.name, total_hours: best.total_hours, score: Math.round(bestScore) }
                     : null,
             };
         });
 
-        res.json({ year, folders, client_matches: clientMatches });
+        res.json({ year, folders, targets, client_matches: clientMatches });
     } catch (err) {
         console.error('[profitability] auto-match-clients error:', err);
         res.status(500).json({ error: err.message });
