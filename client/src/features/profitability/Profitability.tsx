@@ -205,6 +205,26 @@ export default function Profitability() {
                 </div>
             </div>
 
+            {/* ClickUp debug — visible when no hours loaded */}
+            {data && totHours === 0 && data.debug && (
+                <div className="border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 text-xs font-mono space-y-1">
+                    <p className="font-semibold text-blue-700 dark:text-blue-300 font-sans">Debug ClickUp</p>
+                    <p className="text-blue-600 dark:text-blue-400">Entradas recibidas: <strong>{data.debug.total_entries_fetched}</strong></p>
+                    <p className="text-blue-600 dark:text-blue-400">Listas configuradas: <strong>{data.debug.configured_lists}</strong></p>
+                    {data.debug.sample_entry && (
+                        <p className="text-blue-600 dark:text-blue-400">
+                            Muestra: user=<strong>{data.debug.sample_entry.user}</strong> list_id=<strong>{data.debug.sample_entry.list_id}</strong> list=<strong>{data.debug.sample_entry.list_name}</strong> ({data.debug.sample_entry.duration_h}h)
+                        </p>
+                    )}
+                    {!data.debug.sample_entry && data.debug.total_entries_fetched === 0 && (
+                        <p className="text-blue-600 dark:text-blue-400 font-sans">ClickUp devolvió 0 entradas de tiempo. El token puede no tener acceso al Time Tracking API, o no hay horas registradas en {year}.</p>
+                    )}
+                    {Object.keys(data.debug.entries_per_list).length > 0 && (
+                        <p className="text-blue-600 dark:text-blue-400">Entradas por lista: {JSON.stringify(data.debug.entries_per_list)}</p>
+                    )}
+                </div>
+            )}
+
             {/* ClickUp error banner */}
             {data?.clickup_error && (
                 <div className="flex items-start gap-2.5 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3.5 text-xs">

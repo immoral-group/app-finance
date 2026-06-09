@@ -753,7 +753,24 @@ router.get('/accounts/:year', async (req, res) => {
         // Sort by margin ascending (worst first)
         result.sort((a, b) => (a.total_margin_pct ?? 999) - (b.total_margin_pct ?? 999));
 
-        res.json({ year, accounts: result, clickup_error });
+        res.json({
+            year,
+            accounts: result,
+            clickup_error,
+            debug: {
+                total_entries_fetched: allEntries.length,
+                configured_lists: clientListRows.length,
+                entries_per_list: Object.fromEntries(
+                    Object.entries(timeEntriesByList).map(([lid, ents]) => [lid, ents.length])
+                ),
+                sample_entry: allEntries[0] ? {
+                    user: allEntries[0].user?.username,
+                    list_id: allEntries[0].task_location?.list_id || allEntries[0].task?.list?.id,
+                    list_name: allEntries[0].task_location?.list_name || allEntries[0].task?.list?.name,
+                    duration_h: Math.round(Number(allEntries[0].duration || 0) / 3_600_000 * 100) / 100,
+                } : null,
+            },
+        });
     } catch (err) {
         console.error('[profitability] accounts error:', err);
         res.status(500).json({ error: err.message });

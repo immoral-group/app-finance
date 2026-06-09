@@ -616,6 +616,12 @@ export interface ProfitabilityResponse {
     year: number;
     accounts: AccountProfitability[];
     clickup_error?: string | null;
+    debug?: {
+        total_entries_fetched: number;
+        configured_lists: number;
+        entries_per_list: Record<string, number>;
+        sample_entry: { user: string; list_id: string; list_name: string; duration_h: number } | null;
+    };
 }
 
 export interface AutoMappingEntry {
