@@ -34,28 +34,22 @@ function norm(s) {
     return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 }
 
-// Fetch ALL time entries from a workspace. ClickUp's /time_entries returns only
-// the authenticated user's entries unless `assignee` is passed with member IDs.
-// We also paginate in 90-day windows to be safe.
+// Fetch ALL time entries from a workspace, paginating in 30-day windows.
+// Do NOT pass `assignee` — with a personal admin token ClickUp returns all
+// members' entries without it; passing assignee triggers a 403 (TIMEENTRY_059).
 async function fetchAllWorkspaceTimeEntries(teamId, year) {
-    const teamData = await cuFetch(`/team/${teamId}`);
-    const memberIds = (teamData.team?.members || []).map(m => m.user.id).join(',');
-
     const yearStart = new Date(`${year}-01-01T00:00:00Z`).getTime();
-    const yearEnd = new Date(`${year}-12-31T23:59:59Z`).getTime();
+    const yearEnd   = new Date(`${year}-12-31T23:59:59Z`).getTime();
 
     const all = [];
-    // Pagination by ~30-day windows (ClickUp caps the window in some accounts)
     const WINDOW_MS = 30 * 24 * 3600 * 1000;
     for (let ws = yearStart; ws <= yearEnd; ws += WINDOW_MS) {
         const we = Math.min(ws + WINDOW_MS - 1, yearEnd);
         const data = await cuFetch(`/team/${teamId}/time_entries`, {
             start_date: ws,
             end_date: we,
-            assignee: memberIds,
         });
-        const entries = data.data || [];
-        all.push(...entries);
+        all.push(...(data.data || []));
     }
     return all;
 }
