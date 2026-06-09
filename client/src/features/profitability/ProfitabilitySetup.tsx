@@ -226,6 +226,7 @@ function ClientListsSection({ year }: { year: number }) {
     const clients = clientsRaw?.clients ?? [];
 
     const autoLists = autoListsData?.lists ?? [];
+    const autoFolders = autoListsData?.folders ?? [];
 
     return (
         <Section title="Listas ClickUp → Cliente Finance">
@@ -252,18 +253,38 @@ function ClientListsSection({ year }: { year: number }) {
                     </button>
                 </div>
 
-                {/* Auto-discover: lists with time logged */}
+                {/* Auto-discover: folders + lists with time logged */}
                 {showAutoDiscover && (
-                    <div>
-                        {loadingAuto && <p className="text-xs text-muted-foreground py-2">Buscando listas con horas registradas en {year}…</p>}
-                        {!loadingAuto && autoLists.length === 0 && (
-                            <p className="text-xs text-muted-foreground py-2">No se han encontrado listas con horas registradas en {year}.</p>
+                    <div className="space-y-4">
+                        {loadingAuto && <p className="text-xs text-muted-foreground py-2">Buscando elementos con horas registradas en {year}…</p>}
+
+                        {/* Folders (recommended) */}
+                        {!loadingAuto && autoFolders.length > 0 && (
+                            <div>
+                                <p className="text-xs text-foreground font-medium mb-1.5">📁 Carpetas <span className="text-muted-foreground font-normal">— recomendado, agrupa todas las listas dentro</span></p>
+                                <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+                                    {autoFolders
+                                        .filter(f => !rows.find(r => r.clickup_list_id === `folder:${f.id}`))
+                                        .map(f => (
+                                            <button
+                                                key={f.id}
+                                                onClick={() => addList({ id: `folder:${f.id}`, name: `📁 ${f.name}`, folder: f.space })}
+                                                className="flex items-center gap-1 px-2 py-1 rounded-full border border-primary/40 bg-primary/5 hover:bg-primary/10 text-xs text-foreground transition-colors"
+                                                title={`${f.entry_count} entradas · ${f.list_count} listas · ${f.space}`}
+                                            >
+                                                <Plus size={10} />
+                                                {f.name}
+                                                <span className="text-[9px] text-muted-foreground ml-1">{f.total_hours}h</span>
+                                            </button>
+                                        ))}
+                                </div>
+                            </div>
                         )}
-                        {autoLists.length > 0 && (
-                            <>
-                                <p className="text-xs text-muted-foreground mb-2">
-                                    {autoLists.length} listas con horas registradas en {year}. Click para añadir:
-                                </p>
+
+                        {/* Lists */}
+                        {!loadingAuto && autoLists.length > 0 && (
+                            <div>
+                                <p className="text-xs text-foreground font-medium mb-1.5">📋 Listas sueltas</p>
                                 <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
                                     {autoLists
                                         .filter(l => !rows.find(r => r.clickup_list_id === l.id))
@@ -275,12 +296,16 @@ function ClientListsSection({ year }: { year: number }) {
                                                 title={`${l.entry_count} entradas · ${l.space}${l.folder ? ' / ' + l.folder : ''}`}
                                             >
                                                 <Plus size={10} />
-                                                {l.name}
+                                                {l.name || '(sin nombre)'}
                                                 <span className="text-[9px] text-muted-foreground ml-1">{l.total_hours}h</span>
                                             </button>
                                         ))}
                                 </div>
-                            </>
+                            </div>
+                        )}
+
+                        {!loadingAuto && autoFolders.length === 0 && autoLists.length === 0 && (
+                            <p className="text-xs text-muted-foreground py-2">No se han encontrado carpetas/listas con horas registradas en {year}.</p>
                         )}
                     </div>
                 )}

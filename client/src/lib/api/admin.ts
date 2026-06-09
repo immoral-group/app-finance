@@ -519,7 +519,7 @@ export const adminApi = {
     getClickUpMembers: () =>
         fetchApi<{ members: ClickUpMember[] }>('/profitability/clickup/members'),
     getClickUpListsWithTime: (year: number) =>
-        fetchApi<{ year: number; lists: ClickUpListWithTime[]; total_entries: number }>(`/profitability/clickup/lists-with-time/${year}`),
+        fetchApi<{ year: number; lists: ClickUpListWithTime[]; folders: ClickUpFolderWithTime[]; spaces: ClickUpSpaceWithTime[]; total_entries: number }>(`/profitability/clickup/lists-with-time/${year}`),
     getClickUpStatus: () =>
         fetchApi<{ connected: boolean; error?: string; team_id?: string; team_name?: string; member_count?: number }>('/profitability/clickup/status'),
 };
@@ -581,6 +581,22 @@ export interface ClickUpListWithTime {
     name: string;
     space: string;
     folder: string | null;
+    total_hours: number;
+    entry_count: number;
+}
+
+export interface ClickUpFolderWithTime {
+    id: string;
+    name: string;
+    space: string;
+    total_hours: number;
+    entry_count: number;
+    list_count: number;
+}
+
+export interface ClickUpSpaceWithTime {
+    id: string;
+    name: string;
     total_hours: number;
     entry_count: number;
 }

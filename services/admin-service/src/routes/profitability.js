@@ -194,37 +194,47 @@ router.get('/clickup/lists-with-time/:year', async (req, res) => {
         if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
 
         const year = parseInt(req.params.year);
-        // Workspace-level time entries: todos los assignees, paginado por mes
         const entries = await fetchAllWorkspaceTimeEntries(TEAM_ID, year);
 
-        // Agrupar por list_id
+        // Agrupar por list, folder y space simultáneamente
         const listMap = {};
-        for (const e of entries) {
-            const listId = e.task_location?.list_id || e.task?.list?.id;
-            const listName = e.task_location?.list_name || e.task?.list?.name || 'Sin lista';
-            const spaceName = e.task_location?.space_name || e.task?.space?.name || '';
-            const folderName = e.task_location?.folder_name || e.task?.folder?.name || '';
-            if (!listId) continue;
+        const folderMap = {};
+        const spaceMap = {};
 
-            if (!listMap[listId]) {
-                listMap[listId] = {
-                    id: listId,
-                    name: listName,
-                    space: spaceName,
-                    folder: folderName === 'hidden' ? null : folderName,
-                    total_hours: 0,
-                    entry_count: 0,
-                };
+        for (const e of entries) {
+            const loc = e.task_location || {};
+            const listId   = String(loc.list_id   || e.task?.list?.id   || '');
+            const folderId = String(loc.folder_id || e.task?.folder?.id || '');
+            const spaceId  = String(loc.space_id  || e.task?.space?.id  || '');
+            const listName   = loc.list_name   || e.task?.list?.name   || 'Sin lista';
+            const folderName = loc.folder_name || e.task?.folder?.name || '';
+            const spaceName  = loc.space_name  || e.task?.space?.name  || '';
+            const hours = Number(e.duration || 0) / 3_600_000;
+
+            if (listId) {
+                if (!listMap[listId]) listMap[listId] = { id: listId, name: listName, space: spaceName, folder: folderName === 'hidden' ? null : folderName, total_hours: 0, entry_count: 0 };
+                listMap[listId].total_hours += hours;
+                listMap[listId].entry_count++;
             }
-            listMap[listId].total_hours += Number(e.duration || 0) / 3_600_000;
-            listMap[listId].entry_count++;
+            if (folderId && folderName !== 'hidden') {
+                if (!folderMap[folderId]) folderMap[folderId] = { id: folderId, name: folderName, space: spaceName, total_hours: 0, entry_count: 0, list_count: new Set() };
+                folderMap[folderId].total_hours += hours;
+                folderMap[folderId].entry_count++;
+                if (listId) folderMap[folderId].list_count.add(listId);
+            }
+            if (spaceId) {
+                if (!spaceMap[spaceId]) spaceMap[spaceId] = { id: spaceId, name: spaceName, total_hours: 0, entry_count: 0 };
+                spaceMap[spaceId].total_hours += hours;
+                spaceMap[spaceId].entry_count++;
+            }
         }
 
-        const lists = Object.values(listMap)
-            .map(l => ({ ...l, total_hours: Math.round(l.total_hours * 10) / 10 }))
-            .sort((a, b) => b.total_hours - a.total_hours);
+        const round = n => Math.round(n * 10) / 10;
+        const lists   = Object.values(listMap).map(l => ({ ...l, total_hours: round(l.total_hours) })).sort((a, b) => b.total_hours - a.total_hours);
+        const folders = Object.values(folderMap).map(f => ({ ...f, total_hours: round(f.total_hours), list_count: f.list_count.size })).sort((a, b) => b.total_hours - a.total_hours);
+        const spaces  = Object.values(spaceMap).map(s => ({ ...s, total_hours: round(s.total_hours) })).sort((a, b) => b.total_hours - a.total_hours);
 
-        res.json({ year, lists, total_entries: entries.length });
+        res.json({ year, lists, folders, spaces, total_entries: entries.length });
     } catch (err) {
         console.error('[profitability] lists-with-time error:', err);
         res.status(500).json({ error: err.message });
@@ -621,14 +631,27 @@ router.get('/accounts/:year', async (req, res) => {
             console.error(`[profitability] ClickUp time entries fetch failed:`, e.message);
         }
 
-        // Agrupar entries por list_id
+        // Agrupar entries por list, folder y space (un cliente puede estar mapeado a cualquiera de los tres)
         const timeEntriesByList = {};
+        const timeEntriesByFolder = {};
+        const timeEntriesBySpace = {};
         for (const e of allEntries) {
-            const listId = e.task_location?.list_id || e.task?.list?.id;
-            if (!listId) continue;
-            if (!timeEntriesByList[listId]) timeEntriesByList[listId] = [];
-            timeEntriesByList[listId].push(e);
+            const loc = e.task_location || {};
+            const listId   = String(loc.list_id   || e.task?.list?.id   || '');
+            const folderId = String(loc.folder_id || e.task?.folder?.id || '');
+            const spaceId  = String(loc.space_id  || e.task?.space?.id  || '');
+            if (listId)   (timeEntriesByList[listId]     = timeEntriesByList[listId]     || []).push(e);
+            if (folderId) (timeEntriesByFolder[folderId] = timeEntriesByFolder[folderId] || []).push(e);
+            if (spaceId)  (timeEntriesBySpace[spaceId]   = timeEntriesBySpace[spaceId]   || []).push(e);
         }
+
+        // Resolver entries de un mapping. El ID puede llevar prefijo "folder:" o "space:".
+        const entriesForMapping = (raw) => {
+            const id = String(raw || '');
+            if (id.startsWith('folder:')) return timeEntriesByFolder[id.slice(7)] || [];
+            if (id.startsWith('space:'))  return timeEntriesBySpace[id.slice(6)]  || [];
+            return timeEntriesByList[id] || [];
+        };
 
         // 5. Overrides manuales por clickup_user_id
         const overrideByUid = {};
@@ -655,7 +678,7 @@ router.get('/accounts/:year', async (req, res) => {
         for (const clRow of clientListRows) {
             const clientId = clRow.client_id;
             const clientName = clRow.clients?.name || clientId;
-            const entries = timeEntriesByList[clRow.clickup_list_id] || [];
+            const entries = entriesForMapping(clRow.clickup_list_id);
 
             if (!clientMonthData[clientId]) {
                 clientMonthData[clientId] = {
@@ -762,6 +785,9 @@ router.get('/accounts/:year', async (req, res) => {
                 configured_lists: clientListRows.length,
                 entries_per_list: Object.fromEntries(
                     Object.entries(timeEntriesByList).map(([lid, ents]) => [lid, ents.length])
+                ),
+                entries_per_folder: Object.fromEntries(
+                    Object.entries(timeEntriesByFolder).map(([fid, ents]) => [fid, ents.length])
                 ),
                 sample_entry: allEntries[0] ? {
                     user: allEntries[0].user?.username,
