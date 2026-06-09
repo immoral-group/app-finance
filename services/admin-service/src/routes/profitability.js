@@ -5,16 +5,22 @@ import { extractUser } from '../utils/changeLogger.js';
 const router = express.Router();
 
 const CLICKUP_BASE = 'https://api.clickup.com/api/v2';
-const TEAM_ID = process.env.CLICKUP_TEAM_ID || '20639716';
-const CLICKUP_TOKEN = process.env.CLICKUP_API_TOKEN;
 
 const MONTH_COLS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
+function getClickUpConfig() {
+    return {
+        token: process.env.CLICKUP_API_TOKEN,
+        teamId: process.env.CLICKUP_TEAM_ID || '20639716',
+    };
+}
+
 async function cuFetch(path, params = {}) {
+    const { token } = getClickUpConfig();
     const url = new URL(`${CLICKUP_BASE}${path}`);
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     const res = await fetch(url.toString(), {
-        headers: { Authorization: CLICKUP_TOKEN, 'Content-Type': 'application/json' },
+        headers: { Authorization: token, 'Content-Type': 'application/json' },
     });
     if (!res.ok) {
         const text = await res.text();
@@ -28,6 +34,7 @@ async function cuFetch(path, params = {}) {
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/clickup/spaces', async (req, res) => {
     try {
+        const { token: CLICKUP_TOKEN, teamId: TEAM_ID } = getClickUpConfig();
         if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
         const data = await cuFetch(`/team/${TEAM_ID}/space`, { archived: false });
         res.json({ spaces: data.spaces || [] });
@@ -42,6 +49,7 @@ router.get('/clickup/spaces', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/clickup/lists/:spaceId', async (req, res) => {
     try {
+        const { token: CLICKUP_TOKEN, teamId: TEAM_ID } = getClickUpConfig();
         if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
         const [foldersData, folderlessData] = await Promise.all([
             cuFetch(`/space/${req.params.spaceId}/folder`, { archived: false }),
@@ -69,6 +77,7 @@ router.get('/clickup/lists/:spaceId', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/clickup/members', async (req, res) => {
     try {
+        const { token: CLICKUP_TOKEN, teamId: TEAM_ID } = getClickUpConfig();
         if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
         const data = await cuFetch(`/team/${TEAM_ID}`);
         res.json({ members: data.team?.members?.map(m => ({ id: m.user.id, username: m.user.username, email: m.user.email })) || [] });
@@ -160,6 +169,7 @@ router.put('/client-lists', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/accounts/:year', async (req, res) => {
     try {
+        const { token: CLICKUP_TOKEN, teamId: TEAM_ID } = getClickUpConfig();
         if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
 
         const year = parseInt(req.params.year);
