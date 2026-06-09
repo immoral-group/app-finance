@@ -466,20 +466,41 @@ async function computeRealCostPerPerson(year) {
 // Match ClickUp username → empleado Finance por nombre.
 // Requiere que TODOS los tokens del nombre Finance aparezcan en el nombre ClickUp.
 // Esto evita que "Andrés Peñuela" matchee con Finance "Andrés Barrios".
+// Match ClickUp username → empleado Finance.
+// Regla: cada token del nombre Finance debe coincidir (prefijo, en ambos
+// sentidos) con algún token del username ClickUp. Así:
+//   "Flor"           ←→ "Florencia López"     ✓ (florencia.startsWith('flor'))
+//   "Grego"          ←→ "Gregory Y"           ✓
+//   "Andrés Barrios" ←→ "Andres Barrios"      ✓ (acentos normalizados)
+//   "Andrés Barrios" ←→ "Andres Peñuela"      ✗ (falta 'barrios')
+//   "Alba"           ←→ "Andres Peñuela"      ✗
 function matchClickUpUser(clickupName, personByName) {
     if (!clickupName) return null;
     const lower = norm(clickupName);
-    const cuTokens = new Set(lower.split(/[\s._-]+/).filter(Boolean));
+    const cuTokens = lower.split(/[\s._-]+/).filter(Boolean);
 
     if (personByName[lower]) return personByName[lower];
 
-    // All Finance name tokens must be present in ClickUp name (acentos ignorados)
+    let bestMatch = null;
+    let bestScore = -1;
+
     for (const [key, val] of Object.entries(personByName)) {
         const keyTokens = key.split(/[\s._-]+/).filter(Boolean);
-        if (keyTokens.length > 0 && keyTokens.every(t => cuTokens.has(t))) return val;
-    }
+        if (keyTokens.length === 0) continue;
 
-    return null;
+        const allMatch = keyTokens.every(kt =>
+            cuTokens.some(ct => ct === kt || ct.startsWith(kt) || kt.startsWith(ct))
+        );
+        if (!allMatch) continue;
+
+        // Score: nombres más específicos (más tokens) ganan
+        const score = keyTokens.length * 100 + keyTokens.reduce((s, t) => s + t.length, 0);
+        if (score > bestScore) {
+            bestScore = score;
+            bestMatch = val;
+        }
+    }
+    return bestMatch;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -524,8 +545,17 @@ router.get('/accounts/:year', async (req, res) => {
             billingDetails = details || [];
         }
 
-        // 4. Time entries: workspace-wide, todos los assignees, paginado por mes
-        const allEntries = await fetchAllWorkspaceTimeEntries(TEAM_ID, year);
+        // 4. Time entries: workspace-wide, paginado por mes. Aislamos errores
+        // de ClickUp para que el endpoint siga devolviendo el resto.
+        let allEntries = [];
+        let clickup_error = null;
+        try {
+            allEntries = await fetchAllWorkspaceTimeEntries(TEAM_ID, year);
+            console.log(`[profitability] ClickUp returned ${allEntries.length} time entries for ${year}`);
+        } catch (e) {
+            clickup_error = e.message;
+            console.error(`[profitability] ClickUp time entries fetch failed:`, e.message);
+        }
 
         // Agrupar entries por list_id
         const timeEntriesByList = {};
@@ -617,7 +647,11 @@ router.get('/accounts/:year', async (req, res) => {
                 const revenue = billingByClientMonth[clientId]?.[idx] || 0;
                 const labor_cost = m.labor_cost;
                 const gross_profit = revenue - labor_cost;
-                const margin_pct = revenue > 0 ? (gross_profit / revenue) * 100 : null;
+                // Solo calculamos margen si hay revenue Y hay horas registradas
+                // (sin horas, "margen 100%" sería engañoso porque no sabemos el coste real)
+                const margin_pct = (revenue > 0 && m.hours > 0)
+                    ? (gross_profit / revenue) * 100
+                    : null;
                 return {
                     month: idx,
                     hours: Math.round(m.hours * 100) / 100,
@@ -655,7 +689,7 @@ router.get('/accounts/:year', async (req, res) => {
         // Sort by margin ascending (worst first)
         result.sort((a, b) => (a.total_margin_pct ?? 999) - (b.total_margin_pct ?? 999));
 
-        res.json({ year, accounts: result });
+        res.json({ year, accounts: result, clickup_error });
     } catch (err) {
         console.error('[profitability] accounts error:', err);
         res.status(500).json({ error: err.message });

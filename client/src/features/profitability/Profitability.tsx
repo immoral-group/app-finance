@@ -160,6 +160,15 @@ function MatrixTable({ accounts }: { accounts: AccountProfitability[] }) {
                                             const m = account.monthly[i];
                                             const hasData = m.revenue > 0 || m.hours > 0;
                                             const sem = semaphore(m.margin_pct);
+                                            // Label: si hay margen calculado lo mostramos; si no, lo más relevante (€ o h)
+                                            const label = m.margin_pct !== null
+                                                ? `${m.margin_pct.toFixed(0)}%`
+                                                : m.hours > 0
+                                                    ? `${m.hours.toFixed(0)}h`
+                                                    : m.revenue > 0
+                                                        ? fmt(m.revenue)
+                                                        : '—';
+                                            const tooltip = `${account.client_name} · ${MONTH_NAMES[i]}\nFacturado: ${fmt(m.revenue)}\nHoras: ${m.hours.toFixed(1)}h\nCoste labor: ${fmt(m.labor_cost)}\nBeneficio: ${fmt(m.gross_profit)}${m.margin_pct !== null ? `\nMargen: ${m.margin_pct.toFixed(1)}%` : '\nMargen: —'}`;
                                             return (
                                                 <td key={i} className="px-1 py-1.5 text-center">
                                                     {hasData ? (
@@ -167,11 +176,12 @@ function MatrixTable({ accounts }: { accounts: AccountProfitability[] }) {
                                                             onClick={() => setDetail({ account, month: i })}
                                                             className={cn(
                                                                 'w-full px-1 py-1.5 rounded-lg text-[11px] font-bold tabular-nums transition-all hover:scale-105 hover:shadow-sm',
-                                                                sem.bg, sem.color
+                                                                m.margin_pct !== null ? sem.bg : 'bg-muted/40',
+                                                                m.margin_pct !== null ? sem.color : 'text-muted-foreground',
                                                             )}
-                                                            title={`${account.client_name} ${MONTH_NAMES[i]}: ${m.revenue > 0 ? fmt(m.revenue) : `${m.hours.toFixed(1)}h`}`}
+                                                            title={tooltip}
                                                         >
-                                                            {m.margin_pct !== null ? `${m.margin_pct.toFixed(0)}%` : `${m.hours.toFixed(0)}h`}
+                                                            {label}
                                                         </button>
                                                     ) : (
                                                         <span className="text-[10px] text-muted-foreground/30">—</span>
@@ -339,6 +349,15 @@ export default function Profitability() {
                             Ir a Configuración
                         </button>
                     )}
+                </div>
+            )}
+
+            {/* ClickUp connection issue */}
+            {data?.clickup_error && (
+                <div className="border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-xl p-4">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-300">No se han podido cargar horas desde ClickUp</p>
+                    <p className="text-xs text-red-600/80 dark:text-red-400/70 mt-1">{data.clickup_error}</p>
+                    <p className="text-xs text-red-600/70 dark:text-red-400/60 mt-2">Los datos de facturación se muestran igualmente, pero el coste laboral y el margen requieren las horas.</p>
                 </div>
             )}
 

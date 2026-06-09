@@ -615,6 +615,7 @@ export interface AccountProfitability {
 export interface ProfitabilityResponse {
     year: number;
     accounts: AccountProfitability[];
+    clickup_error?: string | null;
 }
 
 export interface AutoMappingEntry {
