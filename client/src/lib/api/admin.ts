@@ -508,6 +508,17 @@ export const adminApi = {
         fetchApi<{ mappings: UserMapping[] }>('/profitability/user-mappings'),
     saveProfitabilityUserMappings: (mappings: Partial<UserMapping>[]) =>
         fetchApi<{ success: boolean }>('/profitability/user-mappings', { method: 'PUT', body: JSON.stringify({ mappings }) }),
+    getProfitabilityAutoMatchClients: (year: number) =>
+        fetchApi<{
+            year: number;
+            folders: ClickUpFolderWithTime[];
+            client_matches: Array<{
+                client_id: string;
+                client_name: string;
+                configured: Array<{ id: string; name: string }>;
+                suggested: { id: string; name: string; total_hours: number; score: number } | null;
+            }>;
+        }>(`/profitability/auto-match-clients/${year}`),
     getProfitabilityClientLists: () =>
         fetchApi<{ client_lists: ClientList[] }>('/profitability/client-lists'),
     saveProfitabilityClientLists: (client_lists: Partial<ClientList>[]) =>

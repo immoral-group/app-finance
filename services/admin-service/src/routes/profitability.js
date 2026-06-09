@@ -257,6 +257,79 @@ router.get('/clickup/members', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// GET /profitability/auto-match-clients/:year
+// Compara carpetas ClickUp (con horas ese año) con clientes Finance por nombre.
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/auto-match-clients/:year', async (req, res) => {
+    try {
+        const { token: CLICKUP_TOKEN, teamId: TEAM_ID } = getClickUpConfig();
+        if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
+
+        const year = parseInt(req.params.year);
+
+        // 1. Carpetas ClickUp con horas este año
+        const entries = await fetchAllWorkspaceTimeEntries(TEAM_ID, year);
+        const folderMap = {};
+        for (const e of entries) {
+            const loc = e.task_location || {};
+            const folderId   = String(loc.folder_id || e.task?.folder?.id || '');
+            const folderName = loc.folder_name || e.task?.folder?.name || '';
+            const spaceName  = loc.space_name  || e.task?.space?.name  || '';
+            if (!folderId || folderName === 'hidden' || !folderName) continue;
+            if (!folderMap[folderId]) folderMap[folderId] = { id: folderId, name: folderName, space: spaceName, total_hours: 0 };
+            folderMap[folderId].total_hours += Number(e.duration || 0) / 3_600_000;
+        }
+        const folders = Object.values(folderMap)
+            .map(f => ({ ...f, total_hours: Math.round(f.total_hours * 100) / 100 }))
+            .filter(f => f.total_hours > 0)
+            .sort((a, b) => b.total_hours - a.total_hours);
+
+        // 2. Clientes Finance
+        const { data: clients } = await supabase.from('clients').select('id, name').order('name');
+
+        // 3. Config manual existente
+        const { data: existing } = await supabase.from('profitability_client_lists').select('*');
+        const existingByClient = {};
+        (existing || []).forEach(r => {
+            if (!existingByClient[r.client_id]) existingByClient[r.client_id] = [];
+            existingByClient[r.client_id].push({ id: r.clickup_list_id, name: r.clickup_list_name });
+        });
+
+        // 4. Sugerencia automática por nombre
+        const clientMatches = (clients || []).map(c => {
+            const configured = existingByClient[c.id] || [];
+            const cn = norm(c.name);
+            const tokens = cn.split(/[\s._-]+/).filter(t => t.length > 2);
+            let best = null; let bestScore = 0;
+            for (const f of folders) {
+                const fn = norm(f.name);
+                let score = 0;
+                if (fn === cn) score = 100;
+                else if (fn.includes(cn) || cn.includes(fn)) score = 90;
+                else {
+                    const matched = tokens.filter(t => fn.includes(t));
+                    score = tokens.length > 0 ? (matched.length / tokens.length) * 80 : 0;
+                }
+                if (score > bestScore) { bestScore = score; best = f; }
+            }
+            return {
+                client_id: c.id,
+                client_name: c.name,
+                configured,
+                suggested: best && bestScore >= 60
+                    ? { id: `folder:${best.id}`, name: best.name, total_hours: best.total_hours, score: Math.round(bestScore) }
+                    : null,
+            };
+        });
+
+        res.json({ year, folders, client_matches: clientMatches });
+    } catch (err) {
+        console.error('[profitability] auto-match-clients error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // GET /profitability/user-mappings  — mapeo usuario ClickUp → coste/hora
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/user-mappings', async (req, res) => {

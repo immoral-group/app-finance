@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, ClientList, ClickUpSpace, ClickUpList } from '@/lib/api/admin';
-import { ArrowLeft, Plus, Trash2, Save, ChevronDown, CheckCircle2, AlertCircle, Sparkles, Info } from 'lucide-react';
+import { adminApi } from '@/lib/api/admin';
+import { ArrowLeft, Save, CheckCircle2, AlertCircle, Sparkles, Info, RefreshCw, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -153,264 +153,150 @@ function AutoMappingSection({ year }: { year: number }) {
     );
 }
 
-// ── Client Lists ───────────────────────────────────────────────────────────────
+// ── Client Match Section ──────────────────────────────────────────────────────
+// Muestra todos los clientes Finance con su carpeta ClickUp sugerida.
+// El usuario solo corrige los que el sistema no acertó.
 function ClientListsSection({ year }: { year: number }) {
     const qc = useQueryClient();
-    const [selectedSpace, setSelectedSpace] = useState<string>('');
-    const [showAutoDiscover, setShowAutoDiscover] = useState(true);
-    const [rows, setRows] = useState<ClientList[]>([]);
+    // clientId → folderId (prefixed "folder:xxx" or list id)
+    const [assignments, setAssignments] = useState<Record<string, string>>({});
     const [initialized, setInitialized] = useState(false);
 
-    const { data: autoListsData, isLoading: loadingAuto } = useQuery({
-        queryKey: ['clickup-lists-with-time', year],
-        queryFn: () => adminApi.getClickUpListsWithTime(year),
-        staleTime: 5 * 60_000,
+    const { data, isLoading, refetch, isFetching } = useQuery({
+        queryKey: ['profitability-auto-match', year],
+        queryFn: () => adminApi.getProfitabilityAutoMatchClients(year),
+        staleTime: 2 * 60_000,
     });
 
-    const { data: spacesData } = useQuery({
-        queryKey: ['clickup-spaces'],
-        queryFn: adminApi.getClickUpSpaces,
-        enabled: !showAutoDiscover,
-        staleTime: 10 * 60_000,
-    });
-
-    const { data: listsData } = useQuery({
-        queryKey: ['clickup-lists', selectedSpace],
-        queryFn: () => adminApi.getClickUpLists(selectedSpace),
-        enabled: !!selectedSpace && !showAutoDiscover,
-        staleTime: 5 * 60_000,
-    });
-
-    const { data: clientListsData } = useQuery({
-        queryKey: ['profitability-client-lists'],
-        queryFn: adminApi.getProfitabilityClientLists,
-    });
-
-    const { data: clientsRaw } = useQuery({
-        queryKey: ['clients-simple'],
-        queryFn: adminApi.getClients,
-        staleTime: 60_000,
-    });
-
+    // Inicializar: si ya hay config guardada, úsala; si no, aplica sugerencia
     useEffect(() => {
-        if (clientListsData && !initialized) {
-            setRows(clientListsData.client_lists || []);
-            setInitialized(true);
+        if (!data || initialized) return;
+        const init: Record<string, string> = {};
+        for (const cm of data.client_matches) {
+            if (cm.configured.length > 0) {
+                init[cm.client_id] = cm.configured[0].id;
+            } else if (cm.suggested) {
+                init[cm.client_id] = cm.suggested.id;
+            }
         }
-    }, [clientListsData, initialized]);
+        setAssignments(init);
+        setInitialized(true);
+    }, [data, initialized]);
 
     const saveMutation = useMutation({
-        mutationFn: () => adminApi.saveProfitabilityClientLists(rows.filter(r => !!r.client_id)),
+        mutationFn: () => {
+            const rows = Object.entries(assignments)
+                .filter(([, folderId]) => !!folderId)
+                .map(([clientId, folderId]) => {
+                    const match = data?.client_matches.find(cm => cm.client_id === clientId);
+                    const name = match
+                        ? (data?.folders.find(f => `folder:${f.id}` === folderId)?.name || folderId)
+                        : folderId;
+                    return { client_id: clientId, clickup_list_id: folderId, clickup_list_name: name };
+                });
+            return adminApi.saveProfitabilityClientLists(rows);
+        },
         onSuccess: () => {
             setInitialized(false);
-            qc.invalidateQueries({ queryKey: ['profitability-client-lists'] });
+            qc.invalidateQueries({ queryKey: ['profitability-auto-match', year] });
             qc.invalidateQueries({ queryKey: ['profitability-accounts'] });
-            toast.success('Listas guardadas');
+            toast.success('Configuración guardada');
         },
         onError: () => toast.error('Error al guardar'),
     });
 
-    const addList = (list: ClickUpList) => {
-        if (rows.find(r => r.clickup_list_id === list.id)) return;
-        setRows(prev => [...prev, { client_id: '', clickup_list_id: list.id, clickup_list_name: list.name }]);
-    };
+    const folders = data?.folders ?? [];
+    const matches = data?.client_matches ?? [];
+    const configured = matches.filter(cm => assignments[cm.client_id]);
+    const missing = matches.filter(cm => !assignments[cm.client_id]);
 
-    const removeRow = (listId: string) => setRows(prev => prev.filter(r => r.clickup_list_id !== listId));
-
-    const updateClient = (listId: string, clientId: string) => {
-        setRows(prev => prev.map(r => r.clickup_list_id === listId ? { ...r, client_id: clientId } : r));
-    };
-
-    const spaces = spacesData?.spaces ?? [];
-    const lists = listsData?.lists ?? [];
-    const clients = clientsRaw?.clients ?? [];
-
-    const autoLists = autoListsData?.lists ?? [];
-    const autoFolders = autoListsData?.folders ?? [];
+    if (isLoading) return (
+        <Section title="Clientes → Carpetas ClickUp">
+            <p className="text-xs text-muted-foreground py-4 text-center">Analizando ClickUp… puede tardar unos segundos.</p>
+        </Section>
+    );
 
     return (
-        <Section title="Listas ClickUp → Cliente Finance">
+        <Section title="Clientes → Carpetas ClickUp">
             <div className="space-y-4">
-                {/* Toggle: auto-discover vs manual */}
-                <div className="flex items-center gap-2 text-xs">
-                    <button
-                        onClick={() => setShowAutoDiscover(true)}
-                        className={cn(
-                            'px-3 py-1.5 rounded-lg font-medium transition-colors',
-                            showAutoDiscover ? 'bg-primary text-primary-foreground' : 'border border-border/60 text-muted-foreground hover:bg-muted/60'
-                        )}
-                    >
-                        <Sparkles size={11} className="inline mr-1" /> Auto-descubrir (con horas {year})
-                    </button>
-                    <button
-                        onClick={() => setShowAutoDiscover(false)}
-                        className={cn(
-                            'px-3 py-1.5 rounded-lg font-medium transition-colors',
-                            !showAutoDiscover ? 'bg-primary text-primary-foreground' : 'border border-border/60 text-muted-foreground hover:bg-muted/60'
-                        )}
-                    >
-                        Explorar por Space
-                    </button>
+                <div className="bg-muted/30 border border-border/50 rounded-lg p-3 text-xs text-muted-foreground flex items-start gap-2">
+                    <Sparkles size={12} className="text-primary mt-0.5 flex-shrink-0" />
+                    <div>
+                        El sistema compara los nombres de carpetas de ClickUp con los clientes de Finance y sugiere el match automáticamente. Corrige los que no coincidan y guarda.
+                        <button onClick={() => { setInitialized(false); refetch(); }} className="ml-2 inline-flex items-center gap-1 text-primary hover:underline">
+                            <RefreshCw size={10} className={isFetching ? 'animate-spin' : ''} /> Recargar
+                        </button>
+                    </div>
                 </div>
 
-                {/* Auto-discover: folders + lists with time logged */}
-                {showAutoDiscover && (
-                    <div className="space-y-4">
-                        {loadingAuto && <p className="text-xs text-muted-foreground py-2">Buscando elementos con horas registradas en {year}…</p>}
-
-                        {/* Folders (recommended) */}
-                        {!loadingAuto && autoFolders.length > 0 && (
-                            <div>
-                                <p className="text-xs text-foreground font-medium mb-1.5">📁 Carpetas <span className="text-muted-foreground font-normal">— recomendado, agrupa todas las listas dentro</span></p>
-                                <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
-                                    {autoFolders
-                                        .filter(f => !rows.find(r => r.clickup_list_id === `folder:${f.id}`))
-                                        .map(f => (
-                                            <button
-                                                key={f.id}
-                                                onClick={() => addList({ id: `folder:${f.id}`, name: `📁 ${f.name}`, folder: f.space })}
-                                                className="flex items-center gap-1 px-2 py-1 rounded-full border border-primary/40 bg-primary/5 hover:bg-primary/10 text-xs text-foreground transition-colors"
-                                                title={`${f.entry_count} entradas · ${f.list_count} listas · ${f.space}`}
-                                            >
-                                                <Plus size={10} />
-                                                {f.name}
-                                                <span className="text-[9px] text-muted-foreground ml-1">{f.total_hours}h</span>
-                                            </button>
-                                        ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Lists */}
-                        {!loadingAuto && autoLists.length > 0 && (
-                            <div>
-                                <p className="text-xs text-foreground font-medium mb-1.5">📋 Listas sueltas</p>
-                                <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
-                                    {autoLists
-                                        .filter(l => !rows.find(r => r.clickup_list_id === l.id))
-                                        .map(l => (
-                                            <button
-                                                key={l.id}
-                                                onClick={() => addList({ id: l.id, name: l.name, folder: l.folder })}
-                                                className="flex items-center gap-1 px-2 py-1 rounded-full border border-border/60 bg-muted/40 hover:bg-muted text-xs text-foreground transition-colors"
-                                                title={`${l.entry_count} entradas · ${l.space}${l.folder ? ' / ' + l.folder : ''}`}
-                                            >
-                                                <Plus size={10} />
-                                                {l.name || '(sin nombre)'}
-                                                <span className="text-[9px] text-muted-foreground ml-1">{l.total_hours}h</span>
-                                            </button>
-                                        ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {!loadingAuto && autoFolders.length === 0 && autoLists.length === 0 && (
-                            <p className="text-xs text-muted-foreground py-2">No se han encontrado carpetas/listas con horas registradas en {year}.</p>
-                        )}
-                    </div>
-                )}
-
-                {/* Manual: space selector */}
-                {!showAutoDiscover && (
-                    <>
-                        <div className="flex items-center gap-3">
-                            <label className="text-xs text-muted-foreground whitespace-nowrap">Space ClickUp:</label>
-                            <div className="relative">
-                                <select
-                                    value={selectedSpace}
-                                    onChange={e => setSelectedSpace(e.target.value)}
-                                    className="appearance-none px-3 pr-7 py-1.5 text-xs rounded-lg border border-border/60 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                                >
-                                    <option value="">— seleccionar —</option>
-                                    {spaces.map((s: ClickUpSpace) => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                </select>
-                                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                            </div>
-                        </div>
-
-                        {lists.length > 0 && (
-                            <div>
-                                <p className="text-xs text-muted-foreground mb-2">Añadir lista:</p>
-                                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-                                    {lists
-                                        .filter((l: ClickUpList) => !rows.find(r => r.clickup_list_id === l.id))
-                                        .map((l: ClickUpList) => (
-                                            <button
-                                                key={l.id}
-                                                onClick={() => addList(l)}
-                                                className="flex items-center gap-1 px-2 py-1 rounded-full border border-border/60 bg-muted/40 hover:bg-muted text-xs text-foreground transition-colors"
-                                            >
-                                                <Plus size={10} />
-                                                {l.folder ? `${l.folder} / ` : ''}{l.name}
-                                            </button>
-                                        ))}
-                                </div>
-                            </div>
-                        )}
-                    </>
-                )}
-
-                {/* Mapping table */}
-                {rows.length > 0 ? (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
-                                    <th className="pb-2 text-left font-medium">Lista ClickUp</th>
-                                    <th className="pb-2 text-left font-medium">Cliente Finance</th>
-                                    <th className="pb-2 w-8" />
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rows.map(r => (
-                                    <tr key={r.clickup_list_id} className="border-b border-border/30">
-                                        <td className="py-2 pr-4 text-foreground text-xs font-medium">{r.clickup_list_name || r.clickup_list_id}</td>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/40">
+                                <th className="pb-2 text-left font-medium">Cliente Finance</th>
+                                <th className="pb-2 text-left font-medium">Carpeta ClickUp</th>
+                                <th className="pb-2 text-right font-medium">Horas {year}</th>
+                                <th className="pb-2 text-center font-medium w-8">Match</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {matches.map(cm => {
+                                const selected = assignments[cm.client_id] || '';
+                                const folder = folders.find(f => `folder:${f.id}` === selected);
+                                const isAuto = cm.suggested?.id === selected && cm.configured.length === 0;
+                                const isSaved = cm.configured.some(c => c.id === selected);
+                                return (
+                                    <tr key={cm.client_id} className="border-b border-border/30 hover:bg-muted/10">
+                                        <td className="py-2 pr-4 text-foreground font-medium text-xs">{cm.client_name}</td>
                                         <td className="py-2 pr-4">
                                             <div className="relative">
                                                 <select
-                                                    value={r.client_id}
-                                                    onChange={e => updateClient(r.clickup_list_id, e.target.value)}
+                                                    value={selected}
+                                                    onChange={e => setAssignments(prev => ({ ...prev, [cm.client_id]: e.target.value }))}
                                                     className={cn(
-                                                        'appearance-none w-48 px-2 pr-7 py-1 text-xs rounded border border-border/60 bg-background focus:outline-none focus:ring-1 focus:ring-primary',
-                                                        !r.client_id && 'text-muted-foreground'
+                                                        'appearance-none w-52 px-2 pr-6 py-1 text-xs rounded border bg-background focus:outline-none focus:ring-1 focus:ring-primary',
+                                                        !selected ? 'border-amber-400/60 text-muted-foreground' : 'border-border/60 text-foreground'
                                                     )}
                                                 >
-                                                    <option value="">— seleccionar cliente —</option>
-                                                    {clients.map((c: any) => (
-                                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                                    <option value="">— sin asignar —</option>
+                                                    {folders.map(f => (
+                                                        <option key={f.id} value={`folder:${f.id}`}>{f.name} ({f.total_hours.toFixed(1)}h)</option>
                                                     ))}
                                                 </select>
-                                                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                                                <ChevronDown size={10} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                                             </div>
                                         </td>
-                                        <td className="py-2">
-                                            <button onClick={() => removeRow(r.clickup_list_id)} className="p-1 hover:text-red-500 text-muted-foreground transition-colors">
-                                                <Trash2 size={13} />
-                                            </button>
+                                        <td className="py-2 pr-4 text-right text-xs tabular-nums text-muted-foreground">
+                                            {folder ? `${folder.total_hours.toFixed(1)}h` : '—'}
+                                        </td>
+                                        <td className="py-2 text-center">
+                                            {isSaved && <CheckCircle2 size={13} className="text-emerald-500 mx-auto" />}
+                                            {!isSaved && isAuto && <Sparkles size={13} className="text-primary/70 mx-auto" />}
+                                            {!isSaved && !isAuto && selected && <AlertCircle size={13} className="text-amber-500 mx-auto" />}
+                                            {!selected && <span className="text-muted-foreground/30 text-[10px]">—</span>}
                                         </td>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                ) : (
-                    <p className="text-xs text-muted-foreground py-4 text-center">No hay listas configuradas. Selecciona un space y añade listas.</p>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+
+                {missing.length > 0 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">{missing.length} cliente(s) sin carpeta asignada — no aparecerán en el dashboard.</p>
                 )}
 
-                {rows.length > 0 && (
-                    <div className="flex justify-end">
-                        <button
-                            onClick={() => saveMutation.mutate()}
-                            disabled={saveMutation.isPending}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                        >
-                            <Save size={12} />
-                            {saveMutation.isPending ? 'Guardando…' : 'Guardar'}
-                        </button>
-                    </div>
-                )}
+                <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">{configured.length} de {matches.length} clientes configurados</p>
+                    <button
+                        onClick={() => saveMutation.mutate()}
+                        disabled={saveMutation.isPending}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                    >
+                        <Save size={12} />
+                        {saveMutation.isPending ? 'Guardando…' : 'Guardar todo'}
+                    </button>
+                </div>
             </div>
         </Section>
     );
