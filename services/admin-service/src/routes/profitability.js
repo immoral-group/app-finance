@@ -34,23 +34,52 @@ function norm(s) {
     return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 }
 
-// Fetch ALL time entries from a workspace, paginating in 30-day windows.
-// Do NOT pass `assignee` — with a personal admin token ClickUp returns all
-// members' entries without it; passing assignee triggers a 403 (TIMEENTRY_059).
+// Fetch ALL time entries from a workspace.
+// ClickUp's /time_entries returns only the authenticated user's entries unless
+// `assignee=<id>` is passed, AND it must be passed ONE user at a time (passing
+// multiple IDs at once returns 403 TIMEENTRY_059). So we loop per-member.
 async function fetchAllWorkspaceTimeEntries(teamId, year) {
+    const teamData = await cuFetch(`/team/${teamId}`);
+    const members = teamData.team?.members || [];
+
     const yearStart = new Date(`${year}-01-01T00:00:00Z`).getTime();
     const yearEnd   = new Date(`${year}-12-31T23:59:59Z`).getTime();
 
     const all = [];
-    const WINDOW_MS = 30 * 24 * 3600 * 1000;
-    for (let ws = yearStart; ws <= yearEnd; ws += WINDOW_MS) {
-        const we = Math.min(ws + WINDOW_MS - 1, yearEnd);
-        const data = await cuFetch(`/team/${teamId}/time_entries`, {
-            start_date: ws,
-            end_date: we,
+    const errors = [];
+
+    // First: my own entries (no assignee needed)
+    try {
+        const mine = await cuFetch(`/team/${teamId}/time_entries`, {
+            start_date: yearStart,
+            end_date: yearEnd,
         });
-        all.push(...(data.data || []));
+        all.push(...(mine.data || []));
+    } catch (e) {
+        errors.push(`self: ${e.message}`);
     }
+
+    // Then: each member individually
+    for (const m of members) {
+        const uid = m.user?.id;
+        if (!uid) continue;
+        try {
+            const data = await cuFetch(`/team/${teamId}/time_entries`, {
+                start_date: yearStart,
+                end_date: yearEnd,
+                assignee: uid,
+            });
+            const entries = (data.data || []);
+            // Deduplicate by entry.id (in case self overlaps)
+            for (const e of entries) {
+                if (!all.find(x => x.id === e.id)) all.push(e);
+            }
+        } catch (e) {
+            errors.push(`user ${m.user?.username || uid}: ${e.message}`);
+        }
+    }
+
+    console.log(`[profitability] fetched ${all.length} entries from ${members.length} members${errors.length ? ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})` : ''}`);
     return all;
 }
 
