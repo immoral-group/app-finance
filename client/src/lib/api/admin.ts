@@ -498,6 +498,24 @@ export const adminApi = {
         fetchApi<{ success: boolean; row: IcexRow }>('/icex/rows', { method: 'POST', body: JSON.stringify(data) }),
     deleteIcexRow: (id: string) =>
         fetchApi<{ success: boolean }>(`/icex/rows/${id}`, { method: 'DELETE' }),
+
+    // ── Rentabilidad por Cuenta ────────────────────────────────────────────────
+    getProfitabilityAccounts: (year: number) =>
+        fetchApi<ProfitabilityResponse>(`/profitability/accounts/${year}`),
+    getProfitabilityUserMappings: () =>
+        fetchApi<{ mappings: UserMapping[] }>('/profitability/user-mappings'),
+    saveProfitabilityUserMappings: (mappings: Partial<UserMapping>[]) =>
+        fetchApi<{ success: boolean }>('/profitability/user-mappings', { method: 'PUT', body: JSON.stringify({ mappings }) }),
+    getProfitabilityClientLists: () =>
+        fetchApi<{ client_lists: ClientList[] }>('/profitability/client-lists'),
+    saveProfitabilityClientLists: (client_lists: Partial<ClientList>[]) =>
+        fetchApi<{ success: boolean }>('/profitability/client-lists', { method: 'PUT', body: JSON.stringify({ client_lists }) }),
+    getClickUpSpaces: () =>
+        fetchApi<{ spaces: ClickUpSpace[] }>('/profitability/clickup/spaces'),
+    getClickUpLists: (spaceId: string) =>
+        fetchApi<{ lists: ClickUpList[] }>(`/profitability/clickup/lists/${spaceId}`),
+    getClickUpMembers: () =>
+        fetchApi<{ members: ClickUpMember[] }>('/profitability/clickup/members'),
 };
 
 export interface IcexRow {
@@ -522,6 +540,66 @@ export interface NutfruitRow {
     jan: number; feb: number; mar: number; apr: number;
     may: number; jun: number; jul: number; aug: number;
     sep: number; oct: number; nov: number; dec: number;
+}
+
+export interface UserMapping {
+    id?: string;
+    clickup_user_id: string;
+    display_name: string;
+    email?: string;
+    cost_per_hour: number;
+    department?: string;
+}
+
+export interface ClientList {
+    id?: string;
+    client_id: string;
+    clickup_list_id: string;
+    clickup_list_name?: string;
+    clients?: { name: string };
+}
+
+export interface ClickUpSpace {
+    id: string;
+    name: string;
+}
+
+export interface ClickUpList {
+    id: string;
+    name: string;
+    folder: string | null;
+}
+
+export interface ClickUpMember {
+    id: string;
+    username: string;
+    email: string;
+}
+
+export interface MonthlyProfitability {
+    month: number;
+    hours: number;
+    labor_cost: number;
+    revenue: number;
+    gross_profit: number;
+    margin_pct: number | null;
+    members: { name: string; hours: number; labor_cost: number }[];
+}
+
+export interface AccountProfitability {
+    client_id: string;
+    client_name: string;
+    total_revenue: number;
+    total_labor_cost: number;
+    total_hours: number;
+    total_profit: number;
+    total_margin_pct: number | null;
+    monthly: MonthlyProfitability[];
+}
+
+export interface ProfitabilityResponse {
+    year: number;
+    accounts: AccountProfitability[];
 }
 
 export interface BudgetRequest {

@@ -72,6 +72,7 @@ export const ALL_MODULES = [
     { key: 'user_management', label: 'Gestión de Usuarios' },
     { key: 'imsales_billing', label: 'Billing Imsales' },
     { key: 'developers', label: 'Developers' },
+    { key: 'profitability', label: 'Rentabilidad x Cuenta' },
 ];
 
 export const NAV_ITEMS: NavItem[] = [
@@ -100,5 +101,6 @@ export const NAV_ITEMS: NavItem[] = [
     { label: 'Settings', path: '/settings', icon: 'Settings', requiredPermission: 'settings', superadminOnly: true },
     { label: 'Gestión de Usuarios', path: '/users', icon: 'Shield', requiredPermission: 'user_management', superadminOnly: true },
     { label: 'Developers', path: '/developers', icon: 'Activity', requiredPermission: 'developers', superadminOnly: true },
+    { label: 'Rentabilidad x Cuenta', path: '/profitability', icon: 'PieChart', requiredPermission: 'profitability', superadminOnly: true },
 ];
 
