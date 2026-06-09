@@ -30,6 +30,28 @@ async function cuFetch(path, params = {}) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// GET /profitability/clickup/status  — health check de la conexión a ClickUp
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/clickup/status', async (req, res) => {
+    try {
+        const { token, teamId } = getClickUpConfig();
+        if (!token) {
+            return res.json({ connected: false, error: 'CLICKUP_API_TOKEN not configured' });
+        }
+        const data = await cuFetch(`/team/${teamId}`);
+        const team = data.team || {};
+        res.json({
+            connected: true,
+            team_id: team.id,
+            team_name: team.name,
+            member_count: team.members?.length || 0,
+        });
+    } catch (err) {
+        res.json({ connected: false, error: err.message });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // GET /profitability/clickup/spaces  — lista spaces del workspace
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/clickup/spaces', async (req, res) => {

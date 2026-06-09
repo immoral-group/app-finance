@@ -520,6 +520,8 @@ export const adminApi = {
         fetchApi<{ members: ClickUpMember[] }>('/profitability/clickup/members'),
     getClickUpListsWithTime: (year: number) =>
         fetchApi<{ year: number; lists: ClickUpListWithTime[]; total_entries: number }>(`/profitability/clickup/lists-with-time/${year}`),
+    getClickUpStatus: () =>
+        fetchApi<{ connected: boolean; error?: string; team_id?: string; team_name?: string; member_count?: number }>('/profitability/clickup/status'),
 };
 
 export interface IcexRow {
