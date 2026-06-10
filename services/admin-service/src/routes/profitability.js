@@ -559,7 +559,7 @@ async function computeRealCostPerPerson(year) {
     const HOURS_PER_PERSON_MONTH = 160;
     // Use full names where there may be ambiguity (e.g. multiple "Andrés" in ClickUp)
     const PERSONAL_ITEMS = {
-        Immedia: ['Alba', 'Andrés Barrios', 'Leidy', 'Yue'],
+        Immedia: ['Alba', 'Andrés Barrios', 'Leidy', 'Yure'],
         Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'],
         Immoralia: ['David', 'Manel', 'Julian'],
     };
