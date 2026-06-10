@@ -14,6 +14,7 @@ export interface ChangelogEntry {
     moduleKey?: string;       // ties to ALL_MODULES key — if set, requires permission
     superadminOnly?: boolean;
     icon?: string;            // lucide icon name
+    highlight?: boolean;      // si true, muestra punto azul en sidebar hasta dismiss
 }
 
 /**
@@ -21,6 +22,26 @@ export interface ChangelogEntry {
  * The component will filter based on user permissions automatically.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+    {
+        id: 'v1.34-rentabilidad-por-cuenta',
+        date: '2026-06-10',
+        title: 'Nuevo Módulo: Rentabilidad por Cuenta',
+        description: 'Cruza la facturación mensual de cada cliente con las horas reales registradas en ClickUp y calcula automáticamente Fee/hora, Coste/hora del equipo, Coste Immoral, Beneficio y % Rentabilidad con semáforo (verde ≥60%, ámbar 40–59%, rojo <40%). Haz click en las horas para ver el desglose del equipo. Configurable desde el botón "Configurar".',
+        type: 'new_module',
+        moduleKey: 'profitability',
+        icon: 'TrendingUp',
+        highlight: true,
+    },
+    {
+        id: 'v1.34-clickup-integration',
+        date: '2026-06-10',
+        title: 'Integración con ClickUp',
+        description: 'Conectamos directamente con ClickUp para traer las horas reales de cada cuenta. El coste/hora de cada empleado se calcula automáticamente desde Gastos Reales (salario ÷ 160h × meses activos). Cache de 8 minutos para acelerar la carga y botón de sincronización manual.',
+        type: 'new_module',
+        moduleKey: 'developers',
+        icon: 'Clock',
+        highlight: true,
+    },
     {
         id: 'v1.33-client-billing-report',
         date: '2026-05-21',
@@ -382,6 +403,7 @@ export function getModuleHighlights(): Map<string, ChangelogEntry> {
     // CHANGELOG is newest-first, so first match per module wins
     for (const entry of CHANGELOG) {
         if (!entry.moduleKey) continue;
+        if (!entry.highlight) continue; // solo entradas marcadas con highlight
         if (dismissed.has(entry.id)) continue;
         if (map.has(entry.moduleKey)) continue;
         map.set(entry.moduleKey, entry);
