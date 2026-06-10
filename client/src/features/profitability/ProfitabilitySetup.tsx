@@ -76,6 +76,11 @@ function AutoMappingSection({ year }: { year: number }) {
                                                 <CheckCircle2 size={9} /> auto
                                             </span>
                                         )}
+                                        {m.source === 'override' && (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-[9px] font-medium">
+                                                <Sparkles size={9} /> auto
+                                            </span>
+                                        )}
                                         {m.source === 'unmatched' && (
                                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[9px] font-medium">
                                                 <AlertCircle size={9} /> sin match

@@ -904,7 +904,9 @@ router.get('/accounts/:year', async (req, res) => {
                 entries_per_folder: Object.fromEntries(
                     Object.entries(timeEntriesByFolder).map(([fid, ents]) => [fid, ents.length])
                 ),
-                sample_entry: allEntries[0] ? {
+                billing_by_client_month: Object.fromEntries(
+                    Object.entries(billingByClientMonth).map(([cid, months]) => [cid, months])
+                ),
                     user: allEntries[0].user?.username,
                     list_id: allEntries[0].task_location?.list_id || allEntries[0].task?.list?.id,
                     list_name: allEntries[0].task_location?.list_name || allEntries[0].task?.list?.name,
