@@ -534,6 +534,8 @@ export const adminApi = {
         fetchApi<{ year: number; lists: ClickUpListWithTime[]; folders: ClickUpFolderWithTime[]; spaces: ClickUpSpaceWithTime[]; total_entries: number }>(`/profitability/clickup/lists-with-time/${year}`),
     getClickUpStatus: () =>
         fetchApi<{ connected: boolean; error?: string; team_id?: string; team_name?: string; member_count?: number }>('/profitability/clickup/status'),
+    refreshClickUpCache: (year: number) =>
+        fetchApi<{ ok: boolean; message: string }>('/profitability/clickup/refresh-cache', { method: 'POST', body: JSON.stringify({ year }) }),
 };
 
 export interface IcexRow {

@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, AccountProfitability } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
 
@@ -86,7 +86,12 @@ function Row({ account, monthIdx, annual, onTeam }: {
                 {account.client_name}
             </td>
             <td className="px-3 py-2.5 text-right text-sm tabular-nums text-foreground">
-                {revenue > 0 ? eur(revenue) : <span className="text-muted-foreground/40">—</span>}
+                {revenue > 0
+                    ? eur(revenue)
+                    : hours > 0
+                        ? <span className="inline-flex items-center gap-1 text-amber-500" title="Sin facturación registrada este mes"><AlertTriangle size={11} /><span className="text-muted-foreground/40">—</span></span>
+                        : <span className="text-muted-foreground/40">—</span>
+                }
             </td>
             <td className="px-3 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
                 {feePerHour !== null ? eurDec(feePerHour) : <span className="text-muted-foreground/40">—</span>}
@@ -104,7 +109,10 @@ function Row({ account, monthIdx, annual, onTeam }: {
                         {hours.toFixed(1)}h
                         <Users size={11} className="opacity-60" />
                     </button>
-                ) : <span className="text-muted-foreground/40">—</span>}
+                ) : revenue > 0
+                    ? <span className="inline-flex items-center gap-1 text-amber-500" title="Sin horas registradas en ClickUp este mes"><AlertTriangle size={11} /><span className="text-muted-foreground/40">—</span></span>
+                    : <span className="text-muted-foreground/40">—</span>
+                }
             </td>
             <td className="px-3 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
                 {laborCost > 0 ? eur(laborCost) : <span className="text-muted-foreground/40">—</span>}
@@ -133,11 +141,17 @@ export default function Profitability() {
     const [showSetup, setShowSetup] = useState(false);
     const [team, setTeam] = useState<{ account: AccountProfitability; month: number } | null>(null);
     const { isSuperAdmin } = useAuth();
+    const qc = useQueryClient();
 
     const { data, isLoading, error } = useQuery({
         queryKey: ['profitability-accounts', year],
         queryFn: () => adminApi.getProfitabilityAccounts(year),
-        staleTime: 5 * 60_000,
+        staleTime: 7 * 60_000,
+    });
+
+    const refreshCache = useMutation({
+        mutationFn: () => adminApi.refreshClickUpCache(year),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['profitability-accounts', year] }),
     });
 
     const accounts = data?.accounts ?? [];
@@ -194,6 +208,14 @@ export default function Profitability() {
                             </button>
                         ))}
                     </div>
+                    <button
+                        onClick={() => refreshCache.mutate()}
+                        disabled={refreshCache.isPending || isLoading}
+                        title="Actualizar datos de ClickUp (limpia cache)"
+                        className="h-9 w-9 flex items-center justify-center rounded-lg border border-border/60 bg-card hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                        <RefreshCw size={13} className={refreshCache.isPending ? 'animate-spin' : ''} />
+                    </button>
                     {isSuperAdmin() && (
                         <button
                             onClick={() => setShowSetup(true)}

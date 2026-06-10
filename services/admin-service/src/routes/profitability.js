@@ -8,6 +8,25 @@ const CLICKUP_BASE = 'https://api.clickup.com/api/v2';
 
 const MONTH_COLS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
+// ── Cache en memoria para entradas ClickUp ────────────────────────────────────
+// Clave: `${teamId}:${year}` · TTL: 8 minutos
+const ENTRIES_CACHE_TTL_MS = 8 * 60 * 1000;
+const entriesCache = new Map(); // key → { entries, ts }
+
+function getCachedEntries(teamId, year) {
+    const key = `${teamId}:${year}`;
+    const hit = entriesCache.get(key);
+    if (hit && Date.now() - hit.ts < ENTRIES_CACHE_TTL_MS) return hit.entries;
+    return null;
+}
+function setCachedEntries(teamId, year, entries) {
+    entriesCache.set(`${teamId}:${year}`, { entries, ts: Date.now() });
+}
+function invalidateEntriesCache(teamId, year) {
+    if (teamId && year) { entriesCache.delete(`${teamId}:${year}`); return; }
+    entriesCache.clear();
+}
+
 function getClickUpConfig() {
     return {
         token: process.env.CLICKUP_API_TOKEN,
@@ -39,6 +58,12 @@ function norm(s) {
 // `assignee=<id>` is passed, AND it must be passed ONE user at a time (passing
 // multiple IDs at once returns 403 TIMEENTRY_059). So we loop per-member.
 async function fetchAllWorkspaceTimeEntries(teamId, year) {
+    const cached = getCachedEntries(teamId, year);
+    if (cached) {
+        console.log(`[profitability] cache hit: ${cached.length} entries for ${year}`);
+        return cached;
+    }
+
     const teamData = await cuFetch(`/team/${teamId}`);
     const members = teamData.team?.members || [];
 
@@ -80,6 +105,7 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
     }
 
     console.log(`[profitability] fetched ${all.length} entries from ${members.length} members${errors.length ? ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})` : ''}`);
+    setCachedEntries(teamId, year, all);
     return all;
 }
 
@@ -103,6 +129,16 @@ router.get('/clickup/status', async (req, res) => {
     } catch (err) {
         res.json({ connected: false, error: err.message });
     }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /profitability/clickup/refresh-cache  — invalida cache de entries
+// ──────────────────────────────────────────────────────────────────────────────
+router.post('/clickup/refresh-cache', (req, res) => {
+    const { year } = req.body || {};
+    const { teamId } = getClickUpConfig();
+    invalidateEntriesCache(teamId, year ? parseInt(year) : null);
+    res.json({ ok: true, message: year ? `Cache invalidada para ${year}` : 'Cache completa invalidada' });
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
