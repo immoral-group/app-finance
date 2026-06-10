@@ -824,6 +824,19 @@ router.get('/accounts/:year', async (req, res) => {
             billingByClientMonth[cid][m] += Number(d.amount || 0);
         }
 
+        // 8a. Añadir clientes configurados que tienen billing pero 0 horas ClickUp
+        //     (para que aparezcan con su fee aunque no haya entradas de tiempo)
+        for (const clRow of clientListRows) {
+            const clientId = clRow.client_id;
+            if (clientMonthData[clientId]) continue; // ya procesado en paso 6
+            if (!billingByClientMonth[clientId]) continue; // sin billing → ignorar
+            const clientName = clRow.clients?.name || clientId;
+            clientMonthData[clientId] = {
+                name: clientName,
+                months: Array.from({ length: 12 }, () => ({ hours: 0, labor_cost: 0, members: {} })),
+            };
+        }
+
         // 8. Construcción del resultado
         const result = Object.entries(clientMonthData).map(([clientId, cd]) => {
             const monthlyData = cd.months.map((m, idx) => {
