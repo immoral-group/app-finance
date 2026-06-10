@@ -696,15 +696,23 @@ router.get('/accounts/:year', async (req, res) => {
         // 2. Auto-calcular coste/hora real desde actual_expenses
         const { personByName, deptAvg } = await computeRealCostPerPerson(year);
 
-        // 3. Billing data — monthly_billing has client_id; billing_details are child rows
+        // 3. Billing data — leer fee_paid directamente de monthly_billing
+        //    (es el "Fee Mensual" mostrado en el Billing Matrix).
+        //    También sumamos billing_details (servicios extra) para no perder importes.
         const { data: mbRows } = await supabase
             .from('monthly_billing')
-            .select('id, client_id, fiscal_month')
+            .select('id, client_id, fiscal_month, fee_paid')
             .eq('fiscal_year', year);
 
         const mbIds = (mbRows || []).map(r => r.id);
         const mbIdToInfo = {};
-        (mbRows || []).forEach(r => { mbIdToInfo[r.id] = { client_id: r.client_id, fiscal_month: r.fiscal_month }; });
+        (mbRows || []).forEach(r => {
+            mbIdToInfo[r.id] = {
+                client_id: r.client_id,
+                fiscal_month: r.fiscal_month,
+                fee_paid: Number(r.fee_paid || 0),
+            };
+        });
 
         let billingDetails = [];
         if (mbIds.length > 0) {
@@ -813,7 +821,16 @@ router.get('/accounts/:year', async (req, res) => {
         }
 
         // 7. Billing por cliente × mes
+        //    Base: fee_paid de monthly_billing (lo que muestra el Billing Matrix).
+        //    Suma adicional: billing_details (servicios extra que no estén ya en fee_paid).
         const billingByClientMonth = {};
+        for (const mb of (mbRows || [])) {
+            const cid = mb.client_id;
+            if (!cid) continue;
+            const m = (mb.fiscal_month || 1) - 1;
+            if (!billingByClientMonth[cid]) billingByClientMonth[cid] = Array(12).fill(0);
+            billingByClientMonth[cid][m] += Number(mb.fee_paid || 0);
+        }
         for (const d of billingDetails) {
             const info = mbIdToInfo[d.monthly_billing_id];
             if (!info) continue;
