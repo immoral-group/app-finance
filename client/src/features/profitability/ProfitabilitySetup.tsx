@@ -69,7 +69,8 @@ function AutoMappingSection({ year }: { year: number }) {
                                                 <span className="text-muted-foreground/60" title={m.formula}><Info size={10} /></span>
                                             )}
                                         </span>
-                                                    <td className="py-2 text-center">
+                                    </td>
+                                    <td className="py-2 text-center">
                                         {m.source === 'matched' && (
                                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[9px] font-medium">
                                                 <CheckCircle2 size={9} /> auto
