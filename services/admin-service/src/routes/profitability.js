@@ -892,6 +892,12 @@ router.get('/accounts/:year', async (req, res) => {
             debug: {
                 total_entries_fetched: allEntries.length,
                 configured_lists: clientListRows.length,
+                monthly_billing_rows: (mbRows || []).length,
+                billing_details_rows: billingDetails.length,
+                clients_with_billing: Object.keys(billingByClientMonth).length,
+                clients_configured_without_billing: clientListRows
+                    .filter(c => !billingByClientMonth[c.client_id])
+                    .map(c => ({ id: c.client_id, name: c.clients?.name })),
                 entries_per_list: Object.fromEntries(
                     Object.entries(timeEntriesByList).map(([lid, ents]) => [lid, ents.length])
                 ),
