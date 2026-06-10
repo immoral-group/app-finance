@@ -1319,7 +1319,7 @@ router.get('/cost-per-hour/:year/:dept', async (req, res) => {
     // Personal items per department (mirroring frontend EXPENSE_STRUCTURE)
     // These are used to identify which expense items are "personal" for counting people
     const PERSONAL_ITEMS = {
-        Immedia: ['Alba', 'Andrés', 'Leidy'],
+        Immedia: ['Alba', 'Andrés', 'Leidy', 'Yue'],
         Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'],
         Immoralia: ['David', 'Manel', 'Julian'],
     };

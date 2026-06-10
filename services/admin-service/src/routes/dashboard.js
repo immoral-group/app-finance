@@ -199,7 +199,7 @@ router.get('/kpis/:year', async (req, res) => {
             const n = catName || '';
             
             // Personal
-            if (['Alba', 'Andrés', 'Leidy', 'Flor', 'Bruno', 'Grego', 'Silvia', 'Angie', 'David', 'Manel', 'Daniel', 'Mery', 'Yure', 'Marco', 'Jorge Orts', 'Externos', 'Externos puntuales', 'Gastos de Personal'].includes(n)) return 'personal';
+            if (['Alba', 'Andrés', 'Leidy', 'Yue', 'Flor', 'Bruno', 'Grego', 'Silvia', 'Angie', 'David', 'Manel', 'Daniel', 'Mery', 'Yure', 'Marco', 'Jorge Orts', 'Externos', 'Externos puntuales', 'Gastos de Personal'].includes(n)) return 'personal';
             // Marketing
             if (n === 'Marketing') return 'marketing';
             // Formación

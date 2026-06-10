@@ -3,7 +3,7 @@ import supabase from '../src/config/supabase.js';
 
 const EXPENSE_STRUCTURE = {
     personalItems: [
-        { dept: 'Immedia', items: ['Alba', 'Andrés', 'Leidy'] },
+        { dept: 'Immedia', items: ['Alba', 'Andrés', 'Leidy', 'Yue'] },
         { dept: 'Imcontent', items: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'] },
         { dept: 'Immoralia', items: ['David', 'Manel'] },
         { dept: 'Immoral', items: ['Daniel', 'Mery', 'Yure', 'Marco', 'Externos puntuales'] },
