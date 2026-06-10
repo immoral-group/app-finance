@@ -61,6 +61,21 @@ export default function Developers() {
     const [holdedSection, setHoldedSection] = useState<'invoices' | 'contacts' | 'treasury'>('invoices');
     const [activeIntegration, setActiveIntegration] = useState<string | null>(null);
 
+    // ClickUp state
+    const [clickupStatus, setClickupStatus] = useState<{ connected: boolean; error?: string; team_name?: string; team_id?: string; member_count?: number } | null>(null);
+    const [clickupLoading, setClickupLoading] = useState(false);
+    const loadClickup = useCallback(async () => {
+        setClickupLoading(true);
+        try {
+            const status = await adminApi.getClickUpStatus();
+            setClickupStatus(status);
+        } catch (e: any) {
+            setClickupStatus({ connected: false, error: e?.message || 'Error' });
+        } finally {
+            setClickupLoading(false);
+        }
+    }, []);
+
     // Invoice filters
     const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<'all' | 'pending' | 'paid' | 'partial' | 'overdue'>('all');
     const [invoiceMonthFilter, setInvoiceMonthFilter] = useState<number>(-1); // -1 = all
@@ -442,6 +457,40 @@ export default function Developers() {
                             </div>
                         </button>
 
+                        {/* ClickUp Card */}
+                        <button
+                            onClick={() => {
+                                setActiveIntegration(activeIntegration === 'clickup' ? null : 'clickup');
+                                if (!clickupStatus) loadClickup();
+                            }}
+                            className={cn(
+                                'bg-card border rounded-xl p-4 text-left transition-all hover:shadow-md',
+                                activeIntegration === 'clickup' && 'ring-2 ring-primary border-primary'
+                            )}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                                    CU
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="text-sm font-bold text-foreground">ClickUp</h3>
+                                        {clickupStatus && (
+                                            <span className={cn(
+                                                'px-1.5 py-0.5 rounded-full text-[9px] font-semibold',
+                                                clickupStatus.connected
+                                                    ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                                                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                                            )}>
+                                                {clickupStatus.connected ? '● Conectado' : '● Error'}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground mt-0.5">Time tracking · rentabilidad por cuenta</p>
+                                </div>
+                            </div>
+                        </button>
+
                         {/* Future integration placeholder */}
                         <div className="border border-dashed rounded-xl p-4 flex items-center gap-3 opacity-40">
                             <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center text-muted-foreground">
@@ -453,6 +502,52 @@ export default function Developers() {
                             </div>
                         </div>
                     </div>
+
+                    {/* ClickUp Detail Panel */}
+                    {activeIntegration === 'clickup' && (
+                        <div className="space-y-4 border-t pt-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                                    <div className="h-5 w-5 rounded bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-white font-bold text-[7px]">CU</div>
+                                    ClickUp
+                                </h3>
+                                <button
+                                    onClick={loadClickup}
+                                    disabled={clickupLoading}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground border rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-50"
+                                >
+                                    <RefreshCw size={12} className={clickupLoading ? 'animate-spin' : ''} />
+                                    {clickupLoading ? 'Cargando...' : 'Actualizar'}
+                                </button>
+                            </div>
+
+                            {clickupLoading && !clickupStatus ? (
+                                <div className="flex items-center justify-center h-24">
+                                    <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
+                                </div>
+                            ) : clickupStatus?.connected ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <div className="bg-card border border-border/60 rounded-xl p-3">
+                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Workspace</p>
+                                        <p className="text-sm font-bold text-foreground mt-1">{clickupStatus.team_name}</p>
+                                    </div>
+                                    <div className="bg-card border border-border/60 rounded-xl p-3">
+                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Team ID</p>
+                                        <p className="text-sm font-mono text-foreground mt-1">{clickupStatus.team_id}</p>
+                                    </div>
+                                    <div className="bg-card border border-border/60 rounded-xl p-3">
+                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Miembros</p>
+                                        <p className="text-sm font-bold text-foreground mt-1">{clickupStatus.member_count}</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-xl p-4">
+                                    <p className="text-sm font-medium text-red-700 dark:text-red-400">No conectado</p>
+                                    <p className="text-xs text-red-600/80 dark:text-red-400/70 mt-1">{clickupStatus?.error || 'Verifica CLICKUP_API_TOKEN en las variables de entorno.'}</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {/* Holded Detail Panel */}
                     {activeIntegration === 'holded' && (

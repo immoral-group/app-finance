@@ -498,6 +498,44 @@ export const adminApi = {
         fetchApi<{ success: boolean; row: IcexRow }>('/icex/rows', { method: 'POST', body: JSON.stringify(data) }),
     deleteIcexRow: (id: string) =>
         fetchApi<{ success: boolean }>(`/icex/rows/${id}`, { method: 'DELETE' }),
+
+    // ── Rentabilidad por Cuenta ────────────────────────────────────────────────
+    getProfitabilityAccounts: (year: number) =>
+        fetchApi<ProfitabilityResponse>(`/profitability/accounts/${year}`),
+    getProfitabilityAutoMapping: (year: number) =>
+        fetchApi<AutoMappingResponse>(`/profitability/auto-mapping/${year}`),
+    getProfitabilityUserMappings: () =>
+        fetchApi<{ mappings: UserMapping[] }>('/profitability/user-mappings'),
+    saveProfitabilityUserMappings: (mappings: Partial<UserMapping>[]) =>
+        fetchApi<{ success: boolean }>('/profitability/user-mappings', { method: 'PUT', body: JSON.stringify({ mappings }) }),
+    getProfitabilityAutoMatchClients: (year: number) =>
+        fetchApi<{
+            year: number;
+            folders: ClickUpFolderWithTime[];
+            targets: Array<{ id: string; name: string; space: string; total_hours: number; type: 'folder' | 'list'; sub: string }>;
+            client_matches: Array<{
+                client_id: string;
+                client_name: string;
+                configured: Array<{ id: string; name: string }>;
+                suggested: { id: string; name: string; total_hours: number; score: number } | null;
+            }>;
+        }>(`/profitability/auto-match-clients/${year}`),
+    getProfitabilityClientLists: () =>
+        fetchApi<{ client_lists: ClientList[] }>('/profitability/client-lists'),
+    saveProfitabilityClientLists: (client_lists: Partial<ClientList>[]) =>
+        fetchApi<{ success: boolean }>('/profitability/client-lists', { method: 'PUT', body: JSON.stringify({ client_lists }) }),
+    getClickUpSpaces: () =>
+        fetchApi<{ spaces: ClickUpSpace[] }>('/profitability/clickup/spaces'),
+    getClickUpLists: (spaceId: string) =>
+        fetchApi<{ lists: ClickUpList[] }>(`/profitability/clickup/lists/${spaceId}`),
+    getClickUpMembers: () =>
+        fetchApi<{ members: ClickUpMember[] }>('/profitability/clickup/members'),
+    getClickUpListsWithTime: (year: number) =>
+        fetchApi<{ year: number; lists: ClickUpListWithTime[]; folders: ClickUpFolderWithTime[]; spaces: ClickUpSpaceWithTime[]; total_entries: number }>(`/profitability/clickup/lists-with-time/${year}`),
+    getClickUpStatus: () =>
+        fetchApi<{ connected: boolean; error?: string; team_id?: string; team_name?: string; member_count?: number }>('/profitability/clickup/status'),
+    refreshClickUpCache: (year: number) =>
+        fetchApi<{ ok: boolean; message: string }>('/profitability/clickup/refresh-cache', { method: 'POST', body: JSON.stringify({ year }) }),
 };
 
 export interface IcexRow {
@@ -522,6 +560,117 @@ export interface NutfruitRow {
     jan: number; feb: number; mar: number; apr: number;
     may: number; jun: number; jul: number; aug: number;
     sep: number; oct: number; nov: number; dec: number;
+}
+
+export interface UserMapping {
+    id?: string;
+    clickup_user_id: string;
+    display_name: string;
+    email?: string;
+    cost_per_hour: number;
+    department?: string;
+}
+
+export interface ClientList {
+    id?: string;
+    client_id: string;
+    clickup_list_id: string;
+    clickup_list_name?: string;
+    clients?: { name: string };
+}
+
+export interface ClickUpSpace {
+    id: string;
+    name: string;
+}
+
+export interface ClickUpList {
+    id: string;
+    name: string;
+    folder: string | null;
+}
+
+export interface ClickUpListWithTime {
+    id: string;
+    name: string;
+    space: string;
+    folder: string | null;
+    total_hours: number;
+    entry_count: number;
+}
+
+export interface ClickUpFolderWithTime {
+    id: string;
+    name: string;
+    space: string;
+    total_hours: number;
+    entry_count: number;
+    list_count: number;
+}
+
+export interface ClickUpSpaceWithTime {
+    id: string;
+    name: string;
+    total_hours: number;
+    entry_count: number;
+}
+
+export interface ClickUpMember {
+    id: string;
+    username: string;
+    email: string;
+}
+
+export interface MonthlyProfitability {
+    month: number;
+    hours: number;
+    labor_cost: number;
+    revenue: number;
+    gross_profit: number;
+    margin_pct: number | null;
+    members: { name: string; hours: number; labor_cost: number; cost_per_hour: number; source: string }[];
+}
+
+export interface AccountProfitability {
+    client_id: string;
+    client_name: string;
+    total_revenue: number;
+    total_labor_cost: number;
+    total_hours: number;
+    total_profit: number;
+    total_margin_pct: number | null;
+    monthly: MonthlyProfitability[];
+}
+
+export interface ProfitabilityResponse {
+    year: number;
+    accounts: AccountProfitability[];
+    clickup_error?: string | null;
+    debug?: {
+        total_entries_fetched: number;
+        configured_lists: number;
+        entries_per_list: Record<string, number>;
+        sample_entry: { user: string; list_id: string; list_name: string; duration_h: number } | null;
+    };
+}
+
+export interface AutoMappingEntry {
+    clickup_user_id: string;
+    clickup_username: string;
+    email: string;
+    matched_employee: string | null;
+    department: string | null;
+    cost_per_hour: number;
+    yearly_cost: number | null;
+    months_active: number | null;
+    formula: string | null;
+    source: 'matched' | 'override' | 'unmatched';
+}
+
+export interface AutoMappingResponse {
+    year: number;
+    mappings: AutoMappingEntry[];
+    dept_averages: Record<string, number>;
 }
 
 export interface BudgetRequest {

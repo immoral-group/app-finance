@@ -24,6 +24,7 @@ import { ClientsPage } from '@/features/clients/ClientsPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import UserManagement from '@/features/users/UserManagement';
 import Developers from '@/features/developers/Developers';
+import Profitability from '@/features/profitability/Profitability';
 
 // Placeholder components
 // Placeholder components removed
@@ -72,6 +73,7 @@ function App() {
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="users" element={<UserManagement />} />
                   <Route path="developers" element={<Developers />} />
+                  <Route path="profitability" element={<Profitability />} />
                 </Route>
               </Route>
 
