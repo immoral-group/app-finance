@@ -48,8 +48,8 @@ function TeamModal({ account, monthIdx, onClose }: {
                             <div key={mb.name} className="flex items-center justify-between py-1.5 text-xs">
                                 <span className="text-foreground font-medium">{mb.name}</span>
                                 <span className="text-muted-foreground tabular-nums text-right">
-                                    {mb.hours.toFixed(1)}h · {eur(mb.labor_cost)}
-                                    {mb.cost_per_hour > 0 && <span className="ml-1 opacity-50 text-[10px]">@{mb.cost_per_hour.toFixed(0)}€/h</span>}
+                                    {mb.hours.toFixed(2)}h · {eurDec(mb.labor_cost)}
+                                    {mb.cost_per_hour > 0 && <span className="ml-1 opacity-50 text-[10px]">@{mb.cost_per_hour.toFixed(2)}€/h</span>}
                                 </span>
                             </div>
                         ))}

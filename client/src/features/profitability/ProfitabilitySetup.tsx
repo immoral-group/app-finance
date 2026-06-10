@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
-import { ArrowLeft, Save, CheckCircle2, AlertCircle, Sparkles, Info, RefreshCw, ChevronDown } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, AlertCircle, Info, RefreshCw, ChevronDown, Sparkles, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -16,35 +16,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     );
 }
 
-// ── Auto-Mapping (read-only + override opcional) ──────────────────────────────
+// ── Auto-Mapping (solo lectura) ───────────────────────────────────────────────
 function AutoMappingSection({ year }: { year: number }) {
-    const qc = useQueryClient();
-    const [overrides, setOverrides] = useState<Record<string, number>>({});
-    const [editing, setEditing] = useState<string | null>(null);
-
     const { data, isLoading } = useQuery({
         queryKey: ['profitability-auto-mapping', year],
         queryFn: () => adminApi.getProfitabilityAutoMapping(year),
-    });
-
-    const saveOverride = useMutation({
-        mutationFn: (uid: string) => {
-            const entry = data!.mappings.find(m => m.clickup_user_id === uid)!;
-            return adminApi.saveProfitabilityUserMappings([{
-                clickup_user_id: uid,
-                display_name: entry.clickup_username,
-                email: entry.email,
-                cost_per_hour: overrides[uid],
-                department: entry.department || undefined,
-            }]);
-        },
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ['profitability-auto-mapping', year] });
-            qc.invalidateQueries({ queryKey: ['profitability-accounts', year] });
-            toast.success('Override guardado');
-            setEditing(null);
-        },
-        onError: () => toast.error('Error al guardar'),
     });
 
     if (isLoading) return <Section title="Coste por hora (auto)"><p className="text-xs text-muted-foreground text-center py-4">Calculando…</p></Section>;
@@ -81,60 +57,22 @@ function AutoMappingSection({ year }: { year: number }) {
                         </tr>
                     </thead>
                     <tbody>
-                        {mappings.map(m => {
-                            const isEditing = editing === m.clickup_user_id;
-                            return (
-                                <tr key={m.clickup_user_id} className="border-b border-border/30">
+                        {mappings.map(m => (
+                            <tr key={m.clickup_user_id} className="border-b border-border/30">
                                     <td className="py-2 pr-3 font-medium text-foreground text-xs">{m.clickup_username}</td>
                                     <td className="py-2 pr-3 text-muted-foreground text-xs">{m.matched_employee || '—'}</td>
                                     <td className="py-2 pr-3 text-muted-foreground text-xs">{m.department || '—'}</td>
                                     <td className="py-2 pr-3 text-right tabular-nums">
-                                        {m.formula && !isEditing && (
-                                            <div className="inline-flex items-center gap-1 mr-1 text-muted-foreground/70" title={m.formula}>
-                                                <Info size={10} />
-                                            </div>
-                                        )}
-                                        {isEditing ? (
-                                            <div className="flex items-center justify-end gap-1">
-                                                <input
-                                                    type="number"
-                                                    min={0}
-                                                    step={0.5}
-                                                    autoFocus
-                                                    defaultValue={m.cost_per_hour}
-                                                    onChange={e => setOverrides(p => ({ ...p, [m.clickup_user_id]: parseFloat(e.target.value) || 0 }))}
-                                                    onKeyDown={e => {
-                                                        if (e.key === 'Enter') saveOverride.mutate(m.clickup_user_id);
-                                                        if (e.key === 'Escape') setEditing(null);
-                                                    }}
-                                                    className="w-16 px-1.5 py-0.5 text-xs rounded border border-primary bg-background focus:outline-none text-right"
-                                                />
-                                                <button
-                                                    onClick={() => saveOverride.mutate(m.clickup_user_id)}
-                                                    className="p-1 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded"
-                                                >
-                                                    <Save size={11} />
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <button
-                                                onClick={() => { setEditing(m.clickup_user_id); setOverrides(p => ({ ...p, [m.clickup_user_id]: m.cost_per_hour })); }}
-                                                className="hover:text-primary transition-colors text-foreground font-medium"
-                                                title="Click para overridear"
-                                            >
-                                                {m.cost_per_hour > 0 ? `${m.cost_per_hour.toFixed(2)} €` : '—'}
-                                            </button>
-                                        )}
-                                    </td>
-                                    <td className="py-2 text-center">
+                                        <span className="inline-flex items-center gap-1 text-foreground font-medium text-xs">
+                                            {m.cost_per_hour > 0 ? `${m.cost_per_hour.toFixed(2)} €` : '—'}
+                                            {m.formula && (
+                                                <span className="text-muted-foreground/60" title={m.formula}><Info size={10} /></span>
+                                            )}
+                                        </span>
+                                                    <td className="py-2 text-center">
                                         {m.source === 'matched' && (
                                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[9px] font-medium">
                                                 <CheckCircle2 size={9} /> auto
-                                            </span>
-                                        )}
-                                        {m.source === 'override' && (
-                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-[9px] font-medium">
-                                                <Sparkles size={9} /> manual
                                             </span>
                                         )}
                                         {m.source === 'unmatched' && (
@@ -144,8 +82,7 @@ function AutoMappingSection({ year }: { year: number }) {
                                         )}
                                     </td>
                                 </tr>
-                            );
-                        })}
+                        ))}
                     </tbody>
                 </table>
             </div>
