@@ -97,11 +97,12 @@ function Row({ account, monthIdx, annual, onTeam }: {
             <td className="px-3 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
                 {hours > 0 ? (
                     <button
-                        className="hover:text-primary transition-colors tabular-nums"
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-primary/10 hover:text-primary text-foreground underline decoration-dotted underline-offset-4 decoration-muted-foreground/50 transition-colors tabular-nums"
                         onClick={() => onTeam(account, monthIdx)}
-                        title="Ver equipo"
+                        title="Ver detalle del equipo"
                     >
                         {hours.toFixed(1)}h
+                        <Users size={11} className="opacity-60" />
                     </button>
                 ) : <span className="text-muted-foreground/40">—</span>}
             </td>
@@ -259,9 +260,9 @@ export default function Profitability() {
             {/* Table */}
             {(isLoading || accounts.length > 0) && (
                 <div className="bg-card border border-border/60 rounded-xl overflow-hidden">
-                    <div className="overflow-x-auto">
+                    <div className="overflow-auto max-h-[calc(100vh-220px)]">
                         <table className="w-full min-w-[780px]">
-                            <thead className="border-b border-border/50 bg-muted/40">
+                            <thead className="sticky top-0 z-10 border-b border-border/50 bg-muted/80 backdrop-blur">
                                 <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
                                     <th className="px-4 py-3 text-left font-semibold">Cliente</th>
                                     <th className="px-3 py-3 text-right font-semibold">Fee mensual</th>
