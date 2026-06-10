@@ -820,9 +820,7 @@ router.get('/accounts/:year', async (req, res) => {
             }
         }
 
-        // 7. Billing por cliente × mes
-        //    Base: fee_paid de monthly_billing (lo que muestra el Billing Matrix).
-        //    Suma adicional: billing_details (servicios extra que no estén ya en fee_paid).
+        // 7. Billing por cliente × mes — usar fee_paid de monthly_billing
         const billingByClientMonth = {};
         for (const mb of (mbRows || [])) {
             const cid = mb.client_id;
@@ -830,15 +828,6 @@ router.get('/accounts/:year', async (req, res) => {
             const m = (mb.fiscal_month || 1) - 1;
             if (!billingByClientMonth[cid]) billingByClientMonth[cid] = Array(12).fill(0);
             billingByClientMonth[cid][m] += Number(mb.fee_paid || 0);
-        }
-        for (const d of billingDetails) {
-            const info = mbIdToInfo[d.monthly_billing_id];
-            if (!info) continue;
-            const cid = info.client_id;
-            if (!cid) continue;
-            const m = (info.fiscal_month || 1) - 1;
-            if (!billingByClientMonth[cid]) billingByClientMonth[cid] = Array(12).fill(0);
-            billingByClientMonth[cid][m] += Number(d.amount || 0);
         }
 
         // 8a. Añadir clientes configurados que tienen billing pero 0 horas ClickUp
