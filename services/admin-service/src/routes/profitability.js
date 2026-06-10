@@ -403,15 +403,8 @@ router.get('/auto-mapping/:year', async (req, res) => {
             let months_active = null;
             let formula = null;
 
-            if (override !== undefined && override > 0) {
-                cost_per_hour = override;
-                source = 'override';
-                formula = `Override manual: ${override.toFixed(2)} €/h`;
-                if (match) {
-                    matched_employee = match.canonical;
-                    department = match.dept;
-                }
-            } else if (match && match.cost_per_hour > 0) {
+            // Siempre usar el cálculo automático en el display (ignoramos overrides)
+            if (match && match.cost_per_hour > 0) {
                 cost_per_hour = match.cost_per_hour;
                 source = 'matched';
                 matched_employee = match.canonical;
@@ -769,18 +762,12 @@ router.get('/accounts/:year', async (req, res) => {
         const overrideByUid = {};
         manualOverrides.forEach(o => { overrideByUid[String(o.clickup_user_id)] = Number(o.cost_per_hour || 0); });
 
-        // Helper: resolver coste/hora de un ClickUp user
+        // Helper: resolver coste/hora de un ClickUp user (siempre automático)
         const resolveCost = (uid, username) => {
-            // 1) Override manual
-            if (overrideByUid[uid] !== undefined && overrideByUid[uid] > 0) {
-                return { cost: overrideByUid[uid], source: 'override' };
-            }
-            // 2) Match por nombre con empleado Finance
             const match = matchClickUpUser(username, personByName);
             if (match && match.cost_per_hour > 0) {
                 return { cost: match.cost_per_hour, source: 'matched', dept: match.dept };
             }
-            // 3) Sin match → 0
             return { cost: 0, source: 'unmatched' };
         };
 
