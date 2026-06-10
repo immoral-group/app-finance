@@ -701,7 +701,7 @@ router.get('/accounts/:year', async (req, res) => {
         //    También sumamos billing_details (servicios extra) para no perder importes.
         const { data: mbRows } = await supabase
             .from('monthly_billing')
-            .select('id, client_id, fiscal_month, fee_paid')
+            .select('id, client_id, fiscal_month, fee_paid, grand_total')
             .eq('fiscal_year', year);
 
         const mbIds = (mbRows || []).map(r => r.id);
@@ -711,6 +711,7 @@ router.get('/accounts/:year', async (req, res) => {
                 client_id: r.client_id,
                 fiscal_month: r.fiscal_month,
                 fee_paid: Number(r.fee_paid || 0),
+                grand_total: Number(r.grand_total || 0),
             };
         });
 
@@ -721,6 +722,13 @@ router.get('/accounts/:year', async (req, res) => {
                 .select('monthly_billing_id, amount')
                 .in('monthly_billing_id', mbIds);
             billingDetails = details || [];
+        }
+
+        // Suma de details por monthly_billing
+        const detailsSumByMb = {};
+        for (const d of billingDetails) {
+            const mid = d.monthly_billing_id;
+            detailsSumByMb[mid] = (detailsSumByMb[mid] || 0) + Number(d.amount || 0);
         }
 
         // 4. Time entries: workspace-wide, paginado por mes. Aislamos errores
@@ -820,14 +828,24 @@ router.get('/accounts/:year', async (req, res) => {
             }
         }
 
-        // 7. Billing por cliente × mes — usar fee_paid de monthly_billing
+        // 7. Billing por cliente × mes
+        //    El "Fee Mensual" mostrado en Billing Matrix puede estar en:
+        //      - monthly_billing.grand_total (total final del cliente, si está calculado)
+        //      - monthly_billing.fee_paid (fee directo del cliente)
+        //      - billing_details (servicios desglosados)
+        //    Tomamos el máximo entre grand_total, fee_paid y sum(details) para cubrir
+        //    todos los casos sin doble-contar.
         const billingByClientMonth = {};
         for (const mb of (mbRows || [])) {
             const cid = mb.client_id;
             if (!cid) continue;
             const m = (mb.fiscal_month || 1) - 1;
+            const grand = Number(mb.grand_total || 0);
+            const fee = Number(mb.fee_paid || 0);
+            const detSum = detailsSumByMb[mb.id] || 0;
+            const amount = Math.max(grand, fee, detSum);
             if (!billingByClientMonth[cid]) billingByClientMonth[cid] = Array(12).fill(0);
-            billingByClientMonth[cid][m] += Number(mb.fee_paid || 0);
+            billingByClientMonth[cid][m] += amount;
         }
 
         // 8a. Añadir clientes configurados que tienen billing pero 0 horas ClickUp
