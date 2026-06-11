@@ -43,10 +43,34 @@ async function sendEmail({ to, subject, html }) {
     }
 }
 
+const ADMIN_NOTIFY_EMAIL = process.env.FINANCE_EMAIL || 'administracion@immoral.es';
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function formatEuros(cents) {
     return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(cents / 100);
+}
+
+function notifyLinkCreated(link) {
+    const amount = formatEuros(link.amount_cents);
+    const mode = link.mode === 'from_invoice' ? `Factura ${link.holded_doc_number || link.holded_invoice_id}` : 'Manual';
+    const html = `
+<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;">
+  <h2 style="margin:0 0 16px;color:#111827;">Nuevo link de pago generado</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;color:#374151;">
+    <tr><td style="padding:8px 0;font-weight:600;width:140px;">Concepto</td><td>${link.concept}</td></tr>
+    <tr><td style="padding:8px 0;font-weight:600;">Importe</td><td><strong style="color:#0ea5e9;">${amount}</strong></td></tr>
+    <tr><td style="padding:8px 0;font-weight:600;">Modo</td><td>${mode}</td></tr>
+    <tr><td style="padding:8px 0;font-weight:600;">Creado por</td><td>${link.created_by_email || '—'}</td></tr>
+    <tr><td style="padding:8px 0;font-weight:600;">Link</td><td><a href="${link.stripe_payment_url}" style="color:#6366f1;">${link.stripe_payment_url}</a></td></tr>
+  </table>
+  <p style="color:#9ca3af;font-size:12px;margin-top:24px;">Este link expira en 24 horas · Immoral Finance</p>
+</div>`;
+    return sendEmail({
+        to: ADMIN_NOTIFY_EMAIL,
+        subject: `[Link de pago] ${link.concept} — ${amount}`,
+        html,
+    }).catch(err => console.error('[PAYMENT-LINKS] notify-created error:', err));
 }
 
 function defaultEmailBody(link) {
@@ -135,6 +159,7 @@ router.post('/from-invoice', async (req, res) => {
 
         if (error) throw error;
 
+        notifyLinkCreated(data);
         res.json({ success: true, link: data });
     } catch (err) {
         console.error('[PAYMENT-LINKS] from-invoice error:', err);
@@ -203,6 +228,7 @@ router.post('/manual', async (req, res) => {
 
         if (error) throw error;
 
+        notifyLinkCreated(data);
         res.json({ success: true, link: data });
     } catch (err) {
         console.error('[PAYMENT-LINKS] manual error:', err);
