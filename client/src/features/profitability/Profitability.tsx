@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, AccountProfitability } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
 
@@ -72,15 +72,15 @@ const COLUMN_GUIDE = [
     {
         emoji: '💶',
         name: 'Fee mensual',
-        calc: 'Suma de facturas emitidas al cliente en el período',
-        source: 'Holded — facturas de ventas sincronizadas mensualmente',
-        detail: 'Es la facturación real cobrada (o emitida) al cliente. Si aparece ⚠ sin importe significa que hay horas registradas para ese cliente pero no se encontró facturación en Holded ese mes.',
+        calc: 'Importe registrado en la Billing Matrix de la app para ese cliente y mes',
+        source: 'Tabla monthly_billing — introducido manualmente en el módulo de Facturación de Immoral Finance',
+        detail: 'Es el fee mensual acordado con el cliente, tal como está registrado en la Billing Matrix de la propia plataforma. No se extrae automáticamente de Holded. Si aparece ⚠ sin importe significa que hay horas registradas en ClickUp para ese cliente pero no hay fee registrado en la Billing Matrix ese mes.',
     },
     {
         emoji: '📐',
         name: 'Fee/hora',
         calc: 'Fee mensual ÷ Horas totales del equipo',
-        source: 'Calculado en tiempo real a partir de Holded + ClickUp',
+        source: 'Calculado en tiempo real a partir de Billing Matrix + ClickUp',
         detail: 'Indica cuánto ingresa la agencia por cada hora trabajada para ese cliente. Un valor alto significa que cada hora del equipo genera más ingresos. Si no hay horas, se muestra —.',
     },
     {
@@ -119,6 +119,38 @@ const COLUMN_GUIDE = [
         detail: 'El margen de beneficio en porcentaje. El semáforo de colores interpreta la salud financiera: 🟢 Verde ≥ 60% (rentable), 🟡 Ámbar 40–59% (atención), 🔴 Rojo < 40% (problema). Solo se calcula si hay tanto facturación como horas registradas.',
     },
 ];
+
+// ── Inline column header tooltip ──────────────────────────────────────────────
+function ColTip({ name }: { name: string }) {
+    const [open, setOpen] = useState(false);
+    const col = COLUMN_GUIDE.find(c => c.name === name);
+    if (!col) return null;
+    return (
+        <span className="relative inline-flex items-center align-middle ml-1">
+            <button
+                onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
+                className="text-muted-foreground/35 hover:text-indigo-500 transition-colors focus:outline-none"
+                tabIndex={-1}
+            >
+                <Info size={10} />
+            </button>
+            {open && (
+                <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+                    <div
+                        className="absolute top-full right-0 mt-2 z-[61] w-64 bg-popover border border-border/60 rounded-xl shadow-2xl p-3 text-left normal-case tracking-normal space-y-2"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <p className="text-xs font-semibold text-foreground">{col.emoji} {col.name}</p>
+                        <p className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-md px-2 py-1 leading-relaxed">{col.calc}</p>
+                        <p className="text-[10px] text-muted-foreground leading-relaxed border-l-2 border-indigo-400/40 pl-2">{col.detail}</p>
+                        <p className="text-[9px] text-muted-foreground/50 leading-relaxed">Fuente: {col.source}</p>
+                    </div>
+                </>
+            )}
+        </span>
+    );
+}
 
 function ColumnGuide({ onClose }: { onClose: () => void }) {
     return (
@@ -436,13 +468,13 @@ export default function Profitability() {
                             <thead className="sticky top-0 z-10 border-b border-border/50 bg-muted/80 backdrop-blur">
                                 <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
                                     <th className="px-4 py-3 text-left font-semibold">Cliente</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Fee mensual</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Fee/hora</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Coste/hora</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Horas</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Coste Immoral</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Beneficio</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Rentabilidad</th>
+                                    <th className="px-3 py-3 text-right font-semibold">Fee mensual<ColTip name="Fee mensual" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Fee/hora<ColTip name="Fee/hora" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Coste/hora<ColTip name="Coste/hora" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Horas<ColTip name="Horas" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Coste Immoral<ColTip name="Coste Immoral" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Beneficio<ColTip name="Beneficio" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Rentabilidad<ColTip name="Rentabilidad" /></th>
                                 </tr>
                             </thead>
                             <tbody>
