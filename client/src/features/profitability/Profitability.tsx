@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, AccountProfitability } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
 
@@ -21,6 +21,103 @@ function eur(n: number) {
 }
 function eurDec(n: number) {
     return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+}
+
+const HINT_KEY = 'fi_profitability_hint_v1';
+
+// ── First-visit hint card ─────────────────────────────────────────────────────
+function ProfitabilityHint({ isSuperAdmin }: { isSuperAdmin: boolean }) {
+    const [visible, setVisible] = useState(false);
+    const [leaving, setLeaving] = useState(false);
+
+    useEffect(() => {
+        if (localStorage.getItem(HINT_KEY)) return;
+        const t = setTimeout(() => setVisible(true), 600);
+        return () => clearTimeout(t);
+    }, []);
+
+    const dismiss = () => {
+        setLeaving(true);
+        setTimeout(() => {
+            localStorage.setItem(HINT_KEY, '1');
+            setVisible(false);
+        }, 250);
+    };
+
+    if (!visible) return null;
+
+    return (
+        <div
+            className={cn(
+                'fixed bottom-6 right-4 sm:right-6 z-50 w-[calc(100vw-2rem)] sm:w-80 transition-all duration-300',
+                leaving ? 'opacity-0 translate-y-3' : 'opacity-100 translate-y-0'
+            )}
+        >
+            <div className="rounded-2xl overflow-hidden shadow-2xl ring-1 ring-black/10 dark:ring-white/10">
+                {/* Gradient header */}
+                <div
+                    className="relative px-5 pt-5 pb-6 flex items-start gap-3"
+                    style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 60%, #0ea5e9 100%)' }}
+                >
+                    <div className="h-10 w-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center text-xl flex-shrink-0 shadow ring-1 ring-white/20">
+                        🗺️
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                            <Sparkles size={10} className="text-white/60" />
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-white/60">Consejo rápido</span>
+                        </div>
+                        <p className="text-sm font-bold text-white leading-snug">¿Primera vez en Rentabilidad?</p>
+                    </div>
+                    <button
+                        onClick={dismiss}
+                        className="h-6 w-6 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center flex-shrink-0 transition-colors"
+                    >
+                        <X size={12} className="text-white" />
+                    </button>
+                </div>
+
+                {/* Body */}
+                <div className="bg-card px-5 py-4 space-y-2.5">
+                    <div className="flex items-start gap-2.5">
+                        <span className="mt-0.5 h-5 w-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                            <HelpCircle size={11} className="text-indigo-600 dark:text-indigo-400" />
+                        </span>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                            Pulsa <span className="font-semibold text-foreground">Cómo leer esto</span> (arriba a la derecha) para entender qué significa cada columna y cómo se calcula.
+                        </p>
+                    </div>
+                    {isSuperAdmin && (
+                        <div className="flex items-start gap-2.5">
+                            <span className="mt-0.5 h-5 w-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                                <Settings size={11} className="text-indigo-600 dark:text-indigo-400" />
+                            </span>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                En <span className="font-semibold text-foreground">Configurar</span> asignas qué carpeta de ClickUp corresponde a cada cliente y ajustas el coste/hora del equipo.
+                            </p>
+                        </div>
+                    )}
+                    {!isSuperAdmin && (
+                        <div className="flex items-start gap-2.5">
+                            <span className="mt-0.5 h-5 w-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                                <Info size={11} className="text-indigo-600 dark:text-indigo-400" />
+                            </span>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                Los iconos <span className="font-semibold text-foreground">ⓘ</span> en cada columna también te explican el dato en detalle.
+                            </p>
+                        </div>
+                    )}
+                    <button
+                        onClick={dismiss}
+                        className="w-full mt-1 py-2 rounded-xl text-xs font-semibold text-white transition-all active:scale-95"
+                        style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}
+                    >
+                        Entendido
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 // ── Team detail modal ─────────────────────────────────────────────────────────
@@ -548,6 +645,7 @@ export default function Profitability() {
                 <TeamModal account={team.account} monthIdx={team.month} onClose={() => setTeam(null)} />
             )}
             {showGuide && <ColumnGuide onClose={() => setShowGuide(false)} />}
+            <ProfitabilityHint isSuperAdmin={isSuperAdmin()} />
         </div>
     );
 }
