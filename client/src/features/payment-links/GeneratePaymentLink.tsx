@@ -705,7 +705,7 @@ export default function GeneratePaymentLink() {
                     isDark ? 'bg-muted/30 text-muted-foreground' : 'bg-gray-50 text-gray-500'
                 )}>
                     <Ban size={13} className="mt-0.5 flex-shrink-0" />
-                    Los links generados expiran en 24 horas (límite de Stripe). Puedes cancelarlos antes desde el historial de Pagos.
+                    Los links generados expiran en 24 horas (límite de Stripe).
                 </div>
             )}
         </div>
