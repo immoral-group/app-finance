@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { AIChatWidget } from '@/components/shared/AIChatWidget';
+import { OnboardingTour } from '@/components/shared/OnboardingTour';
 import { useAuth } from '@/context/AuthContext';
 
 export function Layout() {
@@ -27,6 +28,7 @@ export function Layout() {
                 </main>
             </div>
             {/* ChatHub flotante — disponible en toda la app excepto en el espacio imsales */}
+            <OnboardingTour />
             {profile && profile.role !== 'partner' && !location.pathname.includes('imsales') && (
                 <AIChatWidget
                     userRole={profile.role}
