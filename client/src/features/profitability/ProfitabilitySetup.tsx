@@ -22,7 +22,7 @@ function FormulaTip({ formula }: { formula: string }) {
                 <>
                     <div className="fixed inset-0 z-[60]" onClick={close} />
                     <div
-                        className="absolute bottom-full right-0 mb-2 z-[61] w-72 bg-popover border border-border/60 rounded-xl shadow-2xl p-3 text-left space-y-1"
+                        className="absolute top-full right-0 mt-2 z-[61] w-72 bg-popover border border-border/60 rounded-xl shadow-2xl p-3 text-left space-y-1"
                         onClick={e => e.stopPropagation()}
                     >
                         <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 mb-1">Fórmula</p>
