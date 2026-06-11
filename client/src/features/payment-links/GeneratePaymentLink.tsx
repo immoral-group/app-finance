@@ -15,14 +15,6 @@ import {
 type Mode = 'from_invoice' | 'manual';
 type Step = 'select_mode' | 'form' | 'result';
 
-const VERTICALS = [
-    { value: 'immedia', label: 'Immedia' },
-    { value: 'imcontent', label: 'Imcontent' },
-    { value: 'immoralia', label: 'Immoralia' },
-    { value: 'immoral', label: 'Immoral' },
-    { value: 'imsales', label: 'Imsales' },
-];
-
 // ── Utilities ──────────────────────────────────────────────────────────────────
 
 function formatCurrency(cents: number, currency = 'EUR') {
@@ -220,10 +212,13 @@ function FromInvoiceForm({
 }) {
     const [selected, setSelected] = useState<HoldedInvoice | null>(null);
     const [customerEmail, setCustomerEmail] = useState('');
-    const [vertical, setVertical] = useState('');
-    const [internalNote, setInternalNote] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    function handleSelect(inv: HoldedInvoice) {
+        setSelected(inv);
+        setCustomerEmail(inv.contactEmail || '');
+    }
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -239,8 +234,6 @@ function FromInvoiceForm({
                 currency: selected.currency || 'EUR',
                 customer_email: customerEmail || undefined,
                 client_name: selected.contactName,
-                vertical: vertical || undefined,
-                internal_note: internalNote || undefined,
             });
             onSuccess(res.link);
         } catch (e: unknown) {
@@ -263,7 +256,7 @@ function FromInvoiceForm({
             </div>
 
             {!selected ? (
-                <InvoiceSelector onSelect={setSelected} isDark={isDark} />
+                <InvoiceSelector onSelect={handleSelect} isDark={isDark} />
             ) : (
                 <>
                     <div className={cn(
@@ -294,7 +287,7 @@ function FromInvoiceForm({
 
                     <div>
                         <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                            Email del cliente <span className="font-normal normal-case">(opcional)</span>
+                            Email del cliente <span className="font-normal normal-case">(opcional, para prerellenar el checkout)</span>
                         </label>
                         <input
                             type="email"
@@ -302,29 +295,6 @@ function FromInvoiceForm({
                             onChange={e => setCustomerEmail(e.target.value)}
                             placeholder="cliente@empresa.com"
                             className={inputClass(isDark)}
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                            Vertical
-                        </label>
-                        <select value={vertical} onChange={e => setVertical(e.target.value)} className={inputClass(isDark)}>
-                            <option value="">Sin asignar</option>
-                            {VERTICALS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                            Nota interna <span className="font-normal normal-case">(solo visible aquí)</span>
-                        </label>
-                        <textarea
-                            value={internalNote}
-                            onChange={e => setInternalNote(e.target.value)}
-                            rows={2}
-                            placeholder="Contexto interno, observaciones..."
-                            className={cn(inputClass(isDark), 'resize-none')}
                         />
                     </div>
 
@@ -360,11 +330,6 @@ function ManualForm({
 }) {
     const [concept, setConcept] = useState('');
     const [amountStr, setAmountStr] = useState('');
-    const [vertical, setVertical] = useState('');
-    const [clientName, setClientName] = useState('');
-    const [clientTaxId, setClientTaxId] = useState('');
-    const [customerEmail, setCustomerEmail] = useState('');
-    const [internalNote, setInternalNote] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -379,11 +344,6 @@ function ManualForm({
             const res = await paymentLinksApi.createManual({
                 concept: concept.trim(),
                 amount_cents: Math.round(amount * 100),
-                vertical: vertical || undefined,
-                client_name: clientName || undefined,
-                client_tax_id: clientTaxId || undefined,
-                customer_email: customerEmail || undefined,
-                internal_note: internalNote || undefined,
             });
             onSuccess(res.link);
         } catch (e: unknown) {
@@ -401,7 +361,7 @@ function ManualForm({
                 </button>
                 <div>
                     <h2 className="font-bold text-base">Pago manual</h2>
-                    <p className="text-xs text-muted-foreground">Rellena los datos del cobro</p>
+                    <p className="text-xs text-muted-foreground">Concepto e importe, y listo</p>
                 </div>
             </div>
 
@@ -435,68 +395,6 @@ function ManualForm({
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">€</span>
                 </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                        Cliente / Razón social
-                    </label>
-                    <input
-                        value={clientName}
-                        onChange={e => setClientName(e.target.value)}
-                        placeholder="Empresa S.L."
-                        className={inputClass(isDark)}
-                    />
-                </div>
-                <div>
-                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                        NIF / CIF
-                    </label>
-                    <input
-                        value={clientTaxId}
-                        onChange={e => setClientTaxId(e.target.value)}
-                        placeholder="B12345678"
-                        className={inputClass(isDark)}
-                    />
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                        Vertical
-                    </label>
-                    <select value={vertical} onChange={e => setVertical(e.target.value)} className={inputClass(isDark)}>
-                        <option value="">Sin asignar</option>
-                        {VERTICALS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
-                    </select>
-                </div>
-                <div>
-                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                        Email del cliente
-                    </label>
-                    <input
-                        type="email"
-                        value={customerEmail}
-                        onChange={e => setCustomerEmail(e.target.value)}
-                        placeholder="cliente@empresa.com"
-                        className={inputClass(isDark)}
-                    />
-                </div>
-            </div>
-
-            <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                    Nota interna
-                </label>
-                <textarea
-                    value={internalNote}
-                    onChange={e => setInternalNote(e.target.value)}
-                    rows={2}
-                    placeholder="Contexto interno, a qué proyecto va vinculado..."
-                    className={cn(inputClass(isDark), 'resize-none')}
-                />
             </div>
 
             {error && (
@@ -614,7 +512,7 @@ function ResultScreen({
                         <p className="text-muted-foreground mt-0.5">Estado</p>
                     </div>
                     <div className={cn('rounded-xl p-3', isDark ? 'bg-muted/40' : 'bg-gray-50')}>
-                        <p className="font-bold text-base text-foreground">7 días</p>
+                        <p className="font-bold text-base text-foreground">24 horas</p>
                         <p className="text-muted-foreground mt-0.5">Expira en</p>
                     </div>
                 </div>
@@ -807,7 +705,7 @@ export default function GeneratePaymentLink() {
                     isDark ? 'bg-muted/30 text-muted-foreground' : 'bg-gray-50 text-gray-500'
                 )}>
                     <Ban size={13} className="mt-0.5 flex-shrink-0" />
-                    Los links generados expiran en 7 días. Puedes cancelarlos antes desde el historial de Pagos.
+                    Los links generados expiran en 24 horas (límite de Stripe). Puedes cancelarlos antes desde el historial de Pagos.
                 </div>
             )}
         </div>

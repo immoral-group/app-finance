@@ -46,7 +46,7 @@ export async function createCheckoutSession({
         customer_email: customerEmail || undefined,
         expires_at: expiresAt,
         success_url: `${APP_URL}/payments?payment=success`,
-        cancel_url: `${APP_URL}/payments?payment=cancelled`,
+        cancel_url: `https://immoral.es`,
         locale: 'es',
         payment_intent_data: {
             description,

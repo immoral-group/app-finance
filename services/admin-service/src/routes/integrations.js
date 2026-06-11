@@ -111,6 +111,7 @@ router.get('/holded/invoices/search', async (req, res) => {
             id: inv.id,
             docNumber: inv.docNumber || inv.num || '',
             contactName: inv.contactName || '',
+            contactEmail: inv.contactEmail || inv.email || '',
             total: inv.total || 0,
             subtotal: inv.subtotal || 0,
             date: inv.date || null,

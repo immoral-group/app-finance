@@ -68,7 +68,7 @@ function defaultEmailBody(link) {
     </a>
   </div>
   <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-top: 24px;">
-    Este link expira en 7 días · Immoral Growth Group
+    Este link expira en 24 horas · Immoral Growth Group
   </p>
 </div>`;
 }

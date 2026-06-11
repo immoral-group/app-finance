@@ -35,6 +35,7 @@ export interface HoldedInvoice {
     id: string;
     docNumber: string;
     contactName: string;
+    contactEmail: string;
     total: number;
     subtotal: number;
     date: number | null;
