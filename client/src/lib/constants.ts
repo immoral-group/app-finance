@@ -89,6 +89,7 @@ export const NAV_ITEMS: NavItem[] = [
         children: [
             { label: 'Pagos', path: '/payments' },
             { label: 'Generar link de pago', path: '/payments/generate-link', requiredPermission: 'payment_links' },
+            { label: 'Historial de links', path: '/payments/links-history', requiredPermission: 'payment_links' },
         ],
     },
     { label: 'Commissions', path: '/commissions', icon: 'Handshake', requiredPermission: 'commissions' },
