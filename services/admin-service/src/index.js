@@ -32,6 +32,8 @@ import budgetRequestsRoutes from './routes/budget-requests.js';
 import nutfruitRoutes from './routes/nutfruit.js';
 import icexRoutes from './routes/icex.js';
 import profitabilityRoutes from './routes/profitability.js';
+import paymentLinksRoutes from './routes/payment-links.js';
+import webhooksRoutes from './routes/webhooks.js';
 
 dotenv.config();
 
@@ -39,6 +41,10 @@ const app = express();
 const port = process.env.PORT || 3010;
 
 app.use(cors());
+
+// Stripe webhook requires raw body — must be mounted BEFORE express.json()
+app.use('/webhooks', express.raw({ type: 'application/json' }), webhooksRoutes);
+
 app.use(express.json());
 
 // Routes
@@ -74,6 +80,7 @@ app.use('/budget-requests', budgetRequestsRoutes);
 app.use('/nutfruit', nutfruitRoutes);
 app.use('/icex', icexRoutes);
 app.use('/profitability', profitabilityRoutes);
+app.use('/payment-links', paymentLinksRoutes);
 
 
 // Health Check

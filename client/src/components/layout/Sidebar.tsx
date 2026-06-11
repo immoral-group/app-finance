@@ -296,11 +296,15 @@ export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () =>
                     if (hasChildren) {
                         let filteredChildren = item.children!;
                         if (isDeptHead() && profile?.department_code) {
-                            filteredChildren = item.children!.filter(c => {
+                            filteredChildren = filteredChildren.filter(c => {
                                 if (!c.deptCode) return true;
                                 return c.deptCode === profile.department_code;
                             });
                         }
+                        filteredChildren = filteredChildren.filter(c => {
+                            if (!c.requiredPermission) return true;
+                            return hasPermission(c.requiredPermission);
+                        });
                         if (filteredChildren.length === 0) return null;
 
                         const parentHighlight = item.requiredPermission ? moduleHighlights.get(item.requiredPermission) : undefined;

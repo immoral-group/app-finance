@@ -54,7 +54,7 @@ export type NavItem = {
     icon?: string;
     requiredPermission?: string;  // module key from user_permissions
     superadminOnly?: boolean;
-    children?: { label: string; path: string; deptCode?: string }[];
+    children?: { label: string; path: string; deptCode?: string; requiredPermission?: string }[];
 };
 
 export const ALL_MODULES = [
@@ -63,6 +63,7 @@ export const ALL_MODULES = [
     { key: 'media_investment', label: 'Media Investment' },
     { key: 'payrolls', label: 'Payrolls' },
     { key: 'payments', label: 'Payments' },
+    { key: 'payment_links', label: 'Generar link de pago' },
     { key: 'commissions', label: 'Commissions' },
     { key: 'pl_matrix', label: 'P&L Matrix' },
     { key: 'departamentos', label: 'Departamentos' },
@@ -80,7 +81,16 @@ export const NAV_ITEMS: NavItem[] = [
     { label: 'Billing Matrix', path: '/billing', icon: 'Receipt', requiredPermission: 'billing' },
     { label: 'Media Investment', path: '/media-investment', icon: 'BarChart3', requiredPermission: 'media_investment' },
     { label: 'Payrolls', path: '/payroll', icon: 'Wallet', requiredPermission: 'payrolls' },
-    { label: 'Payments', path: '/payments', icon: 'CreditCard', requiredPermission: 'payments' },
+    {
+        label: 'Payments',
+        path: '/payments',
+        icon: 'CreditCard',
+        requiredPermission: 'payments',
+        children: [
+            { label: 'Pagos', path: '/payments' },
+            { label: 'Generar link de pago', path: '/payments/generate-link', requiredPermission: 'payment_links' },
+        ],
+    },
     { label: 'Commissions', path: '/commissions', icon: 'Handshake', requiredPermission: 'commissions' },
     { label: 'P&L Matrix', path: '/pl-matrix', icon: 'LineChart', requiredPermission: 'pl_matrix' },
     {

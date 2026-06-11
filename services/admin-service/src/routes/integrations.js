@@ -83,6 +83,50 @@ router.get('/holded/invoices', async (req, res) => {
 });
 
 /**
+ * GET /integrations/holded/invoices/search
+ * Search unpaid invoices for payment link selector
+ * Query params: ?q=search_term&status=pending|all
+ */
+router.get('/holded/invoices/search', async (req, res) => {
+    try {
+        const q = (req.query.q || '').toLowerCase().trim();
+        const status = req.query.status || 'pending';
+
+        const params = new URLSearchParams();
+        if (status === 'pending') params.append('paid', '0');
+
+        const qs = params.toString() ? `?${params.toString()}` : '';
+        const data = await holdedFetch(`/documents/invoice${qs}`);
+        const invoices = Array.isArray(data) ? data : [];
+
+        const filtered = q
+            ? invoices.filter(inv => {
+                const num = (inv.docNumber || inv.num || '').toLowerCase();
+                const contact = (inv.contactName || '').toLowerCase();
+                return num.includes(q) || contact.includes(q);
+            })
+            : invoices;
+
+        const result = filtered.slice(0, 30).map(inv => ({
+            id: inv.id,
+            docNumber: inv.docNumber || inv.num || '',
+            contactName: inv.contactName || '',
+            total: inv.total || 0,
+            subtotal: inv.subtotal || 0,
+            date: inv.date || null,
+            dueDate: inv.dueDate || null,
+            status: inv.status,
+            currency: inv.currency || 'EUR',
+        }));
+
+        res.json({ invoices: result });
+    } catch (err) {
+        console.error('Holded invoice search error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
  * GET /integrations/holded/invoices/:id
  * Get a single invoice by ID
  */

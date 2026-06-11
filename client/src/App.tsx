@@ -19,6 +19,7 @@ import DepartmentPL from '@/features/dashboard/DepartmentPL';
 import PLMatrix from '@/features/pl/PLMatrix';
 import FeeConfiguration from '@/features/fees/FeeConfiguration';
 import Payments from '@/features/payments/Payments';
+import GeneratePaymentLink from '@/features/payment-links/GeneratePaymentLink';
 import Dashboard from '@/features/dashboard/Dashboard';
 import { ClientsPage } from '@/features/clients/ClientsPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
@@ -68,6 +69,7 @@ function App() {
                   <Route path="pl-matrix" element={<PLMatrix />} />
                   <Route path="fees" element={<FeeConfiguration />} />
                   <Route path="payments" element={<Payments />} />
+                  <Route path="payments/generate-link" element={<GeneratePaymentLink />} />
                   <Route path="clients" element={<ClientsPage />} />
                   <Route path="client-billing" element={<ClientBillingReport />} />
                   <Route path="settings" element={<SettingsPage />} />
