@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, AccountProfitability } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
 
@@ -55,6 +55,146 @@ function TeamModal({ account, monthIdx, onClose }: {
                         ))}
                     </div>
                 )}
+            </div>
+        </div>
+    );
+}
+
+// ── Column guide modal ────────────────────────────────────────────────────────
+const COLUMN_GUIDE = [
+    {
+        emoji: '🏢',
+        name: 'Cliente',
+        calc: 'Nombre del cliente',
+        source: 'Base de datos interna (tabla de clientes)',
+        detail: 'Cada fila representa un cliente activo con algún dato configurado en el módulo de Rentabilidad. Solo aparecen clientes con facturación u horas registradas en el período seleccionado.',
+    },
+    {
+        emoji: '💶',
+        name: 'Fee mensual',
+        calc: 'Suma de facturas emitidas al cliente en el período',
+        source: 'Holded — facturas de ventas sincronizadas mensualmente',
+        detail: 'Es la facturación real cobrada (o emitida) al cliente. Si aparece ⚠ sin importe significa que hay horas registradas para ese cliente pero no se encontró facturación en Holded ese mes.',
+    },
+    {
+        emoji: '📐',
+        name: 'Fee/hora',
+        calc: 'Fee mensual ÷ Horas totales del equipo',
+        source: 'Calculado en tiempo real a partir de Holded + ClickUp',
+        detail: 'Indica cuánto ingresa la agencia por cada hora trabajada para ese cliente. Un valor alto significa que cada hora del equipo genera más ingresos. Si no hay horas, se muestra —.',
+    },
+    {
+        emoji: '💸',
+        name: 'Coste/hora',
+        calc: 'Coste del equipo ÷ Horas totales del equipo',
+        source: 'Calculado desde los salarios de empleados configurados en Setup',
+        detail: 'Cuánto le cuesta a Immoral cada hora trabajada para ese cliente. Se deriva del salario bruto de cada empleado dividido entre 160 horas/mes. Si Fee/hora > Coste/hora, cada hora es rentable.',
+    },
+    {
+        emoji: '⏱️',
+        name: 'Horas',
+        calc: 'Suma de horas registradas por el equipo en ClickUp',
+        source: 'ClickUp — Time Tracking API, filtrado por listas configuradas en Setup',
+        detail: 'Horas reales trabajadas para ese cliente en el período. Puedes hacer clic para ver el desglose por persona. Si aparece ⚠ sin horas significa que hay facturación pero nadie registró tiempo en ClickUp ese mes.',
+    },
+    {
+        emoji: '👥',
+        name: 'Coste Immoral',
+        calc: 'Σ (horas_persona × coste_hora_persona) para cada miembro del equipo',
+        source: 'ClickUp (horas) × Salarios configurados en Setup (coste/hora)',
+        detail: 'El coste real del equipo asignado a ese cliente. Cada persona tiene un coste/hora calculado como (salario_bruto / 160). Este número refleja el coste de nómina proporcional a las horas dedicadas.',
+    },
+    {
+        emoji: '📈',
+        name: 'Beneficio',
+        calc: 'Fee mensual − Coste Immoral',
+        source: 'Calculado en tiempo real',
+        detail: 'La ganancia bruta real de ese cliente: lo que facturamos menos lo que nos cuesta el equipo. No incluye otros costes indirectos (herramientas, oficina, etc.). Un número negativo indica que estamos perdiendo dinero en ese cliente.',
+    },
+    {
+        emoji: '🚦',
+        name: 'Rentabilidad',
+        calc: '(Beneficio ÷ Fee mensual) × 100',
+        source: 'Calculado en tiempo real',
+        detail: 'El margen de beneficio en porcentaje. El semáforo de colores interpreta la salud financiera: 🟢 Verde ≥ 60% (rentable), 🟡 Ámbar 40–59% (atención), 🔴 Rojo < 40% (problema). Solo se calcula si hay tanto facturación como horas registradas.',
+    },
+];
+
+function ColumnGuide({ onClose }: { onClose: () => void }) {
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={onClose}
+        >
+            <div
+                className="bg-card border border-border/60 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[85dvh] flex flex-col"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-border/40 flex-shrink-0">
+                    <div>
+                        <h2 className="text-sm font-bold text-foreground">Cómo leer esta tabla</h2>
+                        <p className="text-xs text-muted-foreground mt-0.5">Qué significa cada columna y cómo se calcula</p>
+                    </div>
+                    <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-muted/60 text-muted-foreground transition-colors">
+                        <X size={15} />
+                    </button>
+                </div>
+
+                {/* Scrollable content */}
+                <div className="overflow-y-auto flex-1 px-4 py-3 space-y-2">
+                    {COLUMN_GUIDE.map(col => (
+                        <div key={col.name} className="rounded-xl border border-border/40 bg-muted/20 overflow-hidden">
+                            <div className="flex items-center gap-2.5 px-4 py-2.5 bg-muted/40 border-b border-border/30">
+                                <span className="text-base">{col.emoji}</span>
+                                <span className="text-sm font-semibold text-foreground">{col.name}</span>
+                            </div>
+                            <div className="px-4 py-3 space-y-2.5">
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 mb-0.5">Cálculo</p>
+                                    <p className="text-xs font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-md px-2.5 py-1.5 leading-relaxed">{col.calc}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 mb-0.5">Fuente de datos</p>
+                                    <p className="text-xs text-muted-foreground leading-relaxed">{col.source}</p>
+                                </div>
+                                <p className="text-xs text-foreground/80 leading-relaxed border-l-2 border-indigo-400/50 pl-2.5">{col.detail}</p>
+                            </div>
+                        </div>
+                    ))}
+
+                    {/* Warnings legend */}
+                    <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 space-y-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">Indicadores de alerta ⚠</p>
+                        <p className="text-xs text-amber-700/80 dark:text-amber-400/80 leading-relaxed">
+                            <strong>⚠ en Fee mensual:</strong> el cliente tiene horas en ClickUp pero no hay facturación en Holded ese mes. Puede indicar que falta emitir factura.
+                        </p>
+                        <p className="text-xs text-amber-700/80 dark:text-amber-400/80 leading-relaxed">
+                            <strong>⚠ en Horas:</strong> hay facturación pero nadie registró tiempo en ClickUp. No es posible calcular rentabilidad.
+                        </p>
+                    </div>
+
+                    {/* Semaphore legend */}
+                    <div className="rounded-xl border border-border/40 bg-muted/20 px-4 py-3 space-y-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Semáforo de rentabilidad</p>
+                        <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                                <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                                <span className="text-xs text-foreground/80"><strong className="text-emerald-600 dark:text-emerald-400">≥ 60%</strong> — Cuenta rentable. El fee cubre costes con margen amplio.</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 flex-shrink-0" />
+                                <span className="text-xs text-foreground/80"><strong className="text-amber-600 dark:text-amber-400">40–59%</strong> — Atención. El margen es ajustado, revisar dedicación.</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0" />
+                                <span className="text-xs text-foreground/80"><strong className="text-red-600 dark:text-red-400">&lt; 40%</strong> — Problema. El coste del equipo consume la mayor parte del fee.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="h-2" />
+                </div>
             </div>
         </div>
     );
@@ -139,6 +279,7 @@ export default function Profitability() {
     const [year, setYear] = useState(now.getFullYear());
     const [month, setMonth] = useState(now.getMonth()); // 0-based, -1 = annual
     const [showSetup, setShowSetup] = useState(false);
+    const [showGuide, setShowGuide] = useState(false);
     const [team, setTeam] = useState<{ account: AccountProfitability; month: number } | null>(null);
     const { isSuperAdmin } = useAuth();
     const qc = useQueryClient();
@@ -216,13 +357,21 @@ export default function Profitability() {
                     >
                         <RefreshCw size={13} className={refreshCache.isPending ? 'animate-spin' : ''} />
                     </button>
+                    <button
+                        onClick={() => setShowGuide(true)}
+                        title="Cómo leer esta tabla"
+                        className="h-9 px-3 rounded-lg border border-border/60 bg-card hover:bg-muted/60 text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
+                    >
+                        <HelpCircle size={13} />
+                        <span className="hidden sm:inline">Cómo leer esto</span>
+                    </button>
                     {isSuperAdmin() && (
                         <button
                             onClick={() => setShowSetup(true)}
                             className="h-9 px-3 rounded-lg border border-border/60 bg-card hover:bg-muted/60 text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
                         >
                             <Settings size={13} />
-                            Configurar
+                            <span className="hidden sm:inline">Configurar</span>
                         </button>
                     )}
                 </div>
@@ -366,6 +515,7 @@ export default function Profitability() {
             {team && (
                 <TeamModal account={team.account} monthIdx={team.month} onClose={() => setTeam(null)} />
             )}
+            {showGuide && <ColumnGuide onClose={() => setShowGuide(false)} />}
         </div>
     );
 }
