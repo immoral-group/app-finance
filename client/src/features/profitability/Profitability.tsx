@@ -74,7 +74,7 @@ const COLUMN_GUIDE = [
         name: 'Fee mensual',
         calc: 'Importe registrado en la Billing Matrix de la app para ese cliente y mes',
         source: 'Tabla monthly_billing — introducido manualmente en el módulo de Facturación de Immoral Finance',
-        detail: 'Es el fee mensual acordado con el cliente, tal como está registrado en la Billing Matrix de la propia plataforma. No se extrae automáticamente de Holded. Si aparece ⚠ sin importe significa que hay horas registradas en ClickUp para ese cliente pero no hay fee registrado en la Billing Matrix ese mes.',
+        detail: 'Es el fee mensual acordado con el cliente, tal como está registrado en la Billing Matrix de la plataforma. Si aparece ⚠ sin importe significa que hay horas registradas en ClickUp para ese cliente pero no hay fee registrado en la Billing Matrix ese mes.',
     },
     {
         emoji: '📐',

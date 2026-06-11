@@ -1,9 +1,38 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { ArrowLeft, CheckCircle2, AlertCircle, Info, RefreshCw, ChevronDown, Sparkles, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+
+// ── Formula tooltip (replaces browser title= which doesn't show on macOS) ────
+function FormulaTip({ formula }: { formula: string }) {
+    const [open, setOpen] = useState(false);
+    const close = useCallback(() => setOpen(false), []);
+    return (
+        <span className="relative inline-flex items-center align-middle ml-0.5">
+            <button
+                onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
+                className="text-muted-foreground/40 hover:text-indigo-500 transition-colors focus:outline-none"
+                tabIndex={-1}
+            >
+                <Info size={10} />
+            </button>
+            {open && (
+                <>
+                    <div className="fixed inset-0 z-[60]" onClick={close} />
+                    <div
+                        className="absolute bottom-full right-0 mb-2 z-[61] w-72 bg-popover border border-border/60 rounded-xl shadow-2xl p-3 text-left space-y-1"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 mb-1">Fórmula</p>
+                        <p className="text-xs font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-md px-2.5 py-2 leading-relaxed break-all">{formula}</p>
+                    </div>
+                </>
+            )}
+        </span>
+    );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
     return (
@@ -37,7 +66,7 @@ function AutoMappingSection({ year }: { year: number }) {
                     <Sparkles size={12} className="text-primary" />
                     Cálculo automático
                 </div>
-                <p>El coste/hora se calcula desde los salarios reales registrados en <strong>Gastos Reales (actual_expenses)</strong> del año <strong>{year}</strong>, dividido entre (160h × meses con salario registrado). Los usuarios ClickUp se cruzan con los empleados de Finance por nombre (acentos ignorados). Pasa el ratón por el icono <Info size={10} className="inline mx-0.5" /> para ver la fórmula exacta de cada empleado.</p>
+                <p>El coste/hora se calcula desde los salarios reales registrados en <strong>Gastos Reales (actual_expenses)</strong> del año <strong>{year}</strong>, dividido entre (160h × meses con salario registrado). Los usuarios ClickUp se cruzan con los empleados de Finance por nombre (acentos ignorados). Pulsa el icono <Info size={10} className="inline mx-0.5" /> en la columna €/hora para ver la fórmula exacta de cada empleado.</p>
                 <div className="mt-2 flex gap-3 text-[10px]">
                     <span className="flex items-center gap-1"><CheckCircle2 size={10} className="text-emerald-500" /> {matched} auto-detectados</span>
                     {overridden > 0 && <span className="flex items-center gap-1"><Sparkles size={10} className="text-blue-500" /> {overridden} override</span>}
@@ -65,9 +94,7 @@ function AutoMappingSection({ year }: { year: number }) {
                                     <td className="py-2 pr-3 text-right tabular-nums">
                                         <span className="inline-flex items-center gap-1 text-foreground font-medium text-xs">
                                             {m.cost_per_hour > 0 ? `${m.cost_per_hour.toFixed(2)} €` : '—'}
-                                            {m.formula && (
-                                                <span className="text-muted-foreground/60" title={m.formula}><Info size={10} /></span>
-                                            )}
+                                            {m.formula && <FormulaTip formula={m.formula} />}
                                         </span>
                                     </td>
                                     <td className="py-2 text-center">
