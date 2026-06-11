@@ -23,6 +23,35 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.37-mobile-rendering',
+        date: '2026-06-11',
+        title: 'Renderizado Móvil Mejorado',
+        description: 'Revisión completa de la interfaz para iOS y Android. Los montos ya no se desbordan fuera de las tarjetas, los grids se apilan correctamente en pantallas pequeñas, el menú y el buscador del header se adaptan al espacio disponible, y todos los formularios y filtros funcionan bien en móvil.',
+        type: 'fix',
+        icon: 'Smartphone',
+        highlight: false,
+    },
+    {
+        id: 'v1.36-payment-links-history',
+        date: '2026-06-11',
+        title: 'Historial de Links de Pago',
+        description: 'Consulta todos los links generados con filtros por estado (Activo, Pagado, Expirado, Cancelado). Desde el historial puedes copiar el link, reenviar por email o cancelarlo antes de que expire.',
+        type: 'new_module',
+        moduleKey: 'payment_links',
+        icon: 'Link',
+        highlight: true,
+    },
+    {
+        id: 'v1.35-generate-payment-link',
+        date: '2026-06-11',
+        title: 'Nuevo Módulo: Links de Pago con Stripe',
+        description: 'Genera links de pago seguros directamente desde la plataforma. Crea un link desde una factura existente de Holded (con datos y email autocompletados) o de forma manual con concepto e importe. El cliente recibe un checkout de Stripe seguro en español. Los links tienen una duración de 24 horas y el cobro se reconcilia automáticamente en Holded.',
+        type: 'new_module',
+        moduleKey: 'payment_links',
+        icon: 'CreditCard',
+        highlight: true,
+    },
+    {
         id: 'v1.34-rentabilidad-por-cuenta',
         date: '2026-06-10',
         title: 'Nuevo Módulo: Rentabilidad por Cuenta',
