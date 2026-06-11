@@ -238,7 +238,7 @@ export function CommissionsDashboard() {
             </div>
 
             {/* Top Row KPIs */}
-            <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <Card className="shadow-sm">
                     <CardContent className="p-5 flex flex-col justify-between h-full">
                         <div className="flex justify-between items-start">

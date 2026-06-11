@@ -715,12 +715,12 @@ function DashboardContent() {
                 <>
                     {/* ── KPI Cards ──────────────────────────────────────── */}
                     {visibleWidgets.kpis && (
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
                             {/* Facturación */}
                             <div className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
                                 <div className="h-1 w-full bg-blue-500" />
-                                <div className="p-6 flex flex-col gap-4">
+                                <div className="p-4 sm:p-6 flex flex-col gap-4">
                                     <div className="flex items-center justify-between">
                                         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Facturación</p>
                                         <div className="h-8 w-8 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center">
@@ -728,7 +728,7 @@ function DashboardContent() {
                                         </div>
                                     </div>
                                     <div>
-                                        <p className="text-3xl font-bold tracking-tight tabular leading-none">{formatCurrency(plKpis.totalBilling)}</p>
+                                        <p className="text-2xl sm:text-3xl font-bold tracking-tight tabular leading-none break-all">{formatCurrency(plKpis.totalBilling)}</p>
                                     </div>
                                     <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
                                         <span className="text-xs text-muted-foreground">Ingresos brutos</span>
@@ -740,7 +740,7 @@ function DashboardContent() {
                             {/* Gastos */}
                             <div className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
                                 <div className="h-1 w-full bg-red-500" />
-                                <div className="p-6 flex flex-col gap-4">
+                                <div className="p-4 sm:p-6 flex flex-col gap-4">
                                     <div className="flex items-center justify-between">
                                         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Gastos</p>
                                         <div className="h-8 w-8 rounded-xl bg-red-50 dark:bg-red-950/30 flex items-center justify-center">
@@ -748,7 +748,7 @@ function DashboardContent() {
                                         </div>
                                     </div>
                                     <div>
-                                        <p className="text-3xl font-bold tracking-tight tabular leading-none">{formatCurrency(plKpis.totalExpenses)}</p>
+                                        <p className="text-2xl sm:text-3xl font-bold tracking-tight tabular leading-none break-all">{formatCurrency(plKpis.totalExpenses)}</p>
                                     </div>
                                     <div className="flex items-center justify-between border-t border-border pt-3 mt-auto">
                                         <span className="text-xs text-muted-foreground">Costes operativos</span>
@@ -760,7 +760,7 @@ function DashboardContent() {
                             {/* Resultado */}
                             <div className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
                                 <div className={`h-1 w-full ${plKpis.netMargin >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                                <div className="p-6 flex flex-col gap-4">
+                                <div className="p-4 sm:p-6 flex flex-col gap-4">
                                     <div className="flex items-center justify-between">
                                         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Resultado</p>
                                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.netMargin >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
@@ -768,7 +768,7 @@ function DashboardContent() {
                                         </div>
                                     </div>
                                     <div>
-                                        <p className={`text-3xl font-bold tracking-tight tabular leading-none ${plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        <p className={`text-2xl sm:text-3xl font-bold tracking-tight tabular leading-none break-all ${plKpis.netMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                             {plKpis.netMargin >= 0 ? '+' : ''}{formatCurrency(plKpis.netMargin)}
                                         </p>
                                     </div>
@@ -782,7 +782,7 @@ function DashboardContent() {
                             {/* Margen % */}
                             <div className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
                                 <div className={`h-1 w-full ${plKpis.marginPercentage >= 0 ? 'bg-violet-500' : 'bg-red-500'}`} />
-                                <div className="p-6 flex flex-col gap-4">
+                                <div className="p-4 sm:p-6 flex flex-col gap-4">
                                     <div className="flex items-center justify-between">
                                         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Margen</p>
                                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center ${plKpis.marginPercentage >= 0 ? 'bg-violet-50 dark:bg-violet-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
@@ -790,7 +790,7 @@ function DashboardContent() {
                                         </div>
                                     </div>
                                     <div>
-                                        <p className={`text-3xl font-bold tracking-tight tabular leading-none ${plKpis.marginPercentage >= 0 ? 'text-violet-600' : 'text-red-600'}`}>
+                                        <p className={`text-2xl sm:text-3xl font-bold tracking-tight tabular leading-none ${plKpis.marginPercentage >= 0 ? 'text-violet-600' : 'text-red-600'}`}>
                                             {plKpis.marginPercentage.toFixed(1)}%
                                         </p>
                                     </div>
@@ -858,7 +858,7 @@ function DashboardContent() {
 
                                         return (
                                             <div key={dept.key} className="card-executive bg-card rounded-2xl border border-border overflow-hidden">
-                                                <div className="p-6">
+                                                <div className="p-4 sm:p-6">
                                                     {/* Header */}
                                                     <div className="flex items-center justify-between mb-6">
                                                         <div className="flex items-center gap-2.5">
@@ -873,7 +873,7 @@ function DashboardContent() {
                                                     {/* Revenue — hero */}
                                                     <div className="mb-5">
                                                         <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2">Facturación</p>
-                                                        <p className="text-2xl font-bold tracking-tight tabular leading-none">{formatCurrency(dept.income)}</p>
+                                                        <p className="text-xl sm:text-2xl font-bold tracking-tight tabular leading-none break-all">{formatCurrency(dept.income)}</p>
                                                     </div>
 
                                                     {/* Margin bar */}
@@ -960,7 +960,7 @@ function DashboardContent() {
                                     <p className="text-xs text-muted-foreground mt-0.5">Facturación · Tesorería</p>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                                 {[
                                     { label: 'Pendientes', value: holdedSummary.invoices_pending?.total || 0, sub: `${holdedSummary.invoices_pending?.count || 0} sin vencer`, icon: FileText, iconBg: 'bg-amber-50 dark:bg-amber-950/30', iconColor: 'text-amber-500', click: () => openHoldedDetail('pending') },
                                     { label: 'Vencidas', value: holdedSummary.invoices_overdue?.total || 0, sub: `${holdedSummary.invoices_overdue?.count || 0} facturas`, icon: AlertCircle, iconBg: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'bg-red-50 dark:bg-red-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30', iconColor: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-500' : 'text-emerald-500', valueColor: (holdedSummary.invoices_overdue?.count || 0) > 0 ? 'text-red-600' : '', click: () => openHoldedDetail('overdue') },
@@ -978,7 +978,7 @@ function DashboardContent() {
                                                 <Icon size={14} />
                                             </div>
                                         </div>
-                                        <p className={`text-xl font-bold tabular leading-none ${valueColor || 'text-foreground'}`}>{formatCurrency(value)}</p>
+                                        <p className={`text-lg sm:text-xl font-bold tabular leading-none break-all ${valueColor || 'text-foreground'}`}>{formatCurrency(value)}</p>
                                         <p className="text-[11px] text-muted-foreground mt-2">{sub}</p>
                                     </div>
                                 ))}

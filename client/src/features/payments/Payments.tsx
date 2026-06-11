@@ -457,7 +457,7 @@ export default function Payments() {
                     {/* Toolbar */}
                     <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 p-4 bg-card border border-border rounded-2xl">
                         <div className="flex items-center gap-2 flex-wrap flex-1">
-                            <div className="relative w-56">
+                            <div className="relative w-full sm:w-56">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                 <Input placeholder="Buscar..." className="pl-9 h-9 rounded-xl" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                             </div>
@@ -479,11 +479,11 @@ export default function Payments() {
                             )}
 
                             {/* Date range filter */}
-                            <div className="flex items-center gap-2 bg-background border border-border rounded-xl px-3 h-9 focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+                            <div className="flex items-center gap-2 bg-background border border-border rounded-xl px-3 h-9 focus-within:ring-2 focus-within:ring-primary/20 transition-all w-full sm:w-auto">
                                 <CalendarRange className="w-4 h-4 text-primary shrink-0" />
-                                <input type="date" className="text-xs bg-transparent outline-none cursor-pointer w-[105px]" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
+                                <input type="date" className="text-xs bg-transparent outline-none cursor-pointer min-w-0 flex-1" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
                                 <span className="text-muted-foreground/40">–</span>
-                                <input type="date" className="text-xs bg-transparent outline-none cursor-pointer w-[105px]" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />
+                                <input type="date" className="text-xs bg-transparent outline-none cursor-pointer min-w-0 flex-1" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />
                                 {(filterDateFrom || filterDateTo) && (
                                     <button onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }} className="text-muted-foreground hover:text-destructive transition-colors" title="Limpiar fechas">
                                         <X size={13} />

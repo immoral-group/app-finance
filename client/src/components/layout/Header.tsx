@@ -47,7 +47,7 @@ export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
                         <Menu size={20} />
                     </button>
                 )}
-                <div className="w-40 sm:w-56 md:w-72">
+                <div className="w-28 sm:w-44 md:w-72">
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                         <input
@@ -86,7 +86,7 @@ export function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
 
                     {/* Dropdown */}
                     {menuOpen && (
-                        <div className={`absolute right-0 top-full mt-2 w-56 rounded-xl border border-border shadow-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150
+                        <div className={`absolute right-0 top-full mt-2 w-[min(90vw,14rem)] sm:w-56 rounded-xl border border-border shadow-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150
                         ${isDark ? 'bg-card' : 'bg-white'}`}>
 
                             {/* Info usuario */}
