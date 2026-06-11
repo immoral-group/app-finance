@@ -6,23 +6,27 @@ function getStripe() {
     if (!stripeClient) {
         const key = process.env.STRIPE_SECRET_KEY;
         if (!key) throw new Error('STRIPE_SECRET_KEY not configured');
-        stripeClient = new Stripe(key, { apiVersion: '2025-05-28.basil' });
+        stripeClient = new Stripe(key);
     }
     return stripeClient;
 }
 
-const APP_URL = process.env.APP_URL || 'https://imfinance.immoral.es';
+const APP_URL = 'https://imfinance.immoral.es';
+
+// Stripe Checkout Sessions max expiry is 24h. We cap at 23h to be safe.
+const MAX_EXPIRY_SECONDS = 23 * 60 * 60;
 
 export async function createCheckoutSession({
     amountCents,
     currency = 'eur',
     concept,
     customerEmail,
-    expiresInDays = 7,
+    expiresInDays = 1,
     metadata = {},
 }) {
     const stripe = getStripe();
-    const expiresAt = Math.floor(Date.now() / 1000) + expiresInDays * 24 * 60 * 60;
+    const requestedSeconds = expiresInDays * 24 * 60 * 60;
+    const expiresAt = Math.floor(Date.now() / 1000) + Math.min(requestedSeconds, MAX_EXPIRY_SECONDS);
 
     const description = metadata.holded_doc_number
         ? `Factura ${metadata.holded_doc_number}`
