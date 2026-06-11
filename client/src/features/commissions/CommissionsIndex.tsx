@@ -36,7 +36,7 @@ export default function CommissionsIndex() {
         return (
             <div className="space-y-6">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Mis Comisiones</h1>
+                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Mis Comisiones</h1>
                     <p className="text-muted-foreground mt-1">Resumen de tus comisiones y pagos.</p>
                 </div>
                 <PartnerDetail partner={selectedPartner} onBack={() => { }} />
@@ -61,7 +61,7 @@ export default function CommissionsIndex() {
     return (
         <div className="space-y-6">
             <div>
-                <h1 className="text-3xl font-bold tracking-tight">Comisiones</h1>
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Comisiones</h1>
                 <p className="text-muted-foreground mt-1">Gestión de comisiones generadas, socios y pagos.</p>
             </div>
 

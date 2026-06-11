@@ -329,18 +329,18 @@ function MediaTrackerContent() {
             </div>
 
             {/* Metrics */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <Card className="p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                <Card className="p-4 sm:p-6">
                     <p className="text-sm font-medium text-muted-foreground">Inversión Planificada (Total)</p>
-                    <h3 className="text-2xl font-bold mt-2">{formatCurrency(totalPlanned)}</h3>
+                    <h3 className="text-xl sm:text-2xl font-bold mt-2 break-all">{formatCurrency(totalPlanned)}</h3>
                 </Card>
-                <Card className="p-6">
+                <Card className="p-4 sm:p-6">
                     <p className="text-sm font-medium text-muted-foreground">Total Real Ejecutado</p>
-                    <h3 className="text-2xl font-bold mt-2 text-blue-600">{formatCurrency(totalActual)}</h3>
+                    <h3 className="text-xl sm:text-2xl font-bold mt-2 text-blue-600 break-all">{formatCurrency(totalActual)}</h3>
                 </Card>
-                <Card className="p-6">
+                <Card className="p-4 sm:p-6">
                     <p className="text-sm font-medium text-muted-foreground">Remanente / Exceso Global</p>
-                    <h3 className={`text-2xl font-bold mt-2 ${totalDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <h3 className={`text-xl sm:text-2xl font-bold mt-2 break-all ${totalDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {formatCurrency(totalDiff)}
                     </h3>
                     <p className="text-xs text-muted-foreground">

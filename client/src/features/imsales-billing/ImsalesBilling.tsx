@@ -213,16 +213,16 @@ function ImsalesBillingContent({ embedded = false }: { embedded?: boolean }) {
             )}
 
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {services.map(svc => (
-                    <Card key={svc.id} className="p-6">
+                    <Card key={svc.id} className="p-4 sm:p-6">
                         <p className="text-sm font-medium text-muted-foreground">Total {svc.name}</p>
-                        <h3 className="text-2xl font-bold mt-2 text-emerald-600">{formatCurrency(totals[svc.id] || 0)}</h3>
+                        <h3 className="text-xl sm:text-2xl font-bold mt-2 text-emerald-600 break-all">{formatCurrency(totals[svc.id] || 0)}</h3>
                     </Card>
                 ))}
-                <Card className="p-6">
+                <Card className="p-4 sm:p-6">
                     <p className="text-sm font-medium text-muted-foreground">Total General</p>
-                    <h3 className="text-2xl font-bold mt-2">{formatCurrency(totals.grand)}</h3>
+                    <h3 className="text-xl sm:text-2xl font-bold mt-2 break-all">{formatCurrency(totals.grand)}</h3>
                 </Card>
             </div>
 

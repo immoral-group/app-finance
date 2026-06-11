@@ -282,7 +282,7 @@ export function PartnerDetail({ partner, onBack }: PartnerDetailProps) {
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="p-4">
                     <p className="text-sm text-muted-foreground">Total Facturado</p>
                     <p className="text-xl font-bold">{formatCurrency(totalFacturado)}</p>

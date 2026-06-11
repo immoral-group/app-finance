@@ -404,7 +404,7 @@ export default function ClientBillingReport() {
 
             {/* KPIs */}
             {!isLoading && !isError && allClients.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                     {[
                         { label: 'Clientes', value: String(filtered.length) + (filtered.length !== allClients.length ? ` / ${allClients.length}` : '') },
                         { label: 'Total anual', value: Math.round(grandTotal).toLocaleString('de-DE') + ' €' },
@@ -429,7 +429,7 @@ export default function ClientBillingReport() {
                             placeholder="Buscar cliente..."
                             value={search}
                             onChange={e => setSearch(e.target.value)}
-                            className="pl-7 pr-7 py-1.5 text-xs border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 w-48"
+                            className="pl-7 pr-7 py-1.5 text-xs border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 w-full sm:w-48"
                         />
                         {search && (
                             <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">

@@ -131,7 +131,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSav
                     {/* Basic Info */}
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold border-b pb-2">Información General</h3>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <label className="text-sm font-medium mb-1 block">Nombre Comercial *</label>
                                 <Input
@@ -202,7 +202,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSav
                             </span>
                         </h3>
 
-                        <div className="grid grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                             {/* Left Column: Fee Type */}
                             <div className="space-y-4">
                                 <div>
@@ -305,7 +305,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSav
                                         </div>
                                     </div>
 
-                                    <div className={`grid grid-cols-2 gap-4 ${formData.fee_config.use_platform_costs !== false ? '' : 'opacity-50 pointer-events-none'}`}>
+                                    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${formData.fee_config.use_platform_costs !== false ? '' : 'opacity-50 pointer-events-none'}`}>
                                         <div>
                                             <label className="text-xs font-medium text-gray-600 mb-1 block">1ª Plataforma (Base)</label>
                                             <div className="relative">
