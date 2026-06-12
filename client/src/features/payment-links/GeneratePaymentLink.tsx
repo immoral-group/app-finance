@@ -15,12 +15,14 @@ import {
 type Mode = 'from_invoice' | 'manual';
 type Step = 'select_mode' | 'form' | 'result';
 
-// ── Service suggestions (fixed list from billing matrix) ──────────────────────
+// ── Service suggestions (fixed list) ─────────────────────────────────────────
 const SERVICE_SUGGESTIONS = [
-    { dept: 'Immedia',   items: ['Estrategia y Gestión de Campañas de Paid Media', 'Set-up inicial'] },
-    { dept: 'Imcontent', items: ['Branding', 'Diseño de contenido', 'Generación de contenido con IA', 'Gestión de RRSS', 'Gestión de Influencers y UGC', 'Setup Inicial'] },
-    { dept: 'Immoralia', items: ['Agency Automation', 'Consultoría y automatización de procesos', 'SEO', 'Web dev'] },
-    { dept: 'General',   items: ['Estrategia y gestión de marketing automation y email marketing', 'Horas/Otros'] },
+    'Consultoría',
+    'Desarrollo Web',
+    'Diseño de Contenido',
+    'Fee Paid Media',
+    'Gestión RRSS',
+    'Setup inicial',
 ];
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
@@ -386,12 +388,8 @@ function ManualForm({
                             className="text-[11px] text-primary hover:text-primary/80 font-medium bg-transparent border-0 cursor-pointer appearance-none pr-4 focus:outline-none"
                         >
                             <option value="">Usar servicio…</option>
-                            {SERVICE_SUGGESTIONS.map(dept => (
-                                <optgroup key={dept.dept} label={dept.dept}>
-                                    {dept.items.map(name => (
-                                        <option key={name} value={name}>{name}</option>
-                                    ))}
-                                </optgroup>
+                            {SERVICE_SUGGESTIONS.map(name => (
+                                <option key={name} value={name}>{name}</option>
                             ))}
                         </select>
                         <ChevronDown size={10} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-primary" />
