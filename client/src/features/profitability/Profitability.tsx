@@ -41,82 +41,104 @@ function ProfitabilityHint({ isSuperAdmin }: { isSuperAdmin: boolean }) {
         setTimeout(() => {
             localStorage.setItem(HINT_KEY, '1');
             setVisible(false);
-        }, 250);
+        }, 300);
     };
 
     if (!visible) return null;
 
     return (
-        <div
-            className={cn(
-                'fixed bottom-6 right-4 sm:right-6 z-50 w-[calc(100vw-2rem)] sm:w-80 transition-all duration-300',
-                leaving ? 'opacity-0 translate-y-3' : 'opacity-100 translate-y-0'
-            )}
-        >
-            <div className="rounded-2xl overflow-hidden shadow-2xl ring-1 ring-black/10 dark:ring-white/10">
-                {/* Gradient header */}
-                <div
-                    className="relative px-5 pt-5 pb-6 flex items-start gap-3"
-                    style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 60%, #0ea5e9 100%)' }}
-                >
-                    <div className="h-10 w-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center text-xl flex-shrink-0 shadow ring-1 ring-white/20">
-                        🗺️
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                            <Sparkles size={10} className="text-white/60" />
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-white/60">Consejo rápido</span>
-                        </div>
-                        <p className="text-sm font-bold text-white leading-snug">¿Primera vez en Rentabilidad?</p>
-                    </div>
-                    <button
-                        onClick={dismiss}
-                        className="h-6 w-6 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center flex-shrink-0 transition-colors"
-                    >
-                        <X size={12} className="text-white" />
-                    </button>
-                </div>
+        <>
+            {/* Backdrop */}
+            <div
+                className={cn('fixed inset-0 z-[200] transition-opacity duration-300', leaving ? 'opacity-0' : 'opacity-100')}
+                style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+                onClick={dismiss}
+            />
 
-                {/* Body */}
-                <div className="bg-card px-5 py-4 space-y-2.5">
-                    <div className="flex items-start gap-2.5">
-                        <span className="mt-0.5 h-5 w-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
-                            <HelpCircle size={11} className="text-indigo-600 dark:text-indigo-400" />
-                        </span>
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                            Pulsa <span className="font-semibold text-foreground">Cómo leer esto</span> (arriba a la derecha) para entender qué significa cada columna y cómo se calcula.
-                        </p>
-                    </div>
-                    {isSuperAdmin && (
-                        <div className="flex items-start gap-2.5">
-                            <span className="mt-0.5 h-5 w-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
-                                <Settings size={11} className="text-indigo-600 dark:text-indigo-400" />
-                            </span>
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                                En <span className="font-semibold text-foreground">Configurar</span> asignas qué carpeta de ClickUp corresponde a cada cliente y ajustas el coste/hora del equipo.
-                            </p>
-                        </div>
-                    )}
-                    {!isSuperAdmin && (
-                        <div className="flex items-start gap-2.5">
-                            <span className="mt-0.5 h-5 w-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
-                                <Info size={11} className="text-indigo-600 dark:text-indigo-400" />
-                            </span>
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                                Los iconos <span className="font-semibold text-foreground">ⓘ</span> en cada columna también te explican el dato en detalle.
-                            </p>
-                        </div>
-                    )}
-                    <button
-                        onClick={dismiss}
-                        className="w-full mt-1 py-2 rounded-xl text-xs font-semibold text-white transition-all active:scale-95"
-                        style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}
+            {/* Glow */}
+            <div
+                className={cn('fixed z-[201] pointer-events-none transition-opacity duration-300', leaving ? 'opacity-0' : 'opacity-100')}
+                style={{
+                    top: '50%', left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: 480, height: 480,
+                    background: 'radial-gradient(circle, rgba(99,102,241,0.35) 0%, transparent 70%)',
+                    filter: 'blur(20px)',
+                }}
+            />
+
+            {/* Card */}
+            <div
+                className={cn(
+                    'fixed z-[202] left-1/2 top-1/2 w-full max-w-sm px-4 transition-all duration-300',
+                    leaving ? 'opacity-0 -translate-x-1/2 -translate-y-[46%]' : 'opacity-100 -translate-x-1/2 -translate-y-1/2'
+                )}
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10">
+
+                    {/* Gradient header */}
+                    <div
+                        className="relative px-6 pt-8 pb-8 flex flex-col items-center text-center"
+                        style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #0ea5e9 100%)' }}
                     >
-                        Entendido
-                    </button>
+                        <button
+                            onClick={dismiss}
+                            className="absolute top-4 right-4 h-7 w-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                        >
+                            <X size={14} className="text-white" />
+                        </button>
+
+                        <span className="text-[10px] font-bold tracking-widest uppercase text-white/60 mb-4">Rentabilidad por cuenta</span>
+
+                        <div className="h-16 w-16 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center text-4xl mb-4 shadow-lg ring-1 ring-white/20">
+                            📊
+                        </div>
+
+                        <p className="text-base font-bold text-white leading-snug">¿Todo listo para empezar?</p>
+                        <p className="text-xs text-white/70 mt-1.5 leading-relaxed">Aquí tienes tres cosas que debes saber antes de leer los datos</p>
+                    </div>
+
+                    {/* Body */}
+                    <div className="bg-card px-6 py-5 space-y-3.5">
+                        <div className="flex items-start gap-3">
+                            <span className="mt-0.5 h-6 w-6 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center flex-shrink-0 text-sm">⏳</span>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                <span className="font-semibold text-foreground">La primera carga puede tardar unos segundos</span> — los datos se obtienen en tiempo real desde la API de ClickUp y se cruzan con la facturación de la plataforma.
+                            </p>
+                        </div>
+
+                        <div className="flex items-start gap-3">
+                            <span className="mt-0.5 h-6 w-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                                <HelpCircle size={13} className="text-indigo-600 dark:text-indigo-400" />
+                            </span>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                Pulsa <span className="font-semibold text-foreground">Cómo leer esto</span> (arriba a la derecha) para entender qué significa cada columna y cómo se calcula cada cifra.
+                            </p>
+                        </div>
+
+                        {isSuperAdmin && (
+                            <div className="flex items-start gap-3">
+                                <span className="mt-0.5 h-6 w-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                                    <Settings size={13} className="text-indigo-600 dark:text-indigo-400" />
+                                </span>
+                                <p className="text-xs text-muted-foreground leading-relaxed">
+                                    En <span className="font-semibold text-foreground">Configurar</span> puedes asignar qué carpeta de ClickUp corresponde a cada cliente y revisar el coste/hora de cada miembro del equipo.
+                                </p>
+                            </div>
+                        )}
+
+                        <button
+                            onClick={dismiss}
+                            className="w-full mt-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-95"
+                            style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}
+                        >
+                            Entendido
+                        </button>
+                    </div>
                 </div>
             </div>
-        </div>
+        </>
     );
 }
 
