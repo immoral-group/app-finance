@@ -338,21 +338,25 @@ function ManualForm({
     onSuccess: (link: PaymentLink) => void;
     isDark: boolean;
 }) {
-    const [concept, setConcept] = useState('');
+    const [selected, setSelected] = useState('');
+    const [customConcept, setCustomConcept] = useState('');
     const [amountStr, setAmountStr] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
+    const isCustom = selected === '__custom__';
+    const finalConcept = isCustom ? customConcept.trim() : selected;
+
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        if (!finalConcept) return setError('El concepto es obligatorio');
         const amount = parseFloat(amountStr.replace(',', '.'));
-        if (!concept.trim()) return setError('El concepto es obligatorio');
         if (isNaN(amount) || amount <= 0) return setError('El importe debe ser mayor que 0');
         setLoading(true);
         setError('');
         try {
             const res = await paymentLinksApi.createManual({
-                concept: concept.trim(),
+                concept: finalConcept,
                 amount_cents: Math.round(amount * 100),
             });
             onSuccess(res.link);
@@ -376,33 +380,35 @@ function ManualForm({
             </div>
 
             <div>
-                <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Concepto <span className="text-red-500">*</span>
-                    </label>
-                    {/* Quick-fill from service list */}
-                    <div className="relative">
-                        <select
-                            value=""
-                            onChange={e => { if (e.target.value) setConcept(e.target.value); e.target.value = ''; }}
-                            className="text-[11px] text-primary hover:text-primary/80 font-medium bg-transparent border-0 cursor-pointer appearance-none pr-4 focus:outline-none"
-                        >
-                            <option value="">Usar servicio…</option>
-                            {SERVICE_SUGGESTIONS.map(name => (
-                                <option key={name} value={name}>{name}</option>
-                            ))}
-                        </select>
-                        <ChevronDown size={10} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-primary" />
-                    </div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
+                    Concepto <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                    <select
+                        value={selected}
+                        onChange={e => { setSelected(e.target.value); setError(''); }}
+                        className={cn(inputClass(isDark), 'appearance-none pr-8', !selected && 'text-muted-foreground')}
+                        required
+                    >
+                        <option value="" disabled>Selecciona un concepto…</option>
+                        <option value="__custom__">✏️  Concepto personalizado</option>
+                        <option disabled>──────────────</option>
+                        {SERVICE_SUGGESTIONS.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                        ))}
+                    </select>
+                    <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 </div>
-                <input
-                    autoFocus
-                    value={concept}
-                    onChange={e => setConcept(e.target.value)}
-                    placeholder="Ej: Anticipo restyling web — Cliente"
-                    className={inputClass(isDark)}
-                    required
-                />
+
+                {isCustom && (
+                    <input
+                        autoFocus
+                        value={customConcept}
+                        onChange={e => setCustomConcept(e.target.value)}
+                        placeholder="Ej: Anticipo restyling web — Cliente"
+                        className={cn(inputClass(isDark), 'mt-2')}
+                    />
+                )}
             </div>
 
             <div>
