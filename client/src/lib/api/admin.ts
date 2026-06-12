@@ -52,11 +52,6 @@ export const adminApi = {
         return fetchApi<{ billing_records: BillingRecord[] }>(`/billing?year=${year}&month=${month}`);
     },
 
-    getBillingServices: (year?: number) => {
-        const y = year ?? new Date().getFullYear();
-        return fetchApi<{ services: Array<{ id: string; code: string; name: string; department_id: string; display_order: number; department: { id: string; code: string; name: string; display_order: number } }> }>(`/billing/services?year=${y}`);
-    },
-
     getMatrix: (year: number, month: number) => {
         return fetchApi<{
             year: string;
