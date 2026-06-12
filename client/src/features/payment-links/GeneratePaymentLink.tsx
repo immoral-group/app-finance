@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTheme } from '@/context/ThemeContext';
 import { cn } from '@/lib/utils';
 import {
     CreditCard, FileText, Search, Copy, Check, Mail, X,
-    ChevronLeft, Loader2, AlertCircle, ExternalLink, Ban
+    ChevronLeft, Loader2, AlertCircle, ExternalLink, Ban, ChevronDown, PenLine
 } from 'lucide-react';
 import {
     paymentLinksApi,
@@ -11,6 +12,7 @@ import {
     type PaymentLink,
     type HoldedInvoice,
 } from '@/lib/api/payment-links';
+import { adminApi } from '@/lib/api/admin';
 
 type Mode = 'from_invoice' | 'manual';
 type Step = 'select_mode' | 'form' | 'result';
@@ -328,21 +330,43 @@ function ManualForm({
     onSuccess: (link: PaymentLink) => void;
     isDark: boolean;
 }) {
-    const [concept, setConcept] = useState('');
+    const [selectedServiceId, setSelectedServiceId] = useState('');
+    const [customConcept, setCustomConcept] = useState('');
     const [amountStr, setAmountStr] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
+    const { data: servicesData } = useQuery({
+        queryKey: ['billing-services'],
+        queryFn: () => adminApi.getBillingServices(),
+        staleTime: 10 * 60_000,
+    });
+
+    const services = servicesData?.services ?? [];
+
+    // Group by department
+    const byDept = services.reduce<Record<string, { deptName: string; deptOrder: number; items: typeof services }>>((acc, s) => {
+        const key = s.department?.code ?? 'other';
+        if (!acc[key]) acc[key] = { deptName: s.department?.name ?? 'Otros', deptOrder: s.department?.display_order ?? 99, items: [] };
+        acc[key].items.push(s);
+        return acc;
+    }, {});
+    const depts = Object.values(byDept).sort((a, b) => a.deptOrder - b.deptOrder);
+
+    const isCustom = selectedServiceId === '__custom__';
+    const selectedService = services.find(s => s.id === selectedServiceId);
+    const finalConcept = isCustom ? customConcept.trim() : (selectedService?.name ?? '');
+
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        if (!finalConcept) return setError('Selecciona un servicio o escribe un concepto personalizado');
         const amount = parseFloat(amountStr.replace(',', '.'));
-        if (!concept.trim()) return setError('El concepto es obligatorio');
         if (isNaN(amount) || amount <= 0) return setError('El importe debe ser mayor que 0');
         setLoading(true);
         setError('');
         try {
             const res = await paymentLinksApi.createManual({
-                concept: concept.trim(),
+                concept: finalConcept,
                 amount_cents: Math.round(amount * 100),
             });
             onSuccess(res.link);
@@ -365,18 +389,56 @@ function ManualForm({
                 </div>
             </div>
 
+            {/* Concepto — service selector */}
             <div>
                 <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
-                    Concepto <span className="text-red-500">*</span>
+                    Servicio / Concepto <span className="text-red-500">*</span>
                 </label>
-                <input
-                    autoFocus
-                    value={concept}
-                    onChange={e => setConcept(e.target.value)}
-                    placeholder="Ej: Anticipo restyling web — Cliente"
-                    className={inputClass(isDark)}
-                    required
-                />
+                <div className="relative">
+                    <select
+                        value={selectedServiceId}
+                        onChange={e => { setSelectedServiceId(e.target.value); setError(''); }}
+                        className={cn(
+                            inputClass(isDark),
+                            'appearance-none pr-8',
+                            !selectedServiceId && 'text-muted-foreground'
+                        )}
+                    >
+                        <option value="" disabled>Selecciona un servicio…</option>
+                        {depts.map(dept => (
+                            <optgroup key={dept.deptName} label={dept.deptName}>
+                                {dept.items.map(s => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                            </optgroup>
+                        ))}
+                        <optgroup label="──────────────">
+                            <option value="__custom__">✏️  Concepto personalizado…</option>
+                        </optgroup>
+                    </select>
+                    <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                </div>
+
+                {/* Free-text input shown only when custom is selected */}
+                {isCustom && (
+                    <div className="mt-2 relative">
+                        <PenLine size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
+                        <input
+                            autoFocus
+                            value={customConcept}
+                            onChange={e => setCustomConcept(e.target.value)}
+                            placeholder="Ej: Anticipo restyling web — Cliente"
+                            className={cn(inputClass(isDark), 'pl-8')}
+                        />
+                    </div>
+                )}
+
+                {/* Preview of selected service name */}
+                {selectedService && (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                        Concepto: <span className="text-foreground font-medium">{selectedService.name}</span>
+                    </p>
+                )}
             </div>
 
             <div>

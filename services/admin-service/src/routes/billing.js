@@ -6,6 +6,42 @@ import { logChange, extractUser } from '../utils/changeLogger.js';
 
 const router = express.Router();
 
+// ── GET /billing/services ──────────────────────────────────────────────────────
+// Returns all active services for the current year, grouped by department.
+router.get('/services', async (req, res) => {
+    try {
+        const year = parseInt(req.query.year || new Date().getFullYear());
+
+        const { data: assignments } = await supabase
+            .from('service_year_assignments')
+            .select('service_id')
+            .eq('fiscal_year', year)
+            .eq('is_active', true);
+
+        const serviceIds = (assignments || []).map(a => a.service_id);
+        if (serviceIds.length === 0) return res.json({ services: [] });
+
+        const { data, error } = await supabase
+            .from('services')
+            .select('id, code, name, department_id, display_order, department:departments(id, code, name, display_order)')
+            .in('id', serviceIds)
+            .order('display_order', { ascending: true });
+
+        if (error) throw error;
+
+        const sorted = (data || []).sort((a, b) => {
+            const da = a.department?.display_order ?? 99;
+            const db = b.department?.display_order ?? 99;
+            return da !== db ? da - db : (a.display_order ?? 99) - (b.display_order ?? 99);
+        });
+
+        res.json({ services: sorted });
+    } catch (err) {
+        console.error('[BILLING] services error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ================================================
 // BILLING MATRIX ENDPOINTS
 // ================================================
