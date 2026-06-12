@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, AccountProfitability } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info, Sparkles } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
 
