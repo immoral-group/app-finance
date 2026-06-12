@@ -3,7 +3,8 @@ import { useTheme } from '@/context/ThemeContext';
 import { cn } from '@/lib/utils';
 import {
     CreditCard, FileText, Search, Copy, Check, Mail, X,
-    ChevronLeft, Loader2, AlertCircle, ExternalLink, Ban, ChevronDown
+    ChevronLeft, Loader2, AlertCircle, ExternalLink, Ban, ChevronDown,
+    CheckCircle2, Circle, ChevronRight as ChevRight,
 } from 'lucide-react';
 import {
     paymentLinksApi,
@@ -40,6 +41,101 @@ function daysSince(unix: number | null | undefined) {
     if (!unix) return null;
     const diff = Date.now() - unix * 1000;
     return Math.floor(diff / (1000 * 60 * 60 * 24));
+}
+
+// ── Step Guide ─────────────────────────────────────────────────────────────────
+
+interface GuideStep {
+    emoji: string;
+    label: string;
+    hint: string;
+}
+
+function StepGuide({
+    steps,
+    activeIndex,
+    isDark,
+}: {
+    steps: GuideStep[];
+    activeIndex: number;
+    isDark: boolean;
+}) {
+    return (
+        <div className={cn(
+            'rounded-2xl border overflow-hidden',
+            isDark ? 'border-border/60 bg-muted/20' : 'border-gray-100 bg-gray-50/80'
+        )}>
+            {/* Header */}
+            <div className={cn(
+                'flex items-center gap-2 px-4 py-2.5 border-b',
+                isDark ? 'border-border/60' : 'border-gray-100'
+            )}>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                    Guía rápida
+                </span>
+                <span className={cn(
+                    'ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full',
+                    isDark ? 'bg-primary/15 text-primary' : 'bg-blue-100 text-blue-700'
+                )}>
+                    Paso {Math.min(activeIndex + 1, steps.length)} de {steps.length}
+                </span>
+            </div>
+
+            {/* Steps */}
+            <div className="divide-y divide-border/30">
+                {steps.map((s, i) => {
+                    const done = i < activeIndex;
+                    const active = i === activeIndex;
+                    return (
+                        <div
+                            key={i}
+                            className={cn(
+                                'flex items-start gap-3 px-4 py-3 transition-colors',
+                                active && (isDark ? 'bg-primary/8' : 'bg-blue-50/60'),
+                            )}
+                            style={active ? { borderLeft: '3px solid #6366f1' } : { borderLeft: '3px solid transparent' }}
+                        >
+                            {/* Icon */}
+                            <div className="mt-0.5 flex-shrink-0">
+                                {done ? (
+                                    <CheckCircle2 size={15} className="text-emerald-500" />
+                                ) : active ? (
+                                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-indigo-500 text-[9px] font-bold text-white">
+                                        {i + 1}
+                                    </span>
+                                ) : (
+                                    <Circle size={15} className="text-muted-foreground/30" />
+                                )}
+                            </div>
+
+                            {/* Content */}
+                            <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-sm">{s.emoji}</span>
+                                    <span className={cn(
+                                        'text-xs font-semibold',
+                                        done ? 'text-muted-foreground line-through decoration-muted-foreground/40' :
+                                        active ? 'text-foreground' : 'text-muted-foreground/50'
+                                    )}>
+                                        {s.label}
+                                    </span>
+                                </div>
+                                {active && (
+                                    <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                                        {s.hint}
+                                    </p>
+                                )}
+                            </div>
+
+                            {active && (
+                                <ChevRight size={13} className="flex-shrink-0 mt-0.5 text-indigo-500/60" />
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
 }
 
 // ── Mode Selector ──────────────────────────────────────────────────────────────
@@ -211,6 +307,29 @@ function InvoiceSelector({
 
 // ── From Invoice Form ──────────────────────────────────────────────────────────
 
+const INVOICE_STEPS: GuideStep[] = [
+    {
+        emoji: '🔍',
+        label: 'Buscar factura',
+        hint: 'Escribe el número de factura (ej: F-2025-042) o el nombre del cliente. Los resultados aparecen en tiempo real.',
+    },
+    {
+        emoji: '✅',
+        label: 'Seleccionar factura',
+        hint: 'Haz clic en la factura correcta. El importe, concepto y email del cliente se autocompletan automáticamente.',
+    },
+    {
+        emoji: '📧',
+        label: 'Verificar email',
+        hint: 'Revisa el email del cliente. Si el checkout lleva email prerellenado el cliente no tendrá que escribirlo.',
+    },
+    {
+        emoji: '🔗',
+        label: 'Generar link',
+        hint: 'Haz clic en "Generar link de pago". Se crea un checkout seguro de Stripe válido por 24 horas.',
+    },
+];
+
 function FromInvoiceForm({
     onBack,
     onSuccess,
@@ -224,6 +343,9 @@ function FromInvoiceForm({
     const [customerEmail, setCustomerEmail] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    // Active guide step: 0=search, 1=select (skipped once done), 2=email, 3=generate
+    const guideStep = !selected ? 0 : customerEmail ? 3 : 2;
 
     function handleSelect(inv: HoldedInvoice) {
         setSelected(inv);
@@ -264,6 +386,9 @@ function FromInvoiceForm({
                     <p className="text-xs text-muted-foreground">Busca y selecciona la factura</p>
                 </div>
             </div>
+
+            {/* Guide */}
+            <StepGuide steps={INVOICE_STEPS} activeIndex={guideStep} isDark={isDark} />
 
             {!selected ? (
                 <InvoiceSelector onSelect={handleSelect} isDark={isDark} />
@@ -329,6 +454,24 @@ function FromInvoiceForm({
 
 // ── Manual Form ────────────────────────────────────────────────────────────────
 
+const MANUAL_STEPS: GuideStep[] = [
+    {
+        emoji: '📝',
+        label: 'Concepto',
+        hint: 'Escribe qué estás cobrando. Este texto aparecerá en el checkout de Stripe. Ej: "Anticipo diseño web — Cliente X".',
+    },
+    {
+        emoji: '💶',
+        label: 'Importe',
+        hint: 'El total a cobrar en euros. Usa punto o coma como separador decimal. Ej: 1500 o 1500.50.',
+    },
+    {
+        emoji: '🔗',
+        label: 'Generar link',
+        hint: 'Haz clic en "Generar link de pago". Se crea un checkout seguro de Stripe válido por 24 horas.',
+    },
+];
+
 function ManualForm({
     onBack,
     onSuccess,
@@ -346,6 +489,7 @@ function ManualForm({
 
     const isCustom = selected === '__custom__';
     const finalConcept = isCustom ? customConcept.trim() : selected;
+    const guideStep = !finalConcept ? 0 : !amountStr ? 1 : 2;
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -378,6 +522,9 @@ function ManualForm({
                     <p className="text-xs text-muted-foreground">Concepto e importe, y listo</p>
                 </div>
             </div>
+
+            {/* Guide */}
+            <StepGuide steps={MANUAL_STEPS} activeIndex={guideStep} isDark={isDark} />
 
             <div>
                 <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
@@ -448,6 +595,24 @@ function ManualForm({
 
 // ── Result Screen ──────────────────────────────────────────────────────────────
 
+const RESULT_STEPS: GuideStep[] = [
+    {
+        emoji: '📋',
+        label: 'Copia el link',
+        hint: 'Haz clic en "Copiar link" y compártelo por donde prefieras: WhatsApp, Slack, email externo, etc.',
+    },
+    {
+        emoji: '📧',
+        label: 'O envía por email',
+        hint: 'Haz clic en "Enviar por email", introduce el correo del destinatario y se lo mandamos directamente desde la plataforma.',
+    },
+    {
+        emoji: '⏳',
+        label: 'Seguimiento',
+        hint: 'Puedes ver el estado del link (activo, pagado, expirado) en cualquier momento desde el Historial de links.',
+    },
+];
+
 function ResultScreen({
     link,
     onReset,
@@ -464,10 +629,12 @@ function ResultScreen({
     const [emailSending, setEmailSending] = useState(false);
     const [emailSent, setEmailSent] = useState(false);
     const [emailError, setEmailError] = useState('');
+    const [resultGuideStep, setResultGuideStep] = useState(0);
 
     async function handleCopy() {
         await navigator.clipboard.writeText(link.stripe_payment_url);
         setCopied(true);
+        setResultGuideStep(1);
         setTimeout(() => setCopied(false), 2500);
     }
 
@@ -482,6 +649,7 @@ function ResultScreen({
                 subject: emailSubject,
             });
             setEmailSent(true);
+            setResultGuideStep(2);
             setTimeout(() => setShowEmailModal(false), 2000);
         } catch (e: unknown) {
             setEmailError(e instanceof Error ? e.message : 'Error enviando email');
@@ -507,7 +675,7 @@ function ResultScreen({
 
             {/* Link box */}
             <div className={cn(
-                'rounded-2xl border p-5 mb-5',
+                'rounded-2xl border p-5 mb-4',
                 isDark ? 'border-border bg-card' : 'border-gray-200 bg-white'
             )}>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Link de pago</p>
@@ -577,9 +745,12 @@ function ResultScreen({
                 </div>
             </div>
 
+            {/* Result guide */}
+            <StepGuide steps={RESULT_STEPS} activeIndex={resultGuideStep} isDark={isDark} />
+
             <button
                 onClick={onReset}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all"
+                className="w-full mt-4 py-2.5 rounded-xl text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all"
             >
                 Generar otro link
             </button>
@@ -730,7 +901,6 @@ export default function GeneratePaymentLink() {
                 )}
             </div>
 
-            {/* Tip about cancelled mode */}
             {step === 'select_mode' && (
                 <div className={cn(
                     'max-w-2xl mx-auto mt-4 px-4 py-3 rounded-xl flex items-start gap-2.5 text-xs',

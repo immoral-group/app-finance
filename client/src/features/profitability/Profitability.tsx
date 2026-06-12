@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, AccountProfitability } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
 
@@ -21,6 +21,125 @@ function eur(n: number) {
 }
 function eurDec(n: number) {
     return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+}
+
+const HINT_KEY = 'fi_profitability_hint_v1';
+
+// ── First-visit hint card ─────────────────────────────────────────────────────
+function ProfitabilityHint({ isSuperAdmin }: { isSuperAdmin: boolean }) {
+    const [visible, setVisible] = useState(false);
+    const [leaving, setLeaving] = useState(false);
+
+    useEffect(() => {
+        if (localStorage.getItem(HINT_KEY)) return;
+        const t = setTimeout(() => setVisible(true), 600);
+        return () => clearTimeout(t);
+    }, []);
+
+    const dismiss = () => {
+        setLeaving(true);
+        setTimeout(() => {
+            localStorage.setItem(HINT_KEY, '1');
+            setVisible(false);
+        }, 300);
+    };
+
+    if (!visible) return null;
+
+    return (
+        <>
+            {/* Backdrop */}
+            <div
+                className={cn('fixed inset-0 z-[200] transition-opacity duration-300', leaving ? 'opacity-0' : 'opacity-100')}
+                style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+                onClick={dismiss}
+            />
+
+            {/* Glow */}
+            <div
+                className={cn('fixed z-[201] pointer-events-none transition-opacity duration-300', leaving ? 'opacity-0' : 'opacity-100')}
+                style={{
+                    top: '50%', left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: 480, height: 480,
+                    background: 'radial-gradient(circle, rgba(99,102,241,0.35) 0%, transparent 70%)',
+                    filter: 'blur(20px)',
+                }}
+            />
+
+            {/* Card */}
+            <div
+                className={cn(
+                    'fixed z-[202] left-1/2 top-1/2 w-full max-w-sm px-4 transition-all duration-300',
+                    leaving ? 'opacity-0 -translate-x-1/2 -translate-y-[46%]' : 'opacity-100 -translate-x-1/2 -translate-y-1/2'
+                )}
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10">
+
+                    {/* Gradient header */}
+                    <div
+                        className="relative px-6 pt-8 pb-8 flex flex-col items-center text-center"
+                        style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #0ea5e9 100%)' }}
+                    >
+                        <button
+                            onClick={dismiss}
+                            className="absolute top-4 right-4 h-7 w-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                        >
+                            <X size={14} className="text-white" />
+                        </button>
+
+                        <span className="text-[10px] font-bold tracking-widest uppercase text-white/60 mb-4">Rentabilidad por cuenta</span>
+
+                        <div className="h-16 w-16 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center text-4xl mb-4 shadow-lg ring-1 ring-white/20">
+                            📊
+                        </div>
+
+                        <p className="text-base font-bold text-white leading-snug">¿Todo listo para empezar?</p>
+                        <p className="text-xs text-white/70 mt-1.5 leading-relaxed">Aquí tienes tres cosas que debes saber antes de leer los datos</p>
+                    </div>
+
+                    {/* Body */}
+                    <div className="bg-card px-6 py-5 space-y-3.5">
+                        <div className="flex items-start gap-3">
+                            <span className="mt-0.5 h-6 w-6 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center flex-shrink-0 text-sm">⏳</span>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                <span className="font-semibold text-foreground">La primera carga puede tardar unos segundos</span> — los datos se obtienen en tiempo real desde la API de ClickUp y se cruzan con la facturación de la plataforma.
+                            </p>
+                        </div>
+
+                        <div className="flex items-start gap-3">
+                            <span className="mt-0.5 h-6 w-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                                <HelpCircle size={13} className="text-indigo-600 dark:text-indigo-400" />
+                            </span>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                Pulsa <span className="font-semibold text-foreground">Cómo leer esto</span> (arriba a la derecha) para entender qué significa cada columna y cómo se calcula cada cifra.
+                            </p>
+                        </div>
+
+                        {isSuperAdmin && (
+                            <div className="flex items-start gap-3">
+                                <span className="mt-0.5 h-6 w-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                                    <Settings size={13} className="text-indigo-600 dark:text-indigo-400" />
+                                </span>
+                                <p className="text-xs text-muted-foreground leading-relaxed">
+                                    En <span className="font-semibold text-foreground">Configurar</span> puedes asignar qué carpeta de ClickUp corresponde a cada cliente y revisar el coste/hora de cada miembro del equipo.
+                                </p>
+                            </div>
+                        )}
+
+                        <button
+                            onClick={dismiss}
+                            className="w-full mt-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-95"
+                            style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}
+                        >
+                            Entendido
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </>
+    );
 }
 
 // ── Team detail modal ─────────────────────────────────────────────────────────
@@ -55,6 +174,178 @@ function TeamModal({ account, monthIdx, onClose }: {
                         ))}
                     </div>
                 )}
+            </div>
+        </div>
+    );
+}
+
+// ── Column guide modal ────────────────────────────────────────────────────────
+const COLUMN_GUIDE = [
+    {
+        emoji: '🏢',
+        name: 'Cliente',
+        calc: 'Nombre del cliente',
+        source: 'Base de datos interna (tabla de clientes)',
+        detail: 'Cada fila representa un cliente activo con algún dato configurado en el módulo de Rentabilidad. Solo aparecen clientes con facturación u horas registradas en el período seleccionado.',
+    },
+    {
+        emoji: '💶',
+        name: 'Fee mensual',
+        calc: 'Importe registrado en la Billing Matrix de la app para ese cliente y mes',
+        source: 'Tabla monthly_billing — introducido manualmente en el módulo de Facturación de Immoral Finance',
+        detail: 'Es el fee mensual acordado con el cliente, tal como está registrado en la Billing Matrix de la plataforma. Si aparece ⚠ sin importe significa que hay horas registradas en ClickUp para ese cliente pero no hay fee registrado en la Billing Matrix ese mes.',
+    },
+    {
+        emoji: '📐',
+        name: 'Fee/hora',
+        calc: 'Fee mensual ÷ Horas totales del equipo',
+        source: 'Calculado en tiempo real a partir de Billing Matrix + ClickUp',
+        detail: 'Indica cuánto ingresa la agencia por cada hora trabajada para ese cliente. Un valor alto significa que cada hora del equipo genera más ingresos. Si no hay horas, se muestra —.',
+    },
+    {
+        emoji: '💸',
+        name: 'Coste/hora',
+        calc: 'Coste del equipo ÷ Horas totales del equipo',
+        source: 'Calculado desde los salarios de empleados configurados en Setup',
+        detail: 'Cuánto le cuesta a Immoral cada hora trabajada para ese cliente. Se deriva del salario bruto de cada empleado dividido entre 160 horas/mes. Si Fee/hora > Coste/hora, cada hora es rentable.',
+    },
+    {
+        emoji: '⏱️',
+        name: 'Horas',
+        calc: 'Suma de horas registradas por el equipo en ClickUp',
+        source: 'ClickUp — Time Tracking API, filtrado por listas configuradas en Setup',
+        detail: 'Horas reales trabajadas para ese cliente en el período. Puedes hacer clic para ver el desglose por persona. Si aparece ⚠ sin horas significa que hay facturación pero nadie registró tiempo en ClickUp ese mes.',
+    },
+    {
+        emoji: '👥',
+        name: 'Coste Immoral',
+        calc: 'Σ (horas_persona × coste_hora_persona) para cada miembro del equipo',
+        source: 'ClickUp (horas) × Salarios configurados en Setup (coste/hora)',
+        detail: 'El coste real del equipo asignado a ese cliente. Cada persona tiene un coste/hora calculado como (salario_bruto / 160). Este número refleja el coste de nómina proporcional a las horas dedicadas.',
+    },
+    {
+        emoji: '📈',
+        name: 'Beneficio',
+        calc: 'Fee mensual − Coste Immoral',
+        source: 'Calculado en tiempo real',
+        detail: 'La ganancia bruta real de ese cliente: lo que facturamos menos lo que nos cuesta el equipo. No incluye otros costes indirectos (herramientas, oficina, etc.). Un número negativo indica que estamos perdiendo dinero en ese cliente.',
+    },
+    {
+        emoji: '🚦',
+        name: 'Rentabilidad',
+        calc: '(Beneficio ÷ Fee mensual) × 100',
+        source: 'Calculado en tiempo real',
+        detail: 'El margen de beneficio en porcentaje. El semáforo de colores interpreta la salud financiera: 🟢 Verde ≥ 60% (rentable), 🟡 Ámbar 40–59% (atención), 🔴 Rojo < 40% (problema). Solo se calcula si hay tanto facturación como horas registradas.',
+    },
+];
+
+// ── Inline column header tooltip ──────────────────────────────────────────────
+function ColTip({ name }: { name: string }) {
+    const [open, setOpen] = useState(false);
+    const col = COLUMN_GUIDE.find(c => c.name === name);
+    if (!col) return null;
+    return (
+        <span className="relative inline-flex items-center align-middle ml-1">
+            <button
+                onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
+                className="text-muted-foreground/35 hover:text-indigo-500 transition-colors focus:outline-none"
+                tabIndex={-1}
+            >
+                <Info size={10} />
+            </button>
+            {open && (
+                <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+                    <div
+                        className="absolute top-full right-0 mt-2 z-[61] w-64 bg-popover border border-border/60 rounded-xl shadow-2xl p-3 text-left normal-case tracking-normal space-y-2"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <p className="text-xs font-semibold text-foreground">{col.emoji} {col.name}</p>
+                        <p className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-md px-2 py-1 leading-relaxed">{col.calc}</p>
+                        <p className="text-[10px] text-muted-foreground leading-relaxed border-l-2 border-indigo-400/40 pl-2">{col.detail}</p>
+                        <p className="text-[9px] text-muted-foreground/50 leading-relaxed">Fuente: {col.source}</p>
+                    </div>
+                </>
+            )}
+        </span>
+    );
+}
+
+function ColumnGuide({ onClose }: { onClose: () => void }) {
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={onClose}
+        >
+            <div
+                className="bg-card border border-border/60 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[85dvh] flex flex-col"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-border/40 flex-shrink-0">
+                    <div>
+                        <h2 className="text-sm font-bold text-foreground">Cómo leer esta tabla</h2>
+                        <p className="text-xs text-muted-foreground mt-0.5">Qué significa cada columna y cómo se calcula</p>
+                    </div>
+                    <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-muted/60 text-muted-foreground transition-colors">
+                        <X size={15} />
+                    </button>
+                </div>
+
+                {/* Scrollable content */}
+                <div className="overflow-y-auto flex-1 px-4 py-3 space-y-2">
+                    {COLUMN_GUIDE.map(col => (
+                        <div key={col.name} className="rounded-xl border border-border/40 bg-muted/20 overflow-hidden">
+                            <div className="flex items-center gap-2.5 px-4 py-2.5 bg-muted/40 border-b border-border/30">
+                                <span className="text-base">{col.emoji}</span>
+                                <span className="text-sm font-semibold text-foreground">{col.name}</span>
+                            </div>
+                            <div className="px-4 py-3 space-y-2.5">
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 mb-0.5">Cálculo</p>
+                                    <p className="text-xs font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-md px-2.5 py-1.5 leading-relaxed">{col.calc}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 mb-0.5">Fuente de datos</p>
+                                    <p className="text-xs text-muted-foreground leading-relaxed">{col.source}</p>
+                                </div>
+                                <p className="text-xs text-foreground/80 leading-relaxed border-l-2 border-indigo-400/50 pl-2.5">{col.detail}</p>
+                            </div>
+                        </div>
+                    ))}
+
+                    {/* Warnings legend */}
+                    <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 space-y-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">Indicadores de alerta ⚠</p>
+                        <p className="text-xs text-amber-700/80 dark:text-amber-400/80 leading-relaxed">
+                            <strong>⚠ en Fee mensual:</strong> el cliente tiene horas en ClickUp pero no hay facturación en Holded ese mes. Puede indicar que falta emitir factura.
+                        </p>
+                        <p className="text-xs text-amber-700/80 dark:text-amber-400/80 leading-relaxed">
+                            <strong>⚠ en Horas:</strong> hay facturación pero nadie registró tiempo en ClickUp. No es posible calcular rentabilidad.
+                        </p>
+                    </div>
+
+                    {/* Semaphore legend */}
+                    <div className="rounded-xl border border-border/40 bg-muted/20 px-4 py-3 space-y-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Semáforo de rentabilidad</p>
+                        <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                                <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                                <span className="text-xs text-foreground/80"><strong className="text-emerald-600 dark:text-emerald-400">≥ 60%</strong> — Cuenta rentable. El fee cubre costes con margen amplio.</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 flex-shrink-0" />
+                                <span className="text-xs text-foreground/80"><strong className="text-amber-600 dark:text-amber-400">40–59%</strong> — Atención. El margen es ajustado, revisar dedicación.</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0" />
+                                <span className="text-xs text-foreground/80"><strong className="text-red-600 dark:text-red-400">&lt; 40%</strong> — Problema. El coste del equipo consume la mayor parte del fee.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="h-2" />
+                </div>
             </div>
         </div>
     );
@@ -139,6 +430,7 @@ export default function Profitability() {
     const [year, setYear] = useState(now.getFullYear());
     const [month, setMonth] = useState(now.getMonth()); // 0-based, -1 = annual
     const [showSetup, setShowSetup] = useState(false);
+    const [showGuide, setShowGuide] = useState(false);
     const [team, setTeam] = useState<{ account: AccountProfitability; month: number } | null>(null);
     const { isSuperAdmin } = useAuth();
     const qc = useQueryClient();
@@ -216,13 +508,21 @@ export default function Profitability() {
                     >
                         <RefreshCw size={13} className={refreshCache.isPending ? 'animate-spin' : ''} />
                     </button>
+                    <button
+                        onClick={() => setShowGuide(true)}
+                        title="Cómo leer esta tabla"
+                        className="h-9 px-3 rounded-lg border border-border/60 bg-card hover:bg-muted/60 text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
+                    >
+                        <HelpCircle size={13} />
+                        <span className="hidden sm:inline">Cómo leer esto</span>
+                    </button>
                     {isSuperAdmin() && (
                         <button
                             onClick={() => setShowSetup(true)}
                             className="h-9 px-3 rounded-lg border border-border/60 bg-card hover:bg-muted/60 text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
                         >
                             <Settings size={13} />
-                            Configurar
+                            <span className="hidden sm:inline">Configurar</span>
                         </button>
                     )}
                 </div>
@@ -287,13 +587,13 @@ export default function Profitability() {
                             <thead className="sticky top-0 z-10 border-b border-border/50 bg-muted/80 backdrop-blur">
                                 <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
                                     <th className="px-4 py-3 text-left font-semibold">Cliente</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Fee mensual</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Fee/hora</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Coste/hora</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Horas</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Coste Immoral</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Beneficio</th>
-                                    <th className="px-3 py-3 text-right font-semibold">Rentabilidad</th>
+                                    <th className="px-3 py-3 text-right font-semibold">Fee mensual<ColTip name="Fee mensual" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Fee/hora<ColTip name="Fee/hora" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Coste/hora<ColTip name="Coste/hora" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Horas<ColTip name="Horas" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Coste Immoral<ColTip name="Coste Immoral" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Beneficio<ColTip name="Beneficio" /></th>
+                                    <th className="px-3 py-3 text-right font-semibold">Rentabilidad<ColTip name="Rentabilidad" /></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -366,6 +666,8 @@ export default function Profitability() {
             {team && (
                 <TeamModal account={team.account} monthIdx={team.month} onClose={() => setTeam(null)} />
             )}
+            {showGuide && <ColumnGuide onClose={() => setShowGuide(false)} />}
+            <ProfitabilityHint isSuperAdmin={isSuperAdmin()} />
         </div>
     );
 }
