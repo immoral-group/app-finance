@@ -53,10 +53,32 @@ function norm(s) {
     return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 }
 
+function yearRange(year) {
+    return {
+        start: new Date(`${year}-01-01T00:00:00Z`).getTime(),
+        // Inclusive of the very last millisecond of the year (matches ClickUp dashboard)
+        end: new Date(`${year}-12-31T23:59:59.999Z`).getTime(),
+    };
+}
+
+// Bucket a UTC timestamp into a month (0-11) using Europe/Madrid, so entries
+// tracked late at night Spain-time don't fall into the wrong month.
+const MADRID_MONTH_FMT = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Madrid', month: 'numeric',
+});
+function monthInMadrid(timestampMs) {
+    return Number(MADRID_MONTH_FMT.format(new Date(timestampMs))) - 1;
+}
+
 // Fetch ALL time entries from a workspace.
 // ClickUp's /time_entries returns only the authenticated user's entries unless
 // `assignee=<id>` is passed, AND it must be passed ONE user at a time (passing
 // multiple IDs at once returns 403 TIMEENTRY_059). So we loop per-member.
+//
+// Note: this misses entries from Guests / external collaborators (not in
+// team.members). For client-by-client profitability we use
+// `fetchEntriesByLocations` below, which queries by list/folder/space and
+// captures every entry regardless of who tracked it.
 async function fetchAllWorkspaceTimeEntries(teamId, year) {
     const cached = getCachedEntries(teamId, year);
     if (cached) {
@@ -67,8 +89,7 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
     const teamData = await cuFetch(`/team/${teamId}`);
     const members = teamData.team?.members || [];
 
-    const yearStart = new Date(`${year}-01-01T00:00:00Z`).getTime();
-    const yearEnd   = new Date(`${year}-12-31T23:59:59Z`).getTime();
+    const { start: yearStart, end: yearEnd } = yearRange(year);
 
     const all = [];
     const errors = [];
@@ -78,6 +99,7 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
         const mine = await cuFetch(`/team/${teamId}/time_entries`, {
             start_date: yearStart,
             end_date: yearEnd,
+            include_location_names: 'true',
         });
         all.push(...(mine.data || []));
     } catch (e) {
@@ -93,6 +115,7 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
                 start_date: yearStart,
                 end_date: yearEnd,
                 assignee: uid,
+                include_location_names: 'true',
             });
             const entries = (data.data || []);
             // Deduplicate by entry.id (in case self overlaps)
@@ -107,6 +130,47 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
     console.log(`[profitability] fetched ${all.length} entries from ${members.length} members${errors.length ? ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})` : ''}`);
     setCachedEntries(teamId, year, all);
     return all;
+}
+
+// Fetch time entries scoped to a specific list / folder / space. Unlike the
+// per-assignee approach, this includes Guests / external collaborators (since
+// the filter is by location, not by user). Returns the raw entries array.
+async function fetchEntriesByLocation(teamId, year, kind, locationId) {
+    const { start, end } = yearRange(year);
+    const param =
+        kind === 'folder' ? 'folder_id'
+      : kind === 'space'  ? 'space_id'
+      :                     'list_id';
+    const data = await cuFetch(`/team/${teamId}/time_entries`, {
+        start_date: start,
+        end_date: end,
+        include_location_names: 'true',
+        [param]: locationId,
+    });
+    return data.data || [];
+}
+
+// Fetch and merge entries for an array of mappings ({ kind, id }). Deduped
+// by entry.id so the same entry is never counted twice if a client maps to
+// both a folder and one of its lists.
+async function fetchEntriesForMappings(teamId, year, mappings) {
+    const seen = new Map(); // id -> entry
+    const errors = [];
+    for (const { kind, id } of mappings) {
+        if (!id) continue;
+        try {
+            const entries = await fetchEntriesByLocation(teamId, year, kind, id);
+            for (const e of entries) {
+                if (!seen.has(e.id)) seen.set(e.id, e);
+            }
+        } catch (e) {
+            errors.push(`${kind}:${id}: ${e.message}`);
+        }
+    }
+    if (errors.length) {
+        console.warn(`[profitability] location fetch errors (${errors.length}): ${errors.slice(0, 5).join(' | ')}`);
+    }
+    return { entries: Array.from(seen.values()), errors };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -760,19 +824,44 @@ router.get('/accounts/:year', async (req, res) => {
             detailsSumByMb[mid] = (detailsSumByMb[mid] || 0) + Number(d.amount || 0);
         }
 
-        // 4. Time entries: workspace-wide, paginado por mes. Aislamos errores
-        // de ClickUp para que el endpoint siga devolviendo el resto.
+        // 4. Time entries: fetch por cada localización mapeada (list/folder/space).
+        // Esto incluye entries de Guests/freelancers que no aparecen en team.members
+        // (que es lo que sí ve el dashboard nativo de ClickUp). Aislamos errores
+        // para que el endpoint siga devolviendo el resto.
+        const parseMapping = (raw) => {
+            const id = String(raw || '');
+            if (id.startsWith('folder:')) return { kind: 'folder', id: id.slice(7) };
+            if (id.startsWith('space:'))  return { kind: 'space',  id: id.slice(6) };
+            return { kind: 'list', id };
+        };
+
+        // Mappings únicos a consultar (un mismo list/folder puede repetirse entre filas)
+        const uniqueMappings = [];
+        const mappingSeen = new Set();
+        const mappingByClient = new Map(); // clientId -> [{kind,id}]
+        for (const clRow of clientListRows) {
+            const m = parseMapping(clRow.clickup_list_id);
+            if (!m.id) continue;
+            const key = `${m.kind}:${m.id}`;
+            if (!mappingSeen.has(key)) { mappingSeen.add(key); uniqueMappings.push(m); }
+            if (!mappingByClient.has(clRow.client_id)) mappingByClient.set(clRow.client_id, []);
+            mappingByClient.get(clRow.client_id).push(m);
+        }
+
         let allEntries = [];
         let clickup_error = null;
+        let locationErrors = [];
         try {
-            allEntries = await fetchAllWorkspaceTimeEntries(TEAM_ID, year);
-            console.log(`[profitability] ClickUp returned ${allEntries.length} time entries for ${year}`);
+            const fetched = await fetchEntriesForMappings(TEAM_ID, year, uniqueMappings);
+            allEntries = fetched.entries;
+            locationErrors = fetched.errors;
+            console.log(`[profitability] ClickUp returned ${allEntries.length} entries across ${uniqueMappings.length} locations for ${year}`);
         } catch (e) {
             clickup_error = e.message;
             console.error(`[profitability] ClickUp time entries fetch failed:`, e.message);
         }
 
-        // Agrupar entries por list, folder y space (un cliente puede estar mapeado a cualquiera de los tres)
+        // Indexar entries por list, folder y space para resolver cada mapping
         const timeEntriesByList = {};
         const timeEntriesByFolder = {};
         const timeEntriesBySpace = {};
@@ -786,11 +875,9 @@ router.get('/accounts/:year', async (req, res) => {
             if (spaceId)  (timeEntriesBySpace[spaceId]   = timeEntriesBySpace[spaceId]   || []).push(e);
         }
 
-        // Resolver entries de un mapping. El ID puede llevar prefijo "folder:" o "space:".
-        const entriesForMapping = (raw) => {
-            const id = String(raw || '');
-            if (id.startsWith('folder:')) return timeEntriesByFolder[id.slice(7)] || [];
-            if (id.startsWith('space:'))  return timeEntriesBySpace[id.slice(6)]  || [];
+        const entriesForMapping = ({ kind, id }) => {
+            if (kind === 'folder') return timeEntriesByFolder[id] || [];
+            if (kind === 'space')  return timeEntriesBySpace[id]  || [];
             return timeEntriesByList[id] || [];
         };
 
@@ -813,7 +900,8 @@ router.get('/accounts/:year', async (req, res) => {
         for (const clRow of clientListRows) {
             const clientId = clRow.client_id;
             const clientName = clRow.clients?.name || clientId;
-            const entries = entriesForMapping(clRow.clickup_list_id);
+            const mapping = parseMapping(clRow.clickup_list_id);
+            const entries = entriesForMapping(mapping);
 
             if (!clientMonthData[clientId]) {
                 clientMonthData[clientId] = {
@@ -822,11 +910,15 @@ router.get('/accounts/:year', async (req, res) => {
                 };
             }
 
+            // Dedupe by entry id within a client (in case a client has multiple
+            // mappings — list + parent folder — that would otherwise double-count)
+            const seenIds = new Set();
             for (const entry of entries) {
+                if (seenIds.has(entry.id)) continue;
+                seenIds.add(entry.id);
                 const ms = Number(entry.duration || 0);
                 const hours = ms / 3_600_000;
-                const entryDate = new Date(Number(entry.start));
-                const month = entryDate.getMonth();
+                const month = monthInMadrid(Number(entry.start));
                 const uid = String(entry.user?.id || '');
                 const username = entry.user?.username || '';
                 const { cost: costPerHour, source } = resolveCost(uid, username);
@@ -938,6 +1030,8 @@ router.get('/accounts/:year', async (req, res) => {
             clickup_error,
             debug: {
                 total_entries_fetched: allEntries.length,
+                location_fetch_errors: locationErrors,
+                unique_locations_queried: uniqueMappings.length,
                 configured_lists: clientListRows.length,
                 monthly_billing_rows: (mbRows || []).length,
                 billing_details_rows: billingDetails.length,
