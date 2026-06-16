@@ -816,7 +816,6 @@ export default function Profitability() {
                 if (!freshAccount) { setTeam(null); return null; }
                 return <TeamModal account={freshAccount} monthIdx={team.month} year={year} onClose={() => setTeam(null)} />;
             })()}
-            )}
             {showGuide && <ColumnGuide onClose={() => setShowGuide(false)} />}
             <ProfitabilityHint isSuperAdmin={isSuperAdmin()} />
         </div>
