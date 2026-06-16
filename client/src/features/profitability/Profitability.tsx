@@ -23,6 +23,9 @@ function eur(n: number) {
 function eurDec(n: number) {
     return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
+function round2(n: number) {
+    return Math.round(n * 100) / 100;
+}
 
 const HINT_KEY = 'fi_profitability_hint_v1';
 
@@ -150,9 +153,10 @@ function TeamModal({ account, monthIdx, year, onClose }: {
     const qc = useQueryClient();
     const m = monthIdx !== null ? account.monthly[monthIdx] : null;
 
+    // Personas manuales con coste resuelto desde P&L (mismo año que la vista)
     const { data: personsData } = useQuery({
-        queryKey: ['manual-persons'],
-        queryFn: () => adminApi.getManualPersons(),
+        queryKey: ['manual-persons', year],
+        queryFn: () => adminApi.getManualPersons(year),
         enabled: m !== null,
     });
     const persons = personsData?.persons || [];
@@ -162,8 +166,60 @@ function TeamModal({ account, monthIdx, year, onClose }: {
     const [addingPersonId, setAddingPersonId] = useState<string>('');
     const [addingHours, setAddingHours] = useState('');
 
-    const refetchProfitability = () => {
-        qc.invalidateQueries({ queryKey: ['profitability-accounts'] });
+    // Resolver coste/hora final de una persona (auto desde P&L o override)
+    const resolveCost = (personId: string): { cph: number; source: string } => {
+        const p = persons.find(x => x.id === personId);
+        if (!p) return { cph: 0, source: 'manual' };
+        if ((p.resolved_cost_per_hour ?? 0) > 0) {
+            return { cph: p.resolved_cost_per_hour!, source: p.resolved_source === 'matched' ? 'manual-pl' : 'manual' };
+        }
+        return { cph: Number(p.cost_per_hour || 0), source: 'manual' };
+    };
+
+    // Actualización optimista del cache de /accounts/:year sin esperar refetch.
+    // Recalcula hours, labor_cost, gross_profit y margin_pct del mes afectado
+    // y los totales de la cuenta. Si algo se desvía con el backend, el próximo
+    // refetch (cuando recargue la página o cambie de año) reconcilia.
+    const applyOptimistic = (mutator: (acc: AccountProfitability) => AccountProfitability) => {
+        qc.setQueryData(['profitability-accounts', year], (old: any) => {
+            if (!old || !Array.isArray(old.accounts)) return old;
+            return {
+                ...old,
+                accounts: old.accounts.map((acc: AccountProfitability) =>
+                    acc.client_id === account.client_id ? recomputeTotals(mutator(acc)) : acc
+                ),
+            };
+        });
+    };
+
+    const recomputeTotals = (acc: AccountProfitability): AccountProfitability => {
+        const monthly = acc.monthly.map(mo => {
+            const labor = mo.members.reduce((s, mb) => s + mb.labor_cost, 0);
+            const hours = mo.members.reduce((s, mb) => s + mb.hours, 0);
+            const grossProfit = mo.revenue - labor;
+            const marginPct = mo.revenue > 0 && hours > 0 ? (grossProfit / mo.revenue) * 100 : null;
+            return {
+                ...mo,
+                hours: round2(hours),
+                labor_cost: round2(labor),
+                gross_profit: round2(grossProfit),
+                margin_pct: marginPct !== null ? Math.round(marginPct * 10) / 10 : null,
+            };
+        });
+        const totalRevenue = monthly.reduce((s, mo) => s + mo.revenue, 0);
+        const totalLaborCost = monthly.reduce((s, mo) => s + mo.labor_cost, 0);
+        const totalHours = monthly.reduce((s, mo) => s + mo.hours, 0);
+        const totalProfit = totalRevenue - totalLaborCost;
+        const totalMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : null;
+        return {
+            ...acc,
+            monthly,
+            total_revenue: round2(totalRevenue),
+            total_labor_cost: round2(totalLaborCost),
+            total_hours: round2(totalHours),
+            total_profit: round2(totalProfit),
+            total_margin_pct: totalMargin !== null ? Math.round(totalMargin * 10) / 10 : null,
+        };
     };
 
     const upsert = useMutation({
@@ -175,32 +231,77 @@ function TeamModal({ account, monthIdx, year, onClose }: {
                 month: (monthIdx ?? 0) + 1,
                 hours: params.hours,
             }),
-        onSuccess: () => {
+        onSuccess: (response, variables) => {
+            const entry = response.entry;
+            const person = persons.find(p => p.id === variables.manual_person_id);
+            const { cph, source } = resolveCost(variables.manual_person_id);
+            const hours = Number(entry.hours);
+
+            applyOptimistic(acc => {
+                const targetMonth = entry.month - 1;
+                return {
+                    ...acc,
+                    monthly: acc.monthly.map((mo, mi) => {
+                        if (mi !== targetMonth) return mo;
+                        const idx = mo.members.findIndex(mb => mb.manual_person_id === variables.manual_person_id);
+                        const newMember: ProfitabilityMember = {
+                            name: person?.name || entry.manual_person?.name || '',
+                            hours,
+                            labor_cost: round2(hours * cph),
+                            cost_per_hour: cph,
+                            source,
+                            manual_person_id: variables.manual_person_id,
+                            manual_hours_id: entry.id,
+                        };
+                        const members = idx >= 0
+                            ? mo.members.map((mb, i) => i === idx ? newMember : mb)
+                            : [...mo.members, newMember];
+                        return { ...mo, members };
+                    }),
+                };
+            });
+
             toast.success('Horas guardadas');
-            refetchProfitability();
             setEditingHoursId(null);
             setEditingValue('');
             setAddingPersonId('');
             setAddingHours('');
+
+            // Reconciliación silenciosa en background — sin invalidar para que
+            // la UI no se quede en estado "loading". La próxima visita a la
+            // página trae datos frescos.
+            qc.invalidateQueries({ queryKey: ['profitability-accounts', year], refetchType: 'none' });
         },
         onError: (e: Error) => toast.error(e.message),
     });
 
     const remove = useMutation({
         mutationFn: (id: string) => adminApi.deleteManualHours(id),
-        onSuccess: () => { toast.success('Horas borradas'); refetchProfitability(); },
+        onSuccess: (_data, id) => {
+            applyOptimistic(acc => ({
+                ...acc,
+                monthly: acc.monthly.map(mo => ({
+                    ...mo,
+                    members: mo.members.filter(mb => mb.manual_hours_id !== id),
+                })),
+            }));
+            toast.success('Horas borradas');
+            qc.invalidateQueries({ queryKey: ['profitability-accounts', year], refetchType: 'none' });
+        },
         onError: (e: Error) => toast.error(e.message),
     });
 
     if (!m) return null;
 
-    const manualMembers = m.members.filter(mb => mb.source === 'manual');
-    const clickupMembers = m.members.filter(mb => mb.source !== 'manual');
-    const manualPersonIdsUsed = new Set(manualMembers.map(mb => mb.manual_person_id).filter(Boolean));
+    // Una entry es "manual" si tiene manual_person_id (cubre tanto 'manual'
+    // como 'manual-pl' que es el caso de coste auto-resuelto desde P&L).
+    const manualMembers = m.members.filter(mb => !!mb.manual_person_id);
+    const clickupMembers = m.members.filter(mb => !mb.manual_person_id);
+    const manualPersonIdsUsed = new Set(manualMembers.map(mb => mb.manual_person_id));
     const availablePersons = persons.filter(p => !manualPersonIdsUsed.has(p.id));
 
     const renderMemberRow = (mb: ProfitabilityMember) => {
-        const isManual = mb.source === 'manual';
+        const isManual = !!mb.manual_person_id;
         const isEditing = isManual && editingHoursId === mb.manual_hours_id;
         return (
             <div key={mb.manual_hours_id || mb.name} className="flex items-center justify-between py-1.5 text-xs gap-2">
@@ -281,11 +382,13 @@ function TeamModal({ account, monthIdx, year, onClose }: {
                                 onChange={e => setAddingPersonId(e.target.value)}
                                 className="flex-1 h-8 px-2 rounded-md border border-border/60 bg-background text-xs"
                             >
-                                {availablePersons.map(p => (
-                                    <option key={p.id} value={p.id}>
-                                        {p.name}{Number(p.cost_per_hour) > 0 ? ` · ${Number(p.cost_per_hour).toFixed(2)}€/h override` : ' · auto P&L'}
-                                    </option>
-                                ))}
+                                {availablePersons.map(p => {
+                                    const cph = (p.resolved_cost_per_hour ?? Number(p.cost_per_hour || 0));
+                                    const label = cph > 0
+                                        ? `${p.name} · ${cph.toFixed(2)}€/h${p.resolved_source === 'matched' ? ' (P&L)' : ''}`
+                                        : `${p.name} · sin coste`;
+                                    return <option key={p.id} value={p.id}>{label}</option>;
+                                })}
                             </select>
                             <input
                                 type="number" step="0.01" min="0" autoFocus
