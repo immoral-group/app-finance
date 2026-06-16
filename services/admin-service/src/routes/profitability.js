@@ -53,10 +53,114 @@ function norm(s) {
     return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 }
 
+// Get user IDs of a single list via /list/{id}/member.
+// Returns [] on error so one bad list doesn't break the rest.
+async function getMembersOfList(listId) {
+    try {
+        const data = await cuFetch(`/list/${listId}/member`);
+        return (data.members || []).map(u => String(u?.id || '')).filter(Boolean);
+    } catch (e) {
+        console.warn(`[profitability] /list/${listId}/member failed: ${e.message}`);
+        return [];
+    }
+}
+
+// Expand a folder mapping into its list IDs.
+async function getListsInFolder(folderId) {
+    try {
+        const data = await cuFetch(`/folder/${folderId}`);
+        return (data.lists || []).map(l => String(l?.id || '')).filter(Boolean);
+    } catch (e) {
+        console.warn(`[profitability] /folder/${folderId} failed: ${e.message}`);
+        return [];
+    }
+}
+
+// Expand a space mapping into all its list IDs (folder lists + folderless lists).
+async function getListsInSpace(spaceId) {
+    const ids = [];
+    try {
+        const [foldersData, folderlessData] = await Promise.all([
+            cuFetch(`/space/${spaceId}/folder`, { archived: 'false' }),
+            cuFetch(`/space/${spaceId}/list`,   { archived: 'false' }),
+        ]);
+        for (const f of (foldersData.folders || [])) {
+            for (const l of (f.lists || [])) if (l?.id) ids.push(String(l.id));
+        }
+        for (const l of (folderlessData.lists || [])) if (l?.id) ids.push(String(l.id));
+    } catch (e) {
+        console.warn(`[profitability] /space/${spaceId} expansion failed: ${e.message}`);
+    }
+    return ids;
+}
+
+// Discover ALL user IDs that have entries we should fetch:
+//   - team.members (full workspace members)
+//   - Guests / external collaborators with access to any list configured in
+//     profitability_client_lists (these are NOT in /team/{id} so they would
+//     otherwise be invisible to the per-assignee fetch).
+//
+// For folder/space mappings, we expand them to their inner lists and scan each.
+// All discovery errors are isolated so one missing list doesn't break the rest.
+async function getExtendedAssignees(teamId) {
+    const ids = new Set();
+
+    // 1. Full workspace members
+    try {
+        const teamData = await cuFetch(`/team/${teamId}`);
+        for (const m of (teamData.team?.members || [])) {
+            if (m.user?.id) ids.add(String(m.user.id));
+        }
+    } catch (e) {
+        console.warn(`[profitability] team members fetch failed: ${e.message}`);
+    }
+
+    // 2. Guests: enumerate list IDs from configured client mappings
+    let rows = [];
+    try {
+        const r = await supabase
+            .from('profitability_client_lists')
+            .select('clickup_list_id');
+        rows = r.data || [];
+    } catch (e) {
+        console.warn(`[profitability] supabase client_lists read failed: ${e.message}`);
+    }
+
+    const listIdsToScan = new Set();
+    for (const r of rows) {
+        const raw = String(r.clickup_list_id || '');
+        if (!raw) continue;
+        if (raw.startsWith('folder:')) {
+            const inner = await getListsInFolder(raw.slice(7));
+            inner.forEach(id => listIdsToScan.add(id));
+        } else if (raw.startsWith('space:')) {
+            const inner = await getListsInSpace(raw.slice(6));
+            inner.forEach(id => listIdsToScan.add(id));
+        } else {
+            listIdsToScan.add(raw);
+        }
+    }
+
+    let guestsAdded = 0;
+    for (const listId of listIdsToScan) {
+        const uids = await getMembersOfList(listId);
+        for (const uid of uids) {
+            if (!ids.has(uid)) { ids.add(uid); guestsAdded++; }
+        }
+    }
+
+    console.log(`[profitability] assignee discovery: ${ids.size} total IDs (${guestsAdded} new from ${listIdsToScan.size} lists)`);
+    return Array.from(ids);
+}
+
 // Fetch ALL time entries from a workspace.
 // ClickUp's /time_entries returns only the authenticated user's entries unless
 // `assignee=<id>` is passed, AND it must be passed ONE user at a time (passing
-// multiple IDs at once returns 403 TIMEENTRY_059). So we loop per-member.
+// multiple IDs at once returns 403 TIMEENTRY_059). So we loop per-assignee.
+//
+// Critical: the assignee list must include Guests / external collaborators
+// (not in /team/{id}.members). We discover them via /list/{id}/member for
+// each list configured in profitability_client_lists.
 async function fetchAllWorkspaceTimeEntries(teamId, year) {
     const cached = getCachedEntries(teamId, year);
     if (cached) {
@@ -64,14 +168,23 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
         return cached;
     }
 
-    const teamData = await cuFetch(`/team/${teamId}`);
-    const members = teamData.team?.members || [];
+    const assigneeIds = await getExtendedAssignees(teamId);
 
     const yearStart = new Date(`${year}-01-01T00:00:00Z`).getTime();
     const yearEnd   = new Date(`${year}-12-31T23:59:59Z`).getTime();
 
     const all = [];
+    const seen = new Set();
     const errors = [];
+
+    const pushEntries = (list) => {
+        for (const e of list) {
+            if (!e?.id) continue;
+            if (seen.has(e.id)) continue;
+            seen.add(e.id);
+            all.push(e);
+        }
+    };
 
     // First: my own entries (no assignee needed)
     try {
@@ -79,32 +192,26 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
             start_date: yearStart,
             end_date: yearEnd,
         });
-        all.push(...(mine.data || []));
+        pushEntries(mine.data || []);
     } catch (e) {
         errors.push(`self: ${e.message}`);
     }
 
-    // Then: each member individually
-    for (const m of members) {
-        const uid = m.user?.id;
-        if (!uid) continue;
+    // Then: each assignee individually (members + discovered guests)
+    for (const uid of assigneeIds) {
         try {
             const data = await cuFetch(`/team/${teamId}/time_entries`, {
                 start_date: yearStart,
                 end_date: yearEnd,
                 assignee: uid,
             });
-            const entries = (data.data || []);
-            // Deduplicate by entry.id (in case self overlaps)
-            for (const e of entries) {
-                if (!all.find(x => x.id === e.id)) all.push(e);
-            }
+            pushEntries(data.data || []);
         } catch (e) {
-            errors.push(`user ${m.user?.username || uid}: ${e.message}`);
+            errors.push(`user ${uid}: ${e.message}`);
         }
     }
 
-    console.log(`[profitability] fetched ${all.length} entries from ${members.length} members${errors.length ? ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})` : ''}`);
+    console.log(`[profitability] fetched ${all.length} entries from ${assigneeIds.length} assignees${errors.length ? ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})` : ''}`);
     setCachedEntries(teamId, year, all);
     return all;
 }
