@@ -915,7 +915,20 @@ router.get('/accounts/:year', async (req, res) => {
             if (!person) continue;
             const hours = Number(row.hours || 0);
             if (hours <= 0) continue;
-            const cph = Number(person.cost_per_hour || 0);
+
+            // Coste/hora: primero buscar en P&L (mismo mecanismo que para
+            // usuarios ClickUp); si no hay match, usar override de la persona
+            // manual (para freelancers/externos sin sueldo en P&L).
+            const plMatch = matchClickUpUser(person.name, personByName);
+            let cph = 0;
+            let source = 'manual';
+            if (plMatch && plMatch.cost_per_hour > 0) {
+                cph = plMatch.cost_per_hour;
+                source = 'manual-pl';
+            } else if (Number(person.cost_per_hour) > 0) {
+                cph = Number(person.cost_per_hour);
+                source = 'manual';
+            }
             const laborCost = hours * cph;
 
             if (!clientMonthData[cid]) {
@@ -935,7 +948,7 @@ router.get('/accounts/:year', async (req, res) => {
                     hours: 0,
                     labor_cost: 0,
                     cost_per_hour: cph,
-                    source: 'manual',
+                    source,
                     manual_person_id: person.id,
                     manual_hours_id: row.id,
                 };

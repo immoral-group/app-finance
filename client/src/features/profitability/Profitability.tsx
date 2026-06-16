@@ -282,7 +282,9 @@ function TeamModal({ account, monthIdx, year, onClose }: {
                                 className="flex-1 h-8 px-2 rounded-md border border-border/60 bg-background text-xs"
                             >
                                 {availablePersons.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name} · {Number(p.cost_per_hour).toFixed(2)}€/h</option>
+                                    <option key={p.id} value={p.id}>
+                                        {p.name}{Number(p.cost_per_hour) > 0 ? ` · ${Number(p.cost_per_hour).toFixed(2)}€/h override` : ' · auto P&L'}
+                                    </option>
                                 ))}
                             </select>
                             <input

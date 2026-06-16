@@ -338,7 +338,9 @@ function ManualPersonsSection() {
             <div className="space-y-3">
                 <p className="text-xs text-muted-foreground">
                     Personas cuyas horas no llegan desde ClickUp (usuarios desactivados, freelancers no enlazados, etc.).
-                    Configura aquí su coste/hora. Las horas por cliente/mes se cargan desde el modal mensual de cada cuenta.
+                    El coste/hora se calcula automáticamente desde el P&amp;L si su nombre coincide con una categoría de gasto.
+                    Sólo introduce un coste/hora aquí si la persona no tiene sueldo registrado en P&amp;L (p.ej. freelancers externos).
+                    Las horas por cliente/mes se cargan desde el modal mensual de cada cuenta.
                 </p>
 
                 {isLoading ? (
@@ -362,7 +364,11 @@ function ManualPersonsSection() {
                                 {persons.map(p => (
                                     <tr key={p.id} className="hover:bg-muted/30">
                                         <td className="px-3 py-2 font-medium text-foreground">{p.name}</td>
-                                        <td className="px-3 py-2 text-right font-mono">{Number(p.cost_per_hour).toFixed(2)} €/h</td>
+                                        <td className="px-3 py-2 text-right font-mono">
+                                            {Number(p.cost_per_hour) > 0
+                                                ? <>{Number(p.cost_per_hour).toFixed(2)} €/h <span className="text-[10px] text-muted-foreground/60 ml-0.5">override</span></>
+                                                : <span className="text-[10px] text-muted-foreground/70 italic">auto · P&L</span>}
+                                        </td>
                                         <td className="px-3 py-2 text-muted-foreground">{p.department || '—'}</td>
                                         <td className="px-3 py-2 text-xs text-muted-foreground truncate max-w-[200px]">{p.notes || '—'}</td>
                                         <td className="px-3 py-2">
@@ -387,8 +393,9 @@ function ManualPersonsSection() {
                                 <input className="w-full h-9 px-2.5 rounded-md border border-border/60 bg-background text-sm" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="p.ej. Alba Ortega" />
                             </label>
                             <label className="space-y-1">
-                                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Coste por hora (€)</span>
-                                <input type="number" step="0.01" min="0" className="w-full h-9 px-2.5 rounded-md border border-border/60 bg-background text-sm font-mono" value={draft.cost_per_hour} onChange={e => setDraft(d => ({ ...d, cost_per_hour: e.target.value }))} placeholder="0.00" />
+                                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Coste/hora override (€) <span className="normal-case opacity-60">— opcional</span></span>
+                                <input type="number" step="0.01" min="0" className="w-full h-9 px-2.5 rounded-md border border-border/60 bg-background text-sm font-mono" value={draft.cost_per_hour} onChange={e => setDraft(d => ({ ...d, cost_per_hour: e.target.value }))} placeholder="0.00 — si vacío usa el sueldo de P&L" />
+                                <span className="text-[10px] text-muted-foreground/70 block">Déjalo en 0 si la persona tiene sueldo en P&amp;L (se usa el cálculo automático).</span>
                             </label>
                             <label className="space-y-1">
                                 <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Departamento (opcional)</span>
