@@ -536,6 +536,29 @@ export const adminApi = {
         fetchApi<{ connected: boolean; error?: string; team_id?: string; team_name?: string; member_count?: number }>('/profitability/clickup/status'),
     refreshClickUpCache: (year: number) =>
         fetchApi<{ ok: boolean; message: string }>('/profitability/clickup/refresh-cache', { method: 'POST', body: JSON.stringify({ year }) }),
+
+    // Manual persons (personas cuyas horas se cargan manualmente)
+    getManualPersons: () =>
+        fetchApi<{ persons: ManualPerson[] }>('/profitability/manual-persons'),
+    createManualPerson: (data: { name: string; cost_per_hour: number; department?: string | null; notes?: string | null }) =>
+        fetchApi<{ person: ManualPerson }>('/profitability/manual-persons', { method: 'POST', body: JSON.stringify(data) }),
+    updateManualPerson: (id: string, data: Partial<{ name: string; cost_per_hour: number; department: string | null; notes: string | null }>) =>
+        fetchApi<{ person: ManualPerson }>(`/profitability/manual-persons/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteManualPerson: (id: string) =>
+        fetchApi<{ ok: boolean }>(`/profitability/manual-persons/${id}`, { method: 'DELETE' }),
+
+    // Manual hours (horas manuales por cliente, persona, año, mes)
+    getManualHours: (params: { year?: number; client_id?: string } = {}) => {
+        const qs = new URLSearchParams();
+        if (params.year !== undefined) qs.set('year', String(params.year));
+        if (params.client_id) qs.set('client_id', params.client_id);
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return fetchApi<{ hours: ManualHourEntry[] }>(`/profitability/manual-hours${suffix}`);
+    },
+    upsertManualHours: (data: { client_id: string; manual_person_id: string; year: number; month: number; hours: number }) =>
+        fetchApi<{ entry: ManualHourEntry }>('/profitability/manual-hours', { method: 'POST', body: JSON.stringify(data) }),
+    deleteManualHours: (id: string) =>
+        fetchApi<{ ok: boolean }>(`/profitability/manual-hours/${id}`, { method: 'DELETE' }),
 };
 
 export interface IcexRow {
@@ -628,7 +651,38 @@ export interface MonthlyProfitability {
     revenue: number;
     gross_profit: number;
     margin_pct: number | null;
-    members: { name: string; hours: number; labor_cost: number; cost_per_hour: number; source: string }[];
+    members: ProfitabilityMember[];
+}
+
+export interface ProfitabilityMember {
+    name: string;
+    hours: number;
+    labor_cost: number;
+    cost_per_hour: number;
+    source: string;
+    manual_person_id?: string;
+    manual_hours_id?: string;
+}
+
+export interface ManualPerson {
+    id: string;
+    name: string;
+    cost_per_hour: number;
+    department: string | null;
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ManualHourEntry {
+    id: string;
+    client_id: string;
+    manual_person_id: string;
+    year: number;
+    month: number;
+    hours: number;
+    manual_person?: { id: string; name: string; cost_per_hour: number; department: string | null };
+    client?: { id: string; name: string };
 }
 
 export interface AccountProfitability {

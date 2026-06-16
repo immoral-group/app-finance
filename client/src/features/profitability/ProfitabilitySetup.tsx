@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi } from '@/lib/api/admin';
-import { ArrowLeft, CheckCircle2, AlertCircle, Info, RefreshCw, ChevronDown, Sparkles, Save } from 'lucide-react';
+import { adminApi, type ManualPerson } from '@/lib/api/admin';
+import { ArrowLeft, CheckCircle2, AlertCircle, Info, RefreshCw, ChevronDown, Sparkles, Save, Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -271,6 +271,155 @@ function ClientListsSection({ year }: { year: number }) {
     );
 }
 
+// ── Manual Persons ────────────────────────────────────────────────────────────
+// Personas cuyas horas se cargan manualmente (usuarios desactivados de ClickUp,
+// freelancers no enlazados, etc). Las horas por cliente/mes se cargan en el
+// modal mensual de cada cuenta.
+function ManualPersonsSection() {
+    const qc = useQueryClient();
+    const { data, isLoading } = useQuery({
+        queryKey: ['manual-persons'],
+        queryFn: () => adminApi.getManualPersons(),
+    });
+
+    const [editing, setEditing] = useState<ManualPerson | null>(null);
+    const [draft, setDraft] = useState<{ name: string; cost_per_hour: string; department: string; notes: string }>({ name: '', cost_per_hour: '', department: '', notes: '' });
+    const [showForm, setShowForm] = useState(false);
+
+    const resetForm = () => {
+        setDraft({ name: '', cost_per_hour: '', department: '', notes: '' });
+        setEditing(null);
+        setShowForm(false);
+    };
+
+    const startEdit = (p: ManualPerson) => {
+        setEditing(p);
+        setDraft({
+            name: p.name,
+            cost_per_hour: String(p.cost_per_hour ?? 0),
+            department: p.department || '',
+            notes: p.notes || '',
+        });
+        setShowForm(true);
+    };
+
+    const create = useMutation({
+        mutationFn: () => adminApi.createManualPerson({
+            name: draft.name.trim(),
+            cost_per_hour: Number(draft.cost_per_hour || 0),
+            department: draft.department.trim() || null,
+            notes: draft.notes.trim() || null,
+        }),
+        onSuccess: () => { toast.success('Persona manual creada'); qc.invalidateQueries({ queryKey: ['manual-persons'] }); resetForm(); },
+        onError: (e: Error) => toast.error(e.message),
+    });
+
+    const update = useMutation({
+        mutationFn: () => adminApi.updateManualPerson(editing!.id, {
+            name: draft.name.trim(),
+            cost_per_hour: Number(draft.cost_per_hour || 0),
+            department: draft.department.trim() || null,
+            notes: draft.notes.trim() || null,
+        }),
+        onSuccess: () => { toast.success('Persona actualizada'); qc.invalidateQueries({ queryKey: ['manual-persons'] }); qc.invalidateQueries({ queryKey: ['profitability-accounts'] }); resetForm(); },
+        onError: (e: Error) => toast.error(e.message),
+    });
+
+    const remove = useMutation({
+        mutationFn: (id: string) => adminApi.deleteManualPerson(id),
+        onSuccess: () => { toast.success('Persona borrada'); qc.invalidateQueries({ queryKey: ['manual-persons'] }); qc.invalidateQueries({ queryKey: ['profitability-accounts'] }); },
+        onError: (e: Error) => toast.error(e.message),
+    });
+
+    const persons = data?.persons || [];
+
+    return (
+        <Section title="Personas manuales">
+            <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                    Personas cuyas horas no llegan desde ClickUp (usuarios desactivados, freelancers no enlazados, etc.).
+                    Configura aquí su coste/hora. Las horas por cliente/mes se cargan desde el modal mensual de cada cuenta.
+                </p>
+
+                {isLoading ? (
+                    <div className="text-xs text-muted-foreground">Cargando…</div>
+                ) : (
+                    <div className="border border-border/60 rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+                                <tr>
+                                    <th className="text-left px-3 py-2 font-medium">Nombre</th>
+                                    <th className="text-right px-3 py-2 font-medium">Coste/hora</th>
+                                    <th className="text-left px-3 py-2 font-medium">Departamento</th>
+                                    <th className="text-left px-3 py-2 font-medium">Notas</th>
+                                    <th className="px-3 py-2 w-20"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/40">
+                                {persons.length === 0 && (
+                                    <tr><td colSpan={5} className="px-3 py-4 text-center text-xs text-muted-foreground">Sin personas manuales</td></tr>
+                                )}
+                                {persons.map(p => (
+                                    <tr key={p.id} className="hover:bg-muted/30">
+                                        <td className="px-3 py-2 font-medium text-foreground">{p.name}</td>
+                                        <td className="px-3 py-2 text-right font-mono">{Number(p.cost_per_hour).toFixed(2)} €/h</td>
+                                        <td className="px-3 py-2 text-muted-foreground">{p.department || '—'}</td>
+                                        <td className="px-3 py-2 text-xs text-muted-foreground truncate max-w-[200px]">{p.notes || '—'}</td>
+                                        <td className="px-3 py-2">
+                                            <div className="flex items-center gap-1 justify-end">
+                                                <button onClick={() => startEdit(p)} className="h-7 w-7 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center" title="Editar"><Pencil size={13} /></button>
+                                                <button onClick={() => { if (confirm(`¿Borrar a ${p.name}? Se borran también sus horas manuales en todas las cuentas.`)) remove.mutate(p.id); }} className="h-7 w-7 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 flex items-center justify-center" title="Borrar"><Trash2 size={13} /></button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+
+                {showForm ? (
+                    <div className="bg-muted/30 border border-border/60 rounded-lg p-4 space-y-3">
+                        <div className="text-xs font-semibold text-foreground">{editing ? 'Editar persona' : 'Nueva persona manual'}</div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <label className="space-y-1">
+                                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Nombre</span>
+                                <input className="w-full h-9 px-2.5 rounded-md border border-border/60 bg-background text-sm" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="p.ej. Alba Ortega" />
+                            </label>
+                            <label className="space-y-1">
+                                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Coste por hora (€)</span>
+                                <input type="number" step="0.01" min="0" className="w-full h-9 px-2.5 rounded-md border border-border/60 bg-background text-sm font-mono" value={draft.cost_per_hour} onChange={e => setDraft(d => ({ ...d, cost_per_hour: e.target.value }))} placeholder="0.00" />
+                            </label>
+                            <label className="space-y-1">
+                                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Departamento (opcional)</span>
+                                <input className="w-full h-9 px-2.5 rounded-md border border-border/60 bg-background text-sm" value={draft.department} onChange={e => setDraft(d => ({ ...d, department: e.target.value }))} />
+                            </label>
+                            <label className="space-y-1">
+                                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Notas (opcional)</span>
+                                <input className="w-full h-9 px-2.5 rounded-md border border-border/60 bg-background text-sm" value={draft.notes} onChange={e => setDraft(d => ({ ...d, notes: e.target.value }))} />
+                            </label>
+                        </div>
+                        <div className="flex items-center gap-2 justify-end pt-1">
+                            <button onClick={resetForm} className="h-8 px-3 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted">Cancelar</button>
+                            <button
+                                onClick={() => editing ? update.mutate() : create.mutate()}
+                                disabled={!draft.name.trim() || create.isPending || update.isPending}
+                                className="h-8 px-3 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-1.5"
+                            >
+                                <Save size={12} />{editing ? 'Guardar' : 'Crear'}
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <button onClick={() => setShowForm(true)} className="h-8 px-3 rounded-md text-xs font-medium border border-dashed border-border/80 text-muted-foreground hover:text-foreground hover:bg-muted/40 inline-flex items-center gap-1.5">
+                        <Plus size={13} />Añadir persona manual
+                    </button>
+                )}
+            </div>
+        </Section>
+    );
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 export function ProfitabilitySetup({ onBack, year }: { onBack: () => void; year: number }) {
     return (
@@ -284,12 +433,13 @@ export function ProfitabilitySetup({ onBack, year }: { onBack: () => void; year:
                 </button>
                 <div>
                     <h1 className="text-xl font-bold text-foreground tracking-tight">Configurar Rentabilidad</h1>
-                    <p className="text-xs text-muted-foreground mt-0.5">Coste/hora calculado automáticamente · solo configura el mapeo cliente→lista ClickUp</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Coste/hora calculado automáticamente · mapeo cliente→lista ClickUp · personas manuales</p>
                 </div>
             </div>
 
             <AutoMappingSection year={year} />
             <ClientListsSection year={year} />
+            <ManualPersonsSection />
         </div>
     );
 }

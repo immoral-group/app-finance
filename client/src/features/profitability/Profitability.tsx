@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, AccountProfitability } from '@/lib/api/admin';
+import { adminApi, AccountProfitability, ProfitabilityMember } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info, Plus, Trash2, Pencil, Check } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
 
@@ -143,14 +144,116 @@ function ProfitabilityHint({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 }
 
 // ── Team detail modal ─────────────────────────────────────────────────────────
-function TeamModal({ account, monthIdx, onClose }: {
-    account: AccountProfitability; monthIdx: number | null; onClose: () => void;
+function TeamModal({ account, monthIdx, year, onClose }: {
+    account: AccountProfitability; monthIdx: number | null; year: number; onClose: () => void;
 }) {
+    const qc = useQueryClient();
     const m = monthIdx !== null ? account.monthly[monthIdx] : null;
+
+    const { data: personsData } = useQuery({
+        queryKey: ['manual-persons'],
+        queryFn: () => adminApi.getManualPersons(),
+        enabled: m !== null,
+    });
+    const persons = personsData?.persons || [];
+
+    const [editingHoursId, setEditingHoursId] = useState<string | null>(null);
+    const [editingValue, setEditingValue] = useState('');
+    const [addingPersonId, setAddingPersonId] = useState<string>('');
+    const [addingHours, setAddingHours] = useState('');
+
+    const refetchProfitability = () => {
+        qc.invalidateQueries({ queryKey: ['profitability-accounts'] });
+    };
+
+    const upsert = useMutation({
+        mutationFn: (params: { manual_person_id: string; hours: number }) =>
+            adminApi.upsertManualHours({
+                client_id: account.client_id,
+                manual_person_id: params.manual_person_id,
+                year,
+                month: (monthIdx ?? 0) + 1,
+                hours: params.hours,
+            }),
+        onSuccess: () => {
+            toast.success('Horas guardadas');
+            refetchProfitability();
+            setEditingHoursId(null);
+            setEditingValue('');
+            setAddingPersonId('');
+            setAddingHours('');
+        },
+        onError: (e: Error) => toast.error(e.message),
+    });
+
+    const remove = useMutation({
+        mutationFn: (id: string) => adminApi.deleteManualHours(id),
+        onSuccess: () => { toast.success('Horas borradas'); refetchProfitability(); },
+        onError: (e: Error) => toast.error(e.message),
+    });
+
     if (!m) return null;
+
+    const manualMembers = m.members.filter(mb => mb.source === 'manual');
+    const clickupMembers = m.members.filter(mb => mb.source !== 'manual');
+    const manualPersonIdsUsed = new Set(manualMembers.map(mb => mb.manual_person_id).filter(Boolean));
+    const availablePersons = persons.filter(p => !manualPersonIdsUsed.has(p.id));
+
+    const renderMemberRow = (mb: ProfitabilityMember) => {
+        const isManual = mb.source === 'manual';
+        const isEditing = isManual && editingHoursId === mb.manual_hours_id;
+        return (
+            <div key={mb.manual_hours_id || mb.name} className="flex items-center justify-between py-1.5 text-xs gap-2">
+                <span className="text-foreground font-medium flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{mb.name}</span>
+                    {isManual && <span className="shrink-0 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">Manual</span>}
+                </span>
+                <span className="text-muted-foreground tabular-nums text-right flex items-center gap-1.5 shrink-0">
+                    {isEditing ? (
+                        <>
+                            <input
+                                type="number" step="0.01" min="0" autoFocus
+                                value={editingValue}
+                                onChange={e => setEditingValue(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') upsert.mutate({ manual_person_id: mb.manual_person_id!, hours: Number(editingValue || 0) });
+                                    if (e.key === 'Escape') { setEditingHoursId(null); setEditingValue(''); }
+                                }}
+                                className="w-20 h-7 px-1.5 rounded border border-indigo-400 bg-background text-xs font-mono text-right"
+                            />
+                            <button onClick={() => upsert.mutate({ manual_person_id: mb.manual_person_id!, hours: Number(editingValue || 0) })} disabled={upsert.isPending} className="h-6 w-6 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-600 flex items-center justify-center"><Check size={12} /></button>
+                            <button onClick={() => { setEditingHoursId(null); setEditingValue(''); }} className="h-6 w-6 rounded hover:bg-muted text-muted-foreground flex items-center justify-center"><X size={12} /></button>
+                        </>
+                    ) : (
+                        <>
+                            <span>
+                                {mb.hours.toFixed(2)}h · {eurDec(mb.labor_cost)}
+                                {mb.cost_per_hour > 0 && <span className="ml-1 opacity-50 text-[10px]">@{mb.cost_per_hour.toFixed(2)}€/h</span>}
+                            </span>
+                            {isManual && (
+                                <span className="flex items-center gap-0.5">
+                                    <button
+                                        onClick={() => { setEditingHoursId(mb.manual_hours_id!); setEditingValue(String(mb.hours)); }}
+                                        className="h-6 w-6 rounded hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center"
+                                        title="Editar horas"
+                                    ><Pencil size={11} /></button>
+                                    <button
+                                        onClick={() => { if (confirm(`¿Borrar las horas manuales de ${mb.name} en ${MONTH_NAMES_FULL[monthIdx!]}?`)) remove.mutate(mb.manual_hours_id!); }}
+                                        className="h-6 w-6 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 flex items-center justify-center"
+                                        title="Borrar"
+                                    ><Trash2 size={11} /></button>
+                                </span>
+                            )}
+                        </>
+                    )}
+                </span>
+            </div>
+        );
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-            <div className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3" onClick={e => e.stopPropagation()}>
                 <div className="flex items-start justify-between gap-2">
                     <div>
                         <p className="text-xs text-muted-foreground">{account.client_name}</p>
@@ -159,21 +262,64 @@ function TeamModal({ account, monthIdx, onClose }: {
                     <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground"><X size={14} /></button>
                 </div>
                 <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5"><Users size={11} /> Equipo · {m.hours.toFixed(1)}h</p>
+
                 {m.members.length === 0 ? (
                     <p className="text-xs text-muted-foreground">Sin horas registradas</p>
                 ) : (
                     <div className="divide-y divide-border/30">
-                        {m.members.map(mb => (
-                            <div key={mb.name} className="flex items-center justify-between py-1.5 text-xs">
-                                <span className="text-foreground font-medium">{mb.name}</span>
-                                <span className="text-muted-foreground tabular-nums text-right">
-                                    {mb.hours.toFixed(2)}h · {eurDec(mb.labor_cost)}
-                                    {mb.cost_per_hour > 0 && <span className="ml-1 opacity-50 text-[10px]">@{mb.cost_per_hour.toFixed(2)}€/h</span>}
-                                </span>
-                            </div>
-                        ))}
+                        {clickupMembers.map(renderMemberRow)}
+                        {manualMembers.map(renderMemberRow)}
                     </div>
                 )}
+
+                {/* Añadir persona manual */}
+                <div className="pt-2 border-t border-border/40">
+                    {addingPersonId ? (
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={addingPersonId}
+                                onChange={e => setAddingPersonId(e.target.value)}
+                                className="flex-1 h-8 px-2 rounded-md border border-border/60 bg-background text-xs"
+                            >
+                                {availablePersons.map(p => (
+                                    <option key={p.id} value={p.id}>{p.name} · {Number(p.cost_per_hour).toFixed(2)}€/h</option>
+                                ))}
+                            </select>
+                            <input
+                                type="number" step="0.01" min="0" autoFocus
+                                placeholder="horas"
+                                value={addingHours}
+                                onChange={e => setAddingHours(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter' && addingPersonId && addingHours) {
+                                        upsert.mutate({ manual_person_id: addingPersonId, hours: Number(addingHours) });
+                                    }
+                                    if (e.key === 'Escape') { setAddingPersonId(''); setAddingHours(''); }
+                                }}
+                                className="w-20 h-8 px-2 rounded-md border border-border/60 bg-background text-xs font-mono text-right"
+                            />
+                            <button
+                                onClick={() => upsert.mutate({ manual_person_id: addingPersonId, hours: Number(addingHours || 0) })}
+                                disabled={!addingPersonId || !addingHours || upsert.isPending}
+                                className="h-8 px-3 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                            >Añadir</button>
+                            <button onClick={() => { setAddingPersonId(''); setAddingHours(''); }} className="h-8 w-8 rounded-md hover:bg-muted text-muted-foreground flex items-center justify-center"><X size={13} /></button>
+                        </div>
+                    ) : (
+                        availablePersons.length > 0 ? (
+                            <button
+                                onClick={() => { setAddingPersonId(availablePersons[0].id); setAddingHours(''); }}
+                                className="w-full h-8 rounded-md text-xs font-medium border border-dashed border-border/80 text-muted-foreground hover:text-foreground hover:bg-muted/40 inline-flex items-center justify-center gap-1.5"
+                            ><Plus size={12} />Añadir horas manuales</button>
+                        ) : (
+                            persons.length === 0 ? (
+                                <p className="text-[11px] text-muted-foreground text-center">
+                                    Crea personas manuales en <span className="font-medium">Configurar</span> para poder añadirles horas.
+                                </p>
+                            ) : null
+                        )
+                    )}
+                </div>
             </div>
         </div>
     );
@@ -664,7 +810,7 @@ export default function Profitability() {
             )}
 
             {team && (
-                <TeamModal account={team.account} monthIdx={team.month} onClose={() => setTeam(null)} />
+                <TeamModal account={team.account} monthIdx={team.month} year={year} onClose={() => setTeam(null)} />
             )}
             {showGuide && <ColumnGuide onClose={() => setShowGuide(false)} />}
             <ProfitabilityHint isSuperAdmin={isSuperAdmin()} />

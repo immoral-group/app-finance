@@ -884,6 +884,66 @@ router.get('/accounts/:year', async (req, res) => {
             };
         }
 
+        // 8b. Horas manuales: cargar profitability_manual_hours JOIN manual_persons
+        //     y sumarlas al desglose mensual del cliente como una persona más
+        //     (con source: 'manual'). Esto es el caso de Alba, Leidy y cualquier
+        //     persona que ya no esté accesible vía ClickUp pero que sí trabajó
+        //     en la cuenta.
+        const { data: manualHoursRows } = await supabase
+            .from('profitability_manual_hours')
+            .select('id, client_id, manual_person_id, year, month, hours, manual_person:profitability_manual_persons(id, name, cost_per_hour, department)')
+            .eq('year', year);
+
+        // Para clientes que sólo tienen horas manuales (sin mapping ClickUp ni billing)
+        // necesitamos resolver su nombre para el modal. Resolvemos en bloque.
+        const manualClientIdsMissing = [];
+        for (const row of (manualHoursRows || [])) {
+            if (!clientMonthData[row.client_id]) manualClientIdsMissing.push(row.client_id);
+        }
+        const uniqueMissing = [...new Set(manualClientIdsMissing)];
+        const clientNameById = {};
+        if (uniqueMissing.length > 0) {
+            const { data: clientsData } = await supabase
+                .from('clients').select('id, name').in('id', uniqueMissing);
+            for (const c of (clientsData || [])) clientNameById[c.id] = c.name;
+        }
+
+        for (const row of (manualHoursRows || [])) {
+            const cid = row.client_id;
+            const m = (row.month || 1) - 1;
+            const person = row.manual_person;
+            if (!person) continue;
+            const hours = Number(row.hours || 0);
+            if (hours <= 0) continue;
+            const cph = Number(person.cost_per_hour || 0);
+            const laborCost = hours * cph;
+
+            if (!clientMonthData[cid]) {
+                clientMonthData[cid] = {
+                    name: clientNameById[cid] || cid,
+                    months: Array.from({ length: 12 }, () => ({ hours: 0, labor_cost: 0, members: {} })),
+                };
+            }
+
+            clientMonthData[cid].months[m].hours += hours;
+            clientMonthData[cid].months[m].labor_cost += laborCost;
+
+            const syntheticUid = `manual:${person.id}`;
+            if (!clientMonthData[cid].months[m].members[syntheticUid]) {
+                clientMonthData[cid].months[m].members[syntheticUid] = {
+                    name: person.name,
+                    hours: 0,
+                    labor_cost: 0,
+                    cost_per_hour: cph,
+                    source: 'manual',
+                    manual_person_id: person.id,
+                    manual_hours_id: row.id,
+                };
+            }
+            clientMonthData[cid].months[m].members[syntheticUid].hours += hours;
+            clientMonthData[cid].months[m].members[syntheticUid].labor_cost += laborCost;
+        }
+
         // 8. Construcción del resultado
         const result = Object.entries(clientMonthData).map(([clientId, cd]) => {
             const monthlyData = cd.months.map((m, idx) => {
@@ -962,6 +1022,151 @@ router.get('/accounts/:year', async (req, res) => {
         });
     } catch (err) {
         console.error('[profitability] accounts error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Manual persons: catálogo de personas cuyas horas se cargan manualmente
+// (usuarios desactivados de ClickUp, freelancers no enlazados, etc.)
+// ──────────────────────────────────────────────────────────────────────────────
+
+router.get('/manual-persons', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('profitability_manual_persons')
+            .select('*')
+            .order('name', { ascending: true });
+        if (error) throw error;
+        res.json({ persons: data || [] });
+    } catch (err) {
+        console.error('[profitability] GET manual-persons:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/manual-persons', async (req, res) => {
+    try {
+        const { name, cost_per_hour, department, notes } = req.body || {};
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const { data, error } = await supabase
+            .from('profitability_manual_persons')
+            .insert({
+                name: String(name).trim(),
+                cost_per_hour: Number(cost_per_hour || 0),
+                department: department || null,
+                notes: notes || null,
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        res.json({ person: data });
+    } catch (err) {
+        console.error('[profitability] POST manual-persons:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.put('/manual-persons/:id', async (req, res) => {
+    try {
+        const { name, cost_per_hour, department, notes } = req.body || {};
+        const update = { updated_at: new Date().toISOString() };
+        if (name !== undefined) update.name = String(name).trim();
+        if (cost_per_hour !== undefined) update.cost_per_hour = Number(cost_per_hour || 0);
+        if (department !== undefined) update.department = department || null;
+        if (notes !== undefined) update.notes = notes || null;
+        const { data, error } = await supabase
+            .from('profitability_manual_persons')
+            .update(update)
+            .eq('id', req.params.id)
+            .select()
+            .single();
+        if (error) throw error;
+        res.json({ person: data });
+    } catch (err) {
+        console.error('[profitability] PUT manual-persons:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.delete('/manual-persons/:id', async (req, res) => {
+    try {
+        const { error } = await supabase
+            .from('profitability_manual_persons')
+            .delete()
+            .eq('id', req.params.id);
+        if (error) throw error;
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[profitability] DELETE manual-persons:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Manual hours: horas cargadas manualmente por (cliente, persona manual, año, mes)
+// ──────────────────────────────────────────────────────────────────────────────
+
+router.get('/manual-hours', async (req, res) => {
+    try {
+        const q = supabase
+            .from('profitability_manual_hours')
+            .select('*, manual_person:profitability_manual_persons(id, name, cost_per_hour, department), client:clients(id, name)');
+        if (req.query.year) q.eq('year', parseInt(req.query.year));
+        if (req.query.client_id) q.eq('client_id', req.query.client_id);
+        const { data, error } = await q;
+        if (error) throw error;
+        res.json({ hours: data || [] });
+    } catch (err) {
+        console.error('[profitability] GET manual-hours:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Upsert: si existe (client_id, manual_person_id, year, month) actualiza horas,
+// si no existe inserta. Para borrar usar DELETE /manual-hours/:id.
+router.post('/manual-hours', async (req, res) => {
+    try {
+        const { client_id, manual_person_id, year, month, hours } = req.body || {};
+        if (!client_id || !manual_person_id || !year || !month) {
+            return res.status(400).json({ error: 'client_id, manual_person_id, year, month are required' });
+        }
+        const h = Number(hours);
+        if (!Number.isFinite(h) || h < 0) {
+            return res.status(400).json({ error: 'hours must be a non-negative number' });
+        }
+        const { data, error } = await supabase
+            .from('profitability_manual_hours')
+            .upsert({
+                client_id,
+                manual_person_id,
+                year: parseInt(year),
+                month: parseInt(month),
+                hours: h,
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'client_id,manual_person_id,year,month' })
+            .select('*, manual_person:profitability_manual_persons(id, name, cost_per_hour, department), client:clients(id, name)')
+            .single();
+        if (error) throw error;
+        res.json({ entry: data });
+    } catch (err) {
+        console.error('[profitability] POST manual-hours:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.delete('/manual-hours/:id', async (req, res) => {
+    try {
+        const { error } = await supabase
+            .from('profitability_manual_hours')
+            .delete()
+            .eq('id', req.params.id);
+        if (error) throw error;
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[profitability] DELETE manual-hours:', err);
         res.status(500).json({ error: err.message });
     }
 });
