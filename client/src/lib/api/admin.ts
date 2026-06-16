@@ -538,8 +538,10 @@ export const adminApi = {
         fetchApi<{ ok: boolean; message: string }>('/profitability/clickup/refresh-cache', { method: 'POST', body: JSON.stringify({ year }) }),
 
     // Manual persons (personas cuyas horas se cargan manualmente)
-    getManualPersons: () =>
-        fetchApi<{ persons: ManualPerson[] }>('/profitability/manual-persons'),
+    // Si se pasa year, el backend resuelve cost_per_hour desde P&L y devuelve
+    // los campos resolved_* y formula para mostrar el cálculo real.
+    getManualPersons: (year?: number) =>
+        fetchApi<{ persons: ManualPerson[] }>(`/profitability/manual-persons${year ? `?year=${year}` : ''}`),
     createManualPerson: (data: { name: string; cost_per_hour: number; department?: string | null; notes?: string | null }) =>
         fetchApi<{ person: ManualPerson }>('/profitability/manual-persons', { method: 'POST', body: JSON.stringify(data) }),
     updateManualPerson: (id: string, data: Partial<{ name: string; cost_per_hour: number; department: string | null; notes: string | null }>) =>
@@ -672,6 +674,14 @@ export interface ManualPerson {
     notes: string | null;
     created_at: string;
     updated_at: string;
+    // Campos resueltos sólo cuando GET /manual-persons se llama con ?year=
+    resolved_source?: 'matched' | 'override' | 'unmatched';
+    resolved_cost_per_hour?: number;
+    matched_employee?: string;
+    matched_department?: string;
+    matched_yearly_cost?: number;
+    matched_months_active?: number;
+    formula?: string;
 }
 
 export interface ManualHourEntry {

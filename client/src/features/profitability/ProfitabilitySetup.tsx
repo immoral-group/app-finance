@@ -275,11 +275,11 @@ function ClientListsSection({ year }: { year: number }) {
 // Personas cuyas horas se cargan manualmente (usuarios desactivados de ClickUp,
 // freelancers no enlazados, etc). Las horas por cliente/mes se cargan en el
 // modal mensual de cada cuenta.
-function ManualPersonsSection() {
+function ManualPersonsSection({ year }: { year: number }) {
     const qc = useQueryClient();
     const { data, isLoading } = useQuery({
-        queryKey: ['manual-persons'],
-        queryFn: () => adminApi.getManualPersons(),
+        queryKey: ['manual-persons', year],
+        queryFn: () => adminApi.getManualPersons(year),
     });
 
     const [editing, setEditing] = useState<ManualPerson | null>(null);
@@ -350,35 +350,53 @@ function ManualPersonsSection() {
                         <table className="w-full text-sm">
                             <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
                                 <tr>
-                                    <th className="text-left px-3 py-2 font-medium">Nombre</th>
-                                    <th className="text-right px-3 py-2 font-medium">Coste/hora</th>
-                                    <th className="text-left px-3 py-2 font-medium">Departamento</th>
-                                    <th className="text-left px-3 py-2 font-medium">Notas</th>
+                                    <th className="text-left px-3 py-2 font-medium">Persona manual</th>
+                                    <th className="text-left px-3 py-2 font-medium">Match P&L</th>
+                                    <th className="text-left px-3 py-2 font-medium">Depto</th>
+                                    <th className="text-right px-3 py-2 font-medium">€/h <FormulaTip formula="Sueldo anual ÷ (160h × meses activos)" /></th>
+                                    <th className="text-left px-3 py-2 font-medium">Fuente</th>
                                     <th className="px-3 py-2 w-20"></th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border/40">
                                 {persons.length === 0 && (
-                                    <tr><td colSpan={5} className="px-3 py-4 text-center text-xs text-muted-foreground">Sin personas manuales</td></tr>
+                                    <tr><td colSpan={6} className="px-3 py-4 text-center text-xs text-muted-foreground">Sin personas manuales</td></tr>
                                 )}
-                                {persons.map(p => (
-                                    <tr key={p.id} className="hover:bg-muted/30">
-                                        <td className="px-3 py-2 font-medium text-foreground">{p.name}</td>
-                                        <td className="px-3 py-2 text-right font-mono">
-                                            {Number(p.cost_per_hour) > 0
-                                                ? <>{Number(p.cost_per_hour).toFixed(2)} €/h <span className="text-[10px] text-muted-foreground/60 ml-0.5">override</span></>
-                                                : <span className="text-[10px] text-muted-foreground/70 italic">auto · P&L</span>}
-                                        </td>
-                                        <td className="px-3 py-2 text-muted-foreground">{p.department || '—'}</td>
-                                        <td className="px-3 py-2 text-xs text-muted-foreground truncate max-w-[200px]">{p.notes || '—'}</td>
-                                        <td className="px-3 py-2">
-                                            <div className="flex items-center gap-1 justify-end">
-                                                <button onClick={() => startEdit(p)} className="h-7 w-7 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center" title="Editar"><Pencil size={13} /></button>
-                                                <button onClick={() => { if (confirm(`¿Borrar a ${p.name}? Se borran también sus horas manuales en todas las cuentas.`)) remove.mutate(p.id); }} className="h-7 w-7 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 flex items-center justify-center" title="Borrar"><Trash2 size={13} /></button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
+                                {persons.map(p => {
+                                    const resolved = p.resolved_cost_per_hour ?? 0;
+                                    const matched = p.resolved_source === 'matched';
+                                    const isOverride = p.resolved_source === 'override';
+                                    return (
+                                        <tr key={p.id} className="hover:bg-muted/30">
+                                            <td className="px-3 py-2 font-medium text-foreground">{p.name}</td>
+                                            <td className="px-3 py-2 text-xs">
+                                                {matched
+                                                    ? <span className="text-foreground">{p.matched_employee}</span>
+                                                    : <span className="text-amber-600 dark:text-amber-400">— sin match —</span>}
+                                            </td>
+                                            <td className="px-3 py-2 text-muted-foreground text-xs">{p.matched_department || p.department || '—'}</td>
+                                            <td className="px-3 py-2 text-right font-mono">
+                                                {resolved > 0
+                                                    ? <span className={matched ? 'text-foreground' : 'text-amber-700 dark:text-amber-300'}>{resolved.toFixed(2)} €</span>
+                                                    : <span className="text-amber-600 dark:text-amber-400 italic">0,00 €</span>}
+                                                {p.formula && (
+                                                    <div className="text-[10px] text-muted-foreground/70 mt-0.5 font-normal">{p.formula}</div>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2 text-xs">
+                                                {matched && <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 size={11} /> auto · P&L</span>}
+                                                {isOverride && <span className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400">override</span>}
+                                                {p.resolved_source === 'unmatched' && <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"><AlertCircle size={11} /> sin coste</span>}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                <div className="flex items-center gap-1 justify-end">
+                                                    <button onClick={() => startEdit(p)} className="h-7 w-7 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center" title="Editar"><Pencil size={13} /></button>
+                                                    <button onClick={() => { if (confirm(`¿Borrar a ${p.name}? Se borran también sus horas manuales en todas las cuentas.`)) remove.mutate(p.id); }} className="h-7 w-7 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 flex items-center justify-center" title="Borrar"><Trash2 size={13} /></button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -446,7 +464,7 @@ export function ProfitabilitySetup({ onBack, year }: { onBack: () => void; year:
 
             <AutoMappingSection year={year} />
             <ClientListsSection year={year} />
-            <ManualPersonsSection />
+            <ManualPersonsSection year={year} />
         </div>
     );
 }

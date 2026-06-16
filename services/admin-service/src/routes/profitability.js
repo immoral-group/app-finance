@@ -1051,7 +1051,36 @@ router.get('/manual-persons', async (req, res) => {
             .select('*')
             .order('name', { ascending: true });
         if (error) throw error;
-        res.json({ persons: data || [] });
+
+        const persons = data || [];
+
+        // Si se pasa ?year=, resolver el coste/hora desde P&L (mismo mecanismo
+        // que /auto-mapping/:year usa para empleados activos). Así el frontend
+        // puede mostrar el cálculo real, no sólo "auto · P&L".
+        const year = req.query.year ? parseInt(req.query.year) : null;
+        if (year) {
+            const { personByName } = await computeRealCostPerPerson(year);
+            for (const p of persons) {
+                const match = matchClickUpUser(p.name, personByName);
+                if (match && match.cost_per_hour > 0) {
+                    p.resolved_source = 'matched';
+                    p.resolved_cost_per_hour = Math.round(match.cost_per_hour * 100) / 100;
+                    p.matched_employee = match.canonical;
+                    p.matched_department = match.dept;
+                    p.matched_yearly_cost = Math.round(match.yearly_cost * 100) / 100;
+                    p.matched_months_active = match.months_active;
+                    p.formula = `${p.matched_yearly_cost.toLocaleString('es-ES')} € ÷ (160h × ${match.months_active} meses) = ${p.resolved_cost_per_hour.toFixed(2)} €/h`;
+                } else if (Number(p.cost_per_hour) > 0) {
+                    p.resolved_source = 'override';
+                    p.resolved_cost_per_hour = Number(p.cost_per_hour);
+                } else {
+                    p.resolved_source = 'unmatched';
+                    p.resolved_cost_per_hour = 0;
+                }
+            }
+        }
+
+        res.json({ persons });
     } catch (err) {
         console.error('[profitability] GET manual-persons:', err);
         res.status(500).json({ error: err.message });

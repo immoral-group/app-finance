@@ -579,7 +579,7 @@ export default function Profitability() {
     const [month, setMonth] = useState(now.getMonth()); // 0-based, -1 = annual
     const [showSetup, setShowSetup] = useState(false);
     const [showGuide, setShowGuide] = useState(false);
-    const [team, setTeam] = useState<{ account: AccountProfitability; month: number } | null>(null);
+    const [team, setTeam] = useState<{ client_id: string; month: number } | null>(null);
     const { isSuperAdmin } = useAuth();
     const qc = useQueryClient();
 
@@ -767,7 +767,7 @@ export default function Profitability() {
                                                 account={a}
                                                 monthIdx={annual ? 0 : month}
                                                 annual={annual}
-                                                onTeam={(acc, m) => setTeam({ account: acc, month: m })}
+                                                onTeam={(acc, m) => setTeam({ client_id: acc.client_id, month: m })}
                                             />
                                         ))
                                 }
@@ -811,8 +811,11 @@ export default function Profitability() {
                 </div>
             )}
 
-            {team && (
-                <TeamModal account={team.account} monthIdx={team.month} year={year} onClose={() => setTeam(null)} />
+            {team && (() => {
+                const freshAccount = data?.accounts.find(a => a.client_id === team.client_id);
+                if (!freshAccount) { setTeam(null); return null; }
+                return <TeamModal account={freshAccount} monthIdx={team.month} year={year} onClose={() => setTeam(null)} />;
+            })()}
             )}
             {showGuide && <ColumnGuide onClose={() => setShowGuide(false)} />}
             <ProfitabilityHint isSuperAdmin={isSuperAdmin()} />
