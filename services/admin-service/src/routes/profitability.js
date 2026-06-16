@@ -149,7 +149,25 @@ async function getExtendedAssignees(teamId) {
         }
     }
 
-    console.log(`[profitability] assignee discovery: ${ids.size} total IDs (${guestsAdded} new from ${listIdsToScan.size} lists)`);
+    // 3. Historical / deactivated users: read clickup_user_id from
+    //    profitability_user_mappings. These are users that no longer have
+    //    access to ClickUp lists (deactivated members, revoked guests) but
+    //    whose tracked time still lives in the workspace history. To include
+    //    their entries we must pass their user_id as ?assignee explicitly.
+    let historicalAdded = 0;
+    try {
+        const r = await supabase
+            .from('profitability_user_mappings')
+            .select('clickup_user_id');
+        for (const row of (r.data || [])) {
+            const uid = String(row.clickup_user_id || '');
+            if (uid && !ids.has(uid)) { ids.add(uid); historicalAdded++; }
+        }
+    } catch (e) {
+        console.warn(`[profitability] supabase user_mappings read failed: ${e.message}`);
+    }
+
+    console.log(`[profitability] assignee discovery: ${ids.size} total IDs (${guestsAdded} guests from ${listIdsToScan.size} lists + ${historicalAdded} historical from user_mappings)`);
     return Array.from(ids);
 }
 
@@ -287,6 +305,63 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
     setCachedEntries(teamId, year, all);
     return all;
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /profitability/debug/user-time/:uid/:year[/:month]
+// Diagnostico: ver que devuelve ClickUp cuando le pides time entries para un
+// user id concreto (sirve para confirmar si un usuario desactivado como Alba
+// (100667520) o Leidy (94759676) sigue devolviendo entries historicos via
+// ?assignee=).
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/debug/user-time/:uid/:year/:month?', async (req, res) => {
+    try {
+        const { token: CLICKUP_TOKEN, teamId: TEAM_ID } = getClickUpConfig();
+        if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
+
+        const year = parseInt(req.params.year);
+        const month = req.params.month ? parseInt(req.params.month) : null;
+        let startTs, endTs;
+        if (month) {
+            startTs = new Date(`${year}-${String(month).padStart(2, '0')}-01T00:00:00Z`).getTime();
+            endTs   = new Date(year, month, 0, 23, 59, 59, 999).getTime(); // last day of that month UTC
+        } else {
+            startTs = new Date(`${year}-01-01T00:00:00Z`).getTime();
+            endTs   = new Date(`${year}-12-31T23:59:59Z`).getTime();
+        }
+
+        const data = await cuFetch(`/team/${TEAM_ID}/time_entries`, {
+            start_date: startTs,
+            end_date: endTs,
+            assignee: req.params.uid,
+            include_location_names: 'true',
+        });
+
+        const entries = (data.data || []).map(e => ({
+            id: e.id,
+            user_id: e.user?.id,
+            user_username: e.user?.username,
+            duration_ms: Number(e.duration || 0),
+            duration_h: Math.round(Number(e.duration || 0) / 3_600_000 * 100) / 100,
+            start_utc: new Date(Number(e.start)).toISOString(),
+            list_id: e.task_location?.list_id || e.task?.list?.id,
+            list_name: e.task_location?.list_name || e.task?.list?.name,
+            space_name: e.task_location?.space_name,
+            task_name: e.task?.name,
+        }));
+
+        const totalHours = entries.reduce((s, e) => s + e.duration_h, 0);
+        res.json({
+            uid: req.params.uid,
+            year,
+            month: month || 'full year',
+            total_entries: entries.length,
+            total_hours: Math.round(totalHours * 100) / 100,
+            entries,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /profitability/clickup/status  — health check de la conexión a ClickUp
