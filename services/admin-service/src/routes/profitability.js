@@ -153,14 +153,73 @@ async function getExtendedAssignees(teamId) {
     return Array.from(ids);
 }
 
+// Sweep entries by configured location (list/folder/space). This catches
+// entries from users that no longer appear in any assignee list — typically
+// removed/deactivated members or revoked guests whose historical tracked
+// time still exists in ClickUp.
+//
+// Uses ClickUp's `/team/{id}/time_entries?list_id=...` (or folder_id /
+// space_id) which returns all entries scoped to that location regardless
+// of who tracked them.
+async function fetchEntriesByConfiguredLocations(teamId, year) {
+    const yearStart = new Date(`${year}-01-01T00:00:00Z`).getTime();
+    const yearEnd   = new Date(`${year}-12-31T23:59:59Z`).getTime();
+
+    let rows = [];
+    try {
+        const r = await supabase
+            .from('profitability_client_lists')
+            .select('clickup_list_id');
+        rows = r.data || [];
+    } catch (e) {
+        console.warn(`[profitability] supabase client_lists read (sweep) failed: ${e.message}`);
+        return [];
+    }
+
+    const all = [];
+    const seen = new Set();
+
+    for (const r of rows) {
+        const raw = String(r.clickup_list_id || '');
+        if (!raw) continue;
+        let param, id;
+        if (raw.startsWith('folder:'))      { param = 'folder_id'; id = raw.slice(7); }
+        else if (raw.startsWith('space:'))  { param = 'space_id';  id = raw.slice(6); }
+        else                                 { param = 'list_id';   id = raw;          }
+
+        try {
+            const data = await cuFetch(`/team/${teamId}/time_entries`, {
+                start_date: yearStart,
+                end_date: yearEnd,
+                include_location_names: 'true',
+                [param]: id,
+            });
+            for (const e of (data.data || [])) {
+                if (e?.id && !seen.has(e.id)) {
+                    seen.add(e.id);
+                    all.push(e);
+                }
+            }
+        } catch (e) {
+            console.warn(`[profitability] location sweep ${param}=${id} failed: ${e.message}`);
+        }
+    }
+
+    return all;
+}
+
 // Fetch ALL time entries from a workspace.
 // ClickUp's /time_entries returns only the authenticated user's entries unless
 // `assignee=<id>` is passed, AND it must be passed ONE user at a time (passing
 // multiple IDs at once returns 403 TIMEENTRY_059). So we loop per-assignee.
 //
-// Critical: the assignee list must include Guests / external collaborators
-// (not in /team/{id}.members). We discover them via /list/{id}/member for
-// each list configured in profitability_client_lists.
+// Two strategies, merged with entry.id dedup:
+//   A) Per-assignee: iterate team.members ∪ guests-of-configured-lists.
+//      Catches: active members + active guests.
+//   B) Per-location: query `/time_entries?list_id=X` for each configured
+//      mapping. Catches: entries from REMOVED/DEACTIVATED users whose
+//      historical tracked time still exists in ClickUp but who no longer
+//      appear in any user/member endpoint.
 async function fetchAllWorkspaceTimeEntries(teamId, year) {
     const cached = getCachedEntries(teamId, year);
     if (cached) {
@@ -178,15 +237,18 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
     const errors = [];
 
     const pushEntries = (list) => {
+        let added = 0;
         for (const e of list) {
             if (!e?.id) continue;
             if (seen.has(e.id)) continue;
             seen.add(e.id);
             all.push(e);
+            added++;
         }
+        return added;
     };
 
-    // First: my own entries (no assignee needed)
+    // A.1 — my own entries (no assignee needed)
     try {
         const mine = await cuFetch(`/team/${teamId}/time_entries`, {
             start_date: yearStart,
@@ -197,7 +259,7 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
         errors.push(`self: ${e.message}`);
     }
 
-    // Then: each assignee individually (members + discovered guests)
+    // A.2 — each known assignee (active members + active guests)
     for (const uid of assigneeIds) {
         try {
             const data = await cuFetch(`/team/${teamId}/time_entries`, {
@@ -210,8 +272,18 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
             errors.push(`user ${uid}: ${e.message}`);
         }
     }
+    const afterAssignees = all.length;
 
-    console.log(`[profitability] fetched ${all.length} entries from ${assigneeIds.length} assignees${errors.length ? ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})` : ''}`);
+    // B — sweep configured locations to catch entries of removed users
+    try {
+        const extra = await fetchEntriesByConfiguredLocations(teamId, year);
+        const added = pushEntries(extra);
+        console.log(`[profitability] location sweep added ${added} extra entries (likely from removed/deactivated users)`);
+    } catch (e) {
+        errors.push(`location sweep: ${e.message}`);
+    }
+
+    console.log(`[profitability] fetched ${all.length} entries (${afterAssignees} via ${assigneeIds.length} assignees + ${all.length - afterAssignees} via location sweep)${errors.length ? ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})` : ''}`);
     setCachedEntries(teamId, year, all);
     return all;
 }
