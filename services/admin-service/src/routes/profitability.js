@@ -53,191 +53,10 @@ function norm(s) {
     return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 }
 
-// Get user IDs of a single list via /list/{id}/member.
-// Returns [] on error so one bad list doesn't break the rest.
-async function getMembersOfList(listId) {
-    try {
-        const data = await cuFetch(`/list/${listId}/member`);
-        return (data.members || []).map(u => String(u?.id || '')).filter(Boolean);
-    } catch (e) {
-        console.warn(`[profitability] /list/${listId}/member failed: ${e.message}`);
-        return [];
-    }
-}
-
-// Expand a folder mapping into its list IDs.
-async function getListsInFolder(folderId) {
-    try {
-        const data = await cuFetch(`/folder/${folderId}`);
-        return (data.lists || []).map(l => String(l?.id || '')).filter(Boolean);
-    } catch (e) {
-        console.warn(`[profitability] /folder/${folderId} failed: ${e.message}`);
-        return [];
-    }
-}
-
-// Expand a space mapping into all its list IDs (folder lists + folderless lists).
-async function getListsInSpace(spaceId) {
-    const ids = [];
-    try {
-        const [foldersData, folderlessData] = await Promise.all([
-            cuFetch(`/space/${spaceId}/folder`, { archived: 'false' }),
-            cuFetch(`/space/${spaceId}/list`,   { archived: 'false' }),
-        ]);
-        for (const f of (foldersData.folders || [])) {
-            for (const l of (f.lists || [])) if (l?.id) ids.push(String(l.id));
-        }
-        for (const l of (folderlessData.lists || [])) if (l?.id) ids.push(String(l.id));
-    } catch (e) {
-        console.warn(`[profitability] /space/${spaceId} expansion failed: ${e.message}`);
-    }
-    return ids;
-}
-
-// Discover ALL user IDs that have entries we should fetch:
-//   - team.members (full workspace members)
-//   - Guests / external collaborators with access to any list configured in
-//     profitability_client_lists (these are NOT in /team/{id} so they would
-//     otherwise be invisible to the per-assignee fetch).
-//
-// For folder/space mappings, we expand them to their inner lists and scan each.
-// All discovery errors are isolated so one missing list doesn't break the rest.
-async function getExtendedAssignees(teamId) {
-    const ids = new Set();
-
-    // 1. Full workspace members
-    try {
-        const teamData = await cuFetch(`/team/${teamId}`);
-        for (const m of (teamData.team?.members || [])) {
-            if (m.user?.id) ids.add(String(m.user.id));
-        }
-    } catch (e) {
-        console.warn(`[profitability] team members fetch failed: ${e.message}`);
-    }
-
-    // 2. Guests: enumerate list IDs from configured client mappings
-    let rows = [];
-    try {
-        const r = await supabase
-            .from('profitability_client_lists')
-            .select('clickup_list_id');
-        rows = r.data || [];
-    } catch (e) {
-        console.warn(`[profitability] supabase client_lists read failed: ${e.message}`);
-    }
-
-    const listIdsToScan = new Set();
-    for (const r of rows) {
-        const raw = String(r.clickup_list_id || '');
-        if (!raw) continue;
-        if (raw.startsWith('folder:')) {
-            const inner = await getListsInFolder(raw.slice(7));
-            inner.forEach(id => listIdsToScan.add(id));
-        } else if (raw.startsWith('space:')) {
-            const inner = await getListsInSpace(raw.slice(6));
-            inner.forEach(id => listIdsToScan.add(id));
-        } else {
-            listIdsToScan.add(raw);
-        }
-    }
-
-    let guestsAdded = 0;
-    for (const listId of listIdsToScan) {
-        const uids = await getMembersOfList(listId);
-        for (const uid of uids) {
-            if (!ids.has(uid)) { ids.add(uid); guestsAdded++; }
-        }
-    }
-
-    // 3. Historical / deactivated users: read clickup_user_id from
-    //    profitability_user_mappings. These are users that no longer have
-    //    access to ClickUp lists (deactivated members, revoked guests) but
-    //    whose tracked time still lives in the workspace history. To include
-    //    their entries we must pass their user_id as ?assignee explicitly.
-    let historicalAdded = 0;
-    try {
-        const r = await supabase
-            .from('profitability_user_mappings')
-            .select('clickup_user_id');
-        for (const row of (r.data || [])) {
-            const uid = String(row.clickup_user_id || '');
-            if (uid && !ids.has(uid)) { ids.add(uid); historicalAdded++; }
-        }
-    } catch (e) {
-        console.warn(`[profitability] supabase user_mappings read failed: ${e.message}`);
-    }
-
-    console.log(`[profitability] assignee discovery: ${ids.size} total IDs (${guestsAdded} guests from ${listIdsToScan.size} lists + ${historicalAdded} historical from user_mappings)`);
-    return Array.from(ids);
-}
-
-// Sweep entries by configured location (list/folder/space). This catches
-// entries from users that no longer appear in any assignee list — typically
-// removed/deactivated members or revoked guests whose historical tracked
-// time still exists in ClickUp.
-//
-// Uses ClickUp's `/team/{id}/time_entries?list_id=...` (or folder_id /
-// space_id) which returns all entries scoped to that location regardless
-// of who tracked them.
-async function fetchEntriesByConfiguredLocations(teamId, year) {
-    const yearStart = new Date(`${year}-01-01T00:00:00Z`).getTime();
-    const yearEnd   = new Date(`${year}-12-31T23:59:59Z`).getTime();
-
-    let rows = [];
-    try {
-        const r = await supabase
-            .from('profitability_client_lists')
-            .select('clickup_list_id');
-        rows = r.data || [];
-    } catch (e) {
-        console.warn(`[profitability] supabase client_lists read (sweep) failed: ${e.message}`);
-        return [];
-    }
-
-    const all = [];
-    const seen = new Set();
-
-    for (const r of rows) {
-        const raw = String(r.clickup_list_id || '');
-        if (!raw) continue;
-        let param, id;
-        if (raw.startsWith('folder:'))      { param = 'folder_id'; id = raw.slice(7); }
-        else if (raw.startsWith('space:'))  { param = 'space_id';  id = raw.slice(6); }
-        else                                 { param = 'list_id';   id = raw;          }
-
-        try {
-            const data = await cuFetch(`/team/${teamId}/time_entries`, {
-                start_date: yearStart,
-                end_date: yearEnd,
-                include_location_names: 'true',
-                [param]: id,
-            });
-            for (const e of (data.data || [])) {
-                if (e?.id && !seen.has(e.id)) {
-                    seen.add(e.id);
-                    all.push(e);
-                }
-            }
-        } catch (e) {
-            console.warn(`[profitability] location sweep ${param}=${id} failed: ${e.message}`);
-        }
-    }
-
-    return all;
-}
-
 // Fetch ALL time entries from a workspace.
 // ClickUp's /time_entries returns only the authenticated user's entries unless
 // `assignee=<id>` is passed, AND it must be passed ONE user at a time (passing
-// multiple IDs at once returns 403 TIMEENTRY_059). So we loop per-assignee.
-//
-// Two strategies, merged with entry.id dedup:
-//   A) Per-assignee: iterate team.members ∪ guests-of-configured-lists.
-//      Catches: active members + active guests.
-//   B) Per-location: query `/time_entries?list_id=X` for each configured
-//      mapping. Catches: entries from REMOVED/DEACTIVATED users whose
-//      historical tracked time still exists in ClickUp but who no longer
-//      appear in any user/member endpoint.
+// multiple IDs at once returns 403 TIMEENTRY_059). So we loop per-member.
 async function fetchAllWorkspaceTimeEntries(teamId, year) {
     const cached = getCachedEntries(teamId, year);
     if (cached) {
@@ -245,123 +64,50 @@ async function fetchAllWorkspaceTimeEntries(teamId, year) {
         return cached;
     }
 
-    const assigneeIds = await getExtendedAssignees(teamId);
+    const teamData = await cuFetch(`/team/${teamId}`);
+    const members = teamData.team?.members || [];
 
     const yearStart = new Date(`${year}-01-01T00:00:00Z`).getTime();
     const yearEnd   = new Date(`${year}-12-31T23:59:59Z`).getTime();
 
     const all = [];
-    const seen = new Set();
     const errors = [];
 
-    const pushEntries = (list) => {
-        let added = 0;
-        for (const e of list) {
-            if (!e?.id) continue;
-            if (seen.has(e.id)) continue;
-            seen.add(e.id);
-            all.push(e);
-            added++;
-        }
-        return added;
-    };
-
-    // A.1 — my own entries (no assignee needed)
+    // First: my own entries (no assignee needed)
     try {
         const mine = await cuFetch(`/team/${teamId}/time_entries`, {
             start_date: yearStart,
             end_date: yearEnd,
         });
-        pushEntries(mine.data || []);
+        all.push(...(mine.data || []));
     } catch (e) {
         errors.push(`self: ${e.message}`);
     }
 
-    // A.2 — each known assignee (active members + active guests)
-    for (const uid of assigneeIds) {
+    // Then: each member individually
+    for (const m of members) {
+        const uid = m.user?.id;
+        if (!uid) continue;
         try {
             const data = await cuFetch(`/team/${teamId}/time_entries`, {
                 start_date: yearStart,
                 end_date: yearEnd,
                 assignee: uid,
             });
-            pushEntries(data.data || []);
+            const entries = (data.data || []);
+            // Deduplicate by entry.id (in case self overlaps)
+            for (const e of entries) {
+                if (!all.find(x => x.id === e.id)) all.push(e);
+            }
         } catch (e) {
-            errors.push(`user ${uid}: ${e.message}`);
+            errors.push(`user ${m.user?.username || uid}: ${e.message}`);
         }
     }
-    const afterAssignees = all.length;
 
-    // B — sweep configured locations to catch entries of removed users
-    try {
-        const extra = await fetchEntriesByConfiguredLocations(teamId, year);
-        const added = pushEntries(extra);
-        console.log(`[profitability] location sweep added ${added} extra entries (likely from removed/deactivated users)`);
-    } catch (e) {
-        errors.push(`location sweep: ${e.message}`);
-    }
-
-    console.log(`[profitability] fetched ${all.length} entries (${afterAssignees} via ${assigneeIds.length} assignees + ${all.length - afterAssignees} via location sweep)${errors.length ? ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})` : ''}`);
+    console.log(`[profitability] fetched ${all.length} entries from ${members.length} members${errors.length ? ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})` : ''}`);
     setCachedEntries(teamId, year, all);
     return all;
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// GET /profitability/debug/user-time/:uid/:year[/:month]
-// Diagnostico: ver que devuelve ClickUp cuando le pides time entries para un
-// user id concreto (sirve para confirmar si un usuario desactivado como Alba
-// (100667520) o Leidy (94759676) sigue devolviendo entries historicos via
-// ?assignee=).
-// ──────────────────────────────────────────────────────────────────────────────
-router.get('/debug/user-time/:uid/:year/:month?', async (req, res) => {
-    try {
-        const { token: CLICKUP_TOKEN, teamId: TEAM_ID } = getClickUpConfig();
-        if (!CLICKUP_TOKEN) return res.status(503).json({ error: 'CLICKUP_API_TOKEN not configured' });
-
-        const year = parseInt(req.params.year);
-        const month = req.params.month ? parseInt(req.params.month) : null;
-        let startTs, endTs;
-        if (month) {
-            startTs = new Date(`${year}-${String(month).padStart(2, '0')}-01T00:00:00Z`).getTime();
-            endTs   = new Date(year, month, 0, 23, 59, 59, 999).getTime(); // last day of that month UTC
-        } else {
-            startTs = new Date(`${year}-01-01T00:00:00Z`).getTime();
-            endTs   = new Date(`${year}-12-31T23:59:59Z`).getTime();
-        }
-
-        const data = await cuFetch(`/team/${TEAM_ID}/time_entries`, {
-            start_date: startTs,
-            end_date: endTs,
-            assignee: req.params.uid,
-            include_location_names: 'true',
-        });
-
-        const entries = (data.data || []).map(e => ({
-            id: e.id,
-            user_id: e.user?.id,
-            user_username: e.user?.username,
-            duration_ms: Number(e.duration || 0),
-            duration_h: Math.round(Number(e.duration || 0) / 3_600_000 * 100) / 100,
-            start_utc: new Date(Number(e.start)).toISOString(),
-            list_id: e.task_location?.list_id || e.task?.list?.id,
-            list_name: e.task_location?.list_name || e.task?.list?.name,
-            space_name: e.task_location?.space_name,
-            task_name: e.task?.name,
-        }));
-
-        const totalHours = entries.reduce((s, e) => s + e.duration_h, 0);
-        res.json({
-            uid: req.params.uid,
-            year,
-            month: month || 'full year',
-            total_entries: entries.length,
-            total_hours: Math.round(totalHours * 100) / 100,
-            entries,
-        });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /profitability/clickup/status  — health check de la conexión a ClickUp
