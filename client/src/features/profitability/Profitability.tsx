@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, AccountProfitability, ProfitabilityMember } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info, Plus, Trash2, Pencil, Check } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info, Plus, Trash2, Pencil, Check, Search, ArrowUp, ArrowDown, Eye, EyeOff, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
@@ -430,6 +430,100 @@ function TeamModal({ account, monthIdx, year, onClose }: {
     );
 }
 
+// ── Annual evolution modal ────────────────────────────────────────────────────
+// Vista mensual de una cuenta concreta en formato tabular + sparkline visual,
+// disponible al hacer click en el icono de "evolución" en modo Anual.
+function AnnualEvolutionModal({ account, year, onOpenMonth, onClose }: {
+    account: AccountProfitability; year: number; onOpenMonth: (monthIdx: number) => void; onClose: () => void;
+}) {
+    const monthly = account.monthly;
+    const maxHours = Math.max(...monthly.map(m => m.hours), 0.001);
+    const maxRevenue = Math.max(...monthly.map(m => m.revenue), 0.001);
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+            <div className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85dvh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border/40">
+                    <div>
+                        <p className="text-xs text-muted-foreground">Evolución {year}</p>
+                        <p className="text-base font-bold text-foreground">{account.client_name}</p>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground tabular-nums">
+                            <span>Total fee · <span className="font-semibold text-foreground">{eur(account.total_revenue)}</span></span>
+                            <span>Horas · <span className="font-semibold text-foreground">{account.total_hours.toFixed(1)}h</span></span>
+                            <span>Coste · <span className="font-semibold text-foreground">{eur(account.total_labor_cost)}</span></span>
+                            <span>Beneficio · <span className={cn('font-semibold', account.total_profit >= 0 ? 'text-emerald-600' : 'text-red-600')}>{eur(account.total_profit)}</span></span>
+                            {account.total_margin_pct !== null && (
+                                <span>Margen · <span className={cn('font-semibold', semaphoreColor(account.total_margin_pct).cell)}>{account.total_margin_pct.toFixed(1)}%</span></span>
+                            )}
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground"><X size={15} /></button>
+                </div>
+                <div className="overflow-auto flex-1 px-3 py-2">
+                    <table className="w-full text-sm">
+                        <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/30">
+                            <tr>
+                                <th className="text-left px-2 py-2 font-medium">Mes</th>
+                                <th className="text-right px-2 py-2 font-medium">Fee</th>
+                                <th className="text-right px-2 py-2 font-medium">Horas</th>
+                                <th className="px-2 py-2 font-medium w-32 text-center">Volumen</th>
+                                <th className="text-right px-2 py-2 font-medium">Coste</th>
+                                <th className="text-right px-2 py-2 font-medium">Beneficio</th>
+                                <th className="text-right px-2 py-2 font-medium">Margen</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/30">
+                            {monthly.map((mo, mi) => {
+                                const s = semaphoreColor(mo.margin_pct);
+                                const empty = mo.revenue === 0 && mo.hours === 0;
+                                const hoursPct = (mo.hours / maxHours) * 100;
+                                const revPct = (mo.revenue / maxRevenue) * 100;
+                                return (
+                                    <tr key={mi} className={cn('group', empty && 'opacity-40')}>
+                                        <td className="px-2 py-1.5 text-xs font-medium text-foreground">
+                                            {mo.hours > 0 ? (
+                                                <button onClick={() => onOpenMonth(mi)} className="hover:text-primary underline decoration-dotted underline-offset-4 decoration-muted-foreground/40">
+                                                    {MONTH_NAMES_FULL[mi]}
+                                                </button>
+                                            ) : MONTH_NAMES_FULL[mi]}
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">{mo.revenue > 0 ? eur(mo.revenue) : <span className="text-muted-foreground/40">—</span>}</td>
+                                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">{mo.hours > 0 ? `${mo.hours.toFixed(1)}h` : <span className="text-muted-foreground/40">—</span>}</td>
+                                        <td className="px-2 py-1.5">
+                                            <div className="flex items-center gap-0.5 h-3">
+                                                <div className="flex-1 h-full bg-muted/30 rounded-sm overflow-hidden">
+                                                    <div className="h-full bg-indigo-400/70" style={{ width: `${revPct}%` }} title={`Fee: ${eur(mo.revenue)}`} />
+                                                </div>
+                                                <div className="flex-1 h-full bg-muted/30 rounded-sm overflow-hidden">
+                                                    <div className="h-full bg-emerald-400/70" style={{ width: `${hoursPct}%` }} title={`Horas: ${mo.hours.toFixed(1)}h`} />
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">{mo.labor_cost > 0 ? eur(mo.labor_cost) : <span className="text-muted-foreground/40">—</span>}</td>
+                                        <td className={cn('px-2 py-1.5 text-right text-xs tabular-nums font-medium', mo.gross_profit >= 0 ? 'text-foreground' : 'text-red-600 dark:text-red-400')}>
+                                            {mo.revenue > 0 || mo.labor_cost > 0 ? eur(mo.gross_profit) : <span className="text-muted-foreground/40">—</span>}
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right">
+                                            {mo.margin_pct !== null
+                                                ? <span className={cn('inline-block px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums', s.badge)}>{mo.margin_pct.toFixed(1)}%</span>
+                                                : <span className="text-muted-foreground/40 text-[10px]">—</span>}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                    <div className="flex items-center gap-3 mt-2 px-2 text-[10px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-indigo-400/70 rounded-sm" />Fee</span>
+                        <span className="inline-flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-emerald-400/70 rounded-sm" />Horas</span>
+                        <span className="ml-auto">Click en el nombre del mes para ver detalle de equipo</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ── Column guide modal ────────────────────────────────────────────────────────
 const COLUMN_GUIDE = [
     {
@@ -603,11 +697,15 @@ function ColumnGuide({ onClose }: { onClose: () => void }) {
 }
 
 // ── Main table row ────────────────────────────────────────────────────────────
-function Row({ account, monthIdx, annual, onTeam }: {
+function Row({ account, monthIdx, annual, onTeam, onAnnualEvolution, onHide, onUnhide, isHidden }: {
     account: AccountProfitability;
     monthIdx: number;
     annual: boolean;
     onTeam: (a: AccountProfitability, m: number) => void;
+    onAnnualEvolution: (clientId: string) => void;
+    onHide: (clientId: string) => void;
+    onUnhide: (clientId: string) => void;
+    isHidden: boolean;
 }) {
     const m = account.monthly[monthIdx];
     const revenue = annual ? account.total_revenue : m.revenue;
@@ -623,9 +721,31 @@ function Row({ account, monthIdx, annual, onTeam }: {
     if (!annual && revenue === 0 && hours === 0) return null; // no data this month
 
     return (
-        <tr className="border-b border-border/30 hover:bg-muted/20 transition-colors group">
+        <tr className={cn('border-b border-border/30 hover:bg-muted/20 transition-colors group', isHidden && 'opacity-50')}>
             <td className="px-4 py-2.5 text-sm font-medium text-foreground whitespace-nowrap">
-                {account.client_name}
+                <div className="flex items-center gap-1.5 group/name">
+                    <span>{account.client_name}</span>
+                    {annual && (
+                        <button
+                            onClick={() => onAnnualEvolution(account.client_id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity h-5 w-5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary flex items-center justify-center"
+                            title="Ver evolución mensual"
+                        ><TrendingUp size={12} /></button>
+                    )}
+                    {isHidden ? (
+                        <button
+                            onClick={() => onUnhide(account.client_id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity h-5 w-5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-muted-foreground hover:text-emerald-600 flex items-center justify-center"
+                            title="Mostrar cuenta"
+                        ><Eye size={12} /></button>
+                    ) : (
+                        <button
+                            onClick={() => onHide(account.client_id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity h-5 w-5 rounded hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center"
+                            title="Ocultar cuenta"
+                        ><EyeOff size={12} /></button>
+                    )}
+                </div>
             </td>
             <td className="px-3 py-2.5 text-right text-sm tabular-nums text-foreground">
                 {revenue > 0
@@ -700,17 +820,73 @@ export default function Profitability() {
     const accounts = data?.accounts ?? [];
     const annual = month === -1;
 
-    // Totals for the selected period
-    const totRevenue = accounts.reduce((s, a) => s + (annual ? a.total_revenue : a.monthly[month].revenue), 0);
-    const totCost = accounts.reduce((s, a) => s + (annual ? a.total_labor_cost : a.monthly[month].labor_cost), 0);
-    const totHours = accounts.reduce((s, a) => s + (annual ? a.total_hours : a.monthly[month].hours), 0);
+    // Hidden clients (toggle manual desde la fila o desde Configurar)
+    const { data: hiddenData } = useQuery({
+        queryKey: ['hidden-items', 'client'],
+        queryFn: () => adminApi.getHiddenItems('client'),
+    });
+    const hiddenClientIds = new Set((hiddenData?.items ?? []).map(i => i.ref_id));
+
+    const hideMut = useMutation({
+        mutationFn: (client_id: string) => adminApi.hideItem('client', client_id),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['hidden-items', 'client'] }),
+        onError: (e: Error) => toast.error(e.message),
+    });
+    const unhideMut = useMutation({
+        mutationFn: (client_id: string) => adminApi.unhideItem('client', client_id),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['hidden-items', 'client'] }),
+        onError: (e: Error) => toast.error(e.message),
+    });
+
+    // Búsqueda + orden + mostrar/ocultar
+    const [search, setSearch] = useState('');
+    type SortKey = 'name' | 'margin' | 'hours' | 'revenue';
+    const [sortBy, setSortBy] = useState<SortKey>('name');
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [showHidden, setShowHidden] = useState(false);
+    const [evolutionFor, setEvolutionFor] = useState<string | null>(null);
+
+    // Cuentas con datos en el periodo seleccionado
+    const hasData = (a: AccountProfitability) => annual
+        ? (a.total_revenue > 0 || a.total_hours > 0)
+        : (a.monthly[month].revenue > 0 || a.monthly[month].hours > 0);
+
+    // 1) periodo con datos · 2) no ocultas (salvo showHidden) · 3) búsqueda
+    const searchLower = search.trim().toLowerCase();
+    const filteredAccounts = accounts.filter(a => {
+        if (!hasData(a)) return false;
+        if (!showHidden && hiddenClientIds.has(a.client_id)) return false;
+        if (searchLower && !a.client_name.toLowerCase().includes(searchLower)) return false;
+        return true;
+    });
+
+    // Hidden count para el toggle (siempre con datos pero ocultas)
+    const hiddenWithData = accounts.filter(a => hasData(a) && hiddenClientIds.has(a.client_id)).length;
+
+    const sortAccessor = (a: AccountProfitability): number | string => {
+        if (sortBy === 'name') return a.client_name.toLowerCase();
+        if (sortBy === 'revenue') return annual ? a.total_revenue : a.monthly[month].revenue;
+        if (sortBy === 'hours')   return annual ? a.total_hours   : a.monthly[month].hours;
+        // margin: null al final
+        const v = annual ? a.total_margin_pct : a.monthly[month].margin_pct;
+        return v === null ? Number.NEGATIVE_INFINITY : v;
+    };
+    const visibleAccounts = [...filteredAccounts].sort((a, b) => {
+        const va = sortAccessor(a);
+        const vb = sortAccessor(b);
+        if (typeof va === 'string' && typeof vb === 'string') {
+            return sortDir === 'asc' ? va.localeCompare(vb, 'es') : vb.localeCompare(va, 'es');
+        }
+        const na = va as number, nb = vb as number;
+        return sortDir === 'asc' ? na - nb : nb - na;
+    });
+
+    // Totals (sobre las visibles tras filtrado)
+    const totRevenue = visibleAccounts.reduce((s, a) => s + (annual ? a.total_revenue : a.monthly[month].revenue), 0);
+    const totCost = visibleAccounts.reduce((s, a) => s + (annual ? a.total_labor_cost : a.monthly[month].labor_cost), 0);
+    const totHours = visibleAccounts.reduce((s, a) => s + (annual ? a.total_hours : a.monthly[month].hours), 0);
     const totProfit = totRevenue - totCost;
     const totMargin = totRevenue > 0 && totHours > 0 ? (totProfit / totRevenue) * 100 : null;
-
-    // Filter out empty rows for the selected month
-    const visibleAccounts = annual
-        ? accounts.filter(a => a.total_revenue > 0 || a.total_hours > 0)
-        : accounts.filter(a => a.monthly[month].revenue > 0 || a.monthly[month].hours > 0);
 
     if (showSetup) return <ProfitabilitySetup onBack={() => setShowSetup(false)} year={year} />;
 
@@ -777,6 +953,46 @@ export default function Profitability() {
                         </button>
                     )}
                 </div>
+            </div>
+
+            {/* Toolbar: buscador + ordenación + mostrar ocultas */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <div className="relative flex-1 max-w-sm">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
+                    <input
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        placeholder="Buscar cuenta…"
+                        className="w-full h-8 pl-8 pr-7 rounded-lg border border-border/60 bg-card text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400/60"
+                    />
+                    {search && (
+                        <button onClick={() => setSearch('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-5 rounded hover:bg-muted text-muted-foreground flex items-center justify-center">
+                            <X size={11} />
+                        </button>
+                    )}
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                    <label className="text-muted-foreground">Ordenar:</label>
+                    <select value={sortBy} onChange={e => setSortBy(e.target.value as SortKey)} className="h-8 px-2 rounded-md border border-border/60 bg-card text-xs">
+                        <option value="name">Alfabético</option>
+                        <option value="margin">Rentabilidad</option>
+                        <option value="hours">Horas</option>
+                        <option value="revenue">Fee</option>
+                    </select>
+                    <button
+                        onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                        className="h-8 w-8 rounded-md border border-border/60 bg-card hover:bg-muted flex items-center justify-center text-muted-foreground"
+                        title={sortDir === 'asc' ? 'Ascendente' : 'Descendente'}
+                    >
+                        {sortDir === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
+                    </button>
+                </div>
+                {hiddenWithData > 0 && (
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                        <input type="checkbox" checked={showHidden} onChange={e => setShowHidden(e.target.checked)} className="h-3.5 w-3.5" />
+                        Mostrar ocultas ({hiddenWithData})
+                    </label>
+                )}
             </div>
 
             {/* ClickUp debug — visible when no hours loaded */}
@@ -871,6 +1087,10 @@ export default function Profitability() {
                                                 monthIdx={annual ? 0 : month}
                                                 annual={annual}
                                                 onTeam={(acc, m) => setTeam({ client_id: acc.client_id, month: m })}
+                                                onAnnualEvolution={(cid) => setEvolutionFor(cid)}
+                                                onHide={(cid) => hideMut.mutate(cid)}
+                                                onUnhide={(cid) => unhideMut.mutate(cid)}
+                                                isHidden={hiddenClientIds.has(a.client_id)}
                                             />
                                         ))
                                 }
@@ -918,6 +1138,11 @@ export default function Profitability() {
                 const freshAccount = data?.accounts.find(a => a.client_id === team.client_id);
                 if (!freshAccount) { setTeam(null); return null; }
                 return <TeamModal account={freshAccount} monthIdx={team.month} year={year} onClose={() => setTeam(null)} />;
+            })()}
+            {evolutionFor && (() => {
+                const acc = data?.accounts.find(a => a.client_id === evolutionFor);
+                if (!acc) { setEvolutionFor(null); return null; }
+                return <AnnualEvolutionModal account={acc} year={year} onOpenMonth={(mi) => { setTeam({ client_id: acc.client_id, month: mi }); }} onClose={() => setEvolutionFor(null)} />;
             })()}
             {showGuide && <ColumnGuide onClose={() => setShowGuide(false)} />}
             <ProfitabilityHint isSuperAdmin={isSuperAdmin()} />

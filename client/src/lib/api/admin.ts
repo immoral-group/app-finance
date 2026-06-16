@@ -561,7 +561,22 @@ export const adminApi = {
         fetchApi<{ entry: ManualHourEntry }>('/profitability/manual-hours', { method: 'POST', body: JSON.stringify(data) }),
     deleteManualHours: (id: string) =>
         fetchApi<{ ok: boolean }>(`/profitability/manual-hours/${id}`, { method: 'DELETE' }),
+
+    // Hidden items (genérico: client / clickup_user / manual_person)
+    getHiddenItems: (scope?: HiddenScope) =>
+        fetchApi<{ items: HiddenItem[] }>(`/profitability/hidden-items${scope ? `?scope=${scope}` : ''}`),
+    hideItem: (scope: HiddenScope, ref_id: string) =>
+        fetchApi<{ item: HiddenItem }>('/profitability/hidden-items', { method: 'POST', body: JSON.stringify({ scope, ref_id }) }),
+    unhideItem: (scope: HiddenScope, ref_id: string) =>
+        fetchApi<{ ok: boolean }>(`/profitability/hidden-items/${scope}/${encodeURIComponent(ref_id)}`, { method: 'DELETE' }),
 };
+
+export type HiddenScope = 'client' | 'clickup_user' | 'manual_person';
+export interface HiddenItem {
+    scope: HiddenScope;
+    ref_id: string;
+    hidden_at: string;
+}
 
 export interface IcexRow {
     id: string;

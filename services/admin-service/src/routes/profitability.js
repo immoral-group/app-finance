@@ -1213,4 +1213,56 @@ router.delete('/manual-hours/:id', async (req, res) => {
     }
 });
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Hidden items: ocultar clientes / usuarios / personas manuales del modulo
+// ──────────────────────────────────────────────────────────────────────────────
+
+const VALID_HIDDEN_SCOPES = new Set(['client', 'clickup_user', 'manual_person']);
+
+router.get('/hidden-items', async (req, res) => {
+    try {
+        const q = supabase.from('profitability_hidden_items').select('*');
+        if (req.query.scope) q.eq('scope', req.query.scope);
+        const { data, error } = await q;
+        if (error) throw error;
+        res.json({ items: data || [] });
+    } catch (err) {
+        console.error('[profitability] GET hidden-items:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/hidden-items', async (req, res) => {
+    try {
+        const { scope, ref_id } = req.body || {};
+        if (!VALID_HIDDEN_SCOPES.has(scope)) return res.status(400).json({ error: `scope must be one of ${[...VALID_HIDDEN_SCOPES].join(', ')}` });
+        if (!ref_id) return res.status(400).json({ error: 'ref_id required' });
+        const { data, error } = await supabase
+            .from('profitability_hidden_items')
+            .upsert({ scope, ref_id: String(ref_id) }, { onConflict: 'scope,ref_id' })
+            .select()
+            .single();
+        if (error) throw error;
+        res.json({ item: data });
+    } catch (err) {
+        console.error('[profitability] POST hidden-items:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.delete('/hidden-items/:scope/:ref_id', async (req, res) => {
+    try {
+        const { error } = await supabase
+            .from('profitability_hidden_items')
+            .delete()
+            .eq('scope', req.params.scope)
+            .eq('ref_id', req.params.ref_id);
+        if (error) throw error;
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[profitability] DELETE hidden-items:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 export default router;
