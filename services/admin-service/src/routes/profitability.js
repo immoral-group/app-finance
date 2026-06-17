@@ -607,10 +607,11 @@ async function computeRealCostPerPerson(year) {
         .select('amount, fiscal_month, department_id, description, category:expense_categories(name)')
         .eq('fiscal_year', year);
 
-    // 4. Sum expense per person across the year
-    // We treat any expense row where: section is 'personal' OR the category name matches a known personal name → as that person's salary
-    const personYearly = {}; // canonicalName → { cost, dept, months_active }
-    const personMonths = {}; // canonicalName → Set<monthIdx> where cost > 0
+    // 4. Sum expense per person × mes
+    // Se trata cualquier expense cuya categoría matche un nombre conocido como
+    // sueldo de esa persona. Guardamos por mes (no solo el total anual) para
+    // poder aplicar carry-forward de meses intermedios sin datos.
+    const personData = {}; // canonicalName → { dept, monthly: number[12] }
 
     (expenses || []).forEach(exp => {
         const deptName = deptIdMap[exp.department_id];
@@ -624,26 +625,48 @@ async function computeRealCostPerPerson(year) {
         const amount = Number(exp.amount || 0);
         if (amount <= 0) return;
 
-        if (!personYearly[lookup.canonical]) {
-            personYearly[lookup.canonical] = { cost: 0, dept: lookup.dept };
-            personMonths[lookup.canonical] = new Set();
+        if (!personData[lookup.canonical]) {
+            personData[lookup.canonical] = { dept: lookup.dept, monthly: Array(12).fill(0) };
         }
-        personYearly[lookup.canonical].cost += amount;
-        personMonths[lookup.canonical].add(exp.fiscal_month - 1);
+        const mIdx = (exp.fiscal_month || 1) - 1;
+        personData[lookup.canonical].monthly[mIdx] += amount;
     });
 
-    // 5. cost_per_hour = total cost / (160 * months_active)
+    // 5. cost_per_hour por persona.
+    //
+    //    months_active = número de meses DONDE EFECTIVAMENTE hay un registro
+    //    de sueldo > 0 en P&L. Sin rellenar huecos ni proyectar al futuro.
+    //    Si Julián cobra en mayo → 1 mes. Si añades junio → 2 meses. Si tiene
+    //    enero+febrero+abril (sin marzo) → 3 meses, no 4.
+    //
+    //    yearly_cost = suma real de los meses con datos.
+    //    cost_per_hour = yearly_cost / (160 × months_active).
     const personByName = {};
-    Object.entries(personYearly).forEach(([name, info]) => {
-        const monthsActive = personMonths[name].size || 1;
+    Object.entries(personData).forEach(([name, info]) => {
+        const monthly = info.monthly;
+        let monthsActive = 0;
+        let yearlyCost = 0;
+        let firstMonth = -1, lastMonth = -1;
+        for (let i = 0; i < 12; i++) {
+            if (monthly[i] > 0) {
+                monthsActive++;
+                yearlyCost += monthly[i];
+                if (firstMonth === -1) firstMonth = i;
+                lastMonth = i;
+            }
+        }
+        if (monthsActive === 0) return; // sin datos este año
+
         const totalHours = HOURS_PER_PERSON_MONTH * monthsActive;
         personByName[norm(name)] = {
             canonical: name,
             dept: info.dept,
-            cost_per_hour: totalHours > 0 ? info.cost / totalHours : 0,
-            yearly_cost: info.cost,
+            cost_per_hour: totalHours > 0 ? yearlyCost / totalHours : 0,
+            yearly_cost: yearlyCost,
             months_active: monthsActive,
             hours_used: totalHours,
+            first_month: firstMonth + 1,
+            last_month: lastMonth + 1,
         };
     });
 
@@ -884,6 +907,79 @@ router.get('/accounts/:year', async (req, res) => {
             };
         }
 
+        // 8b. Horas manuales: cargar profitability_manual_hours JOIN manual_persons
+        //     y sumarlas al desglose mensual del cliente como una persona más
+        //     (con source: 'manual'). Esto es el caso de Alba, Leidy y cualquier
+        //     persona que ya no esté accesible vía ClickUp pero que sí trabajó
+        //     en la cuenta.
+        const { data: manualHoursRows } = await supabase
+            .from('profitability_manual_hours')
+            .select('id, client_id, manual_person_id, year, month, hours, manual_person:profitability_manual_persons(id, name, cost_per_hour, department)')
+            .eq('year', year);
+
+        // Para clientes que sólo tienen horas manuales (sin mapping ClickUp ni billing)
+        // necesitamos resolver su nombre para el modal. Resolvemos en bloque.
+        const manualClientIdsMissing = [];
+        for (const row of (manualHoursRows || [])) {
+            if (!clientMonthData[row.client_id]) manualClientIdsMissing.push(row.client_id);
+        }
+        const uniqueMissing = [...new Set(manualClientIdsMissing)];
+        const clientNameById = {};
+        if (uniqueMissing.length > 0) {
+            const { data: clientsData } = await supabase
+                .from('clients').select('id, name').in('id', uniqueMissing);
+            for (const c of (clientsData || [])) clientNameById[c.id] = c.name;
+        }
+
+        for (const row of (manualHoursRows || [])) {
+            const cid = row.client_id;
+            const m = (row.month || 1) - 1;
+            const person = row.manual_person;
+            if (!person) continue;
+            const hours = Number(row.hours || 0);
+            if (hours <= 0) continue;
+
+            // Coste/hora: primero buscar en P&L (mismo mecanismo que para
+            // usuarios ClickUp); si no hay match, usar override de la persona
+            // manual (para freelancers/externos sin sueldo en P&L).
+            const plMatch = matchClickUpUser(person.name, personByName);
+            let cph = 0;
+            let source = 'manual';
+            if (plMatch && plMatch.cost_per_hour > 0) {
+                cph = plMatch.cost_per_hour;
+                source = 'manual-pl';
+            } else if (Number(person.cost_per_hour) > 0) {
+                cph = Number(person.cost_per_hour);
+                source = 'manual';
+            }
+            const laborCost = hours * cph;
+
+            if (!clientMonthData[cid]) {
+                clientMonthData[cid] = {
+                    name: clientNameById[cid] || cid,
+                    months: Array.from({ length: 12 }, () => ({ hours: 0, labor_cost: 0, members: {} })),
+                };
+            }
+
+            clientMonthData[cid].months[m].hours += hours;
+            clientMonthData[cid].months[m].labor_cost += laborCost;
+
+            const syntheticUid = `manual:${person.id}`;
+            if (!clientMonthData[cid].months[m].members[syntheticUid]) {
+                clientMonthData[cid].months[m].members[syntheticUid] = {
+                    name: person.name,
+                    hours: 0,
+                    labor_cost: 0,
+                    cost_per_hour: cph,
+                    source,
+                    manual_person_id: person.id,
+                    manual_hours_id: row.id,
+                };
+            }
+            clientMonthData[cid].months[m].members[syntheticUid].hours += hours;
+            clientMonthData[cid].months[m].members[syntheticUid].labor_cost += laborCost;
+        }
+
         // 8. Construcción del resultado
         const result = Object.entries(clientMonthData).map(([clientId, cd]) => {
             const monthlyData = cd.months.map((m, idx) => {
@@ -962,6 +1058,232 @@ router.get('/accounts/:year', async (req, res) => {
         });
     } catch (err) {
         console.error('[profitability] accounts error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Manual persons: catálogo de personas cuyas horas se cargan manualmente
+// (usuarios desactivados de ClickUp, freelancers no enlazados, etc.)
+// ──────────────────────────────────────────────────────────────────────────────
+
+router.get('/manual-persons', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('profitability_manual_persons')
+            .select('*')
+            .order('name', { ascending: true });
+        if (error) throw error;
+
+        const persons = data || [];
+
+        // Si se pasa ?year=, resolver el coste/hora desde P&L (mismo mecanismo
+        // que /auto-mapping/:year usa para empleados activos). Así el frontend
+        // puede mostrar el cálculo real, no sólo "auto · P&L".
+        const year = req.query.year ? parseInt(req.query.year) : null;
+        if (year) {
+            const { personByName } = await computeRealCostPerPerson(year);
+            for (const p of persons) {
+                const match = matchClickUpUser(p.name, personByName);
+                if (match && match.cost_per_hour > 0) {
+                    p.resolved_source = 'matched';
+                    p.resolved_cost_per_hour = Math.round(match.cost_per_hour * 100) / 100;
+                    p.matched_employee = match.canonical;
+                    p.matched_department = match.dept;
+                    p.matched_yearly_cost = Math.round(match.yearly_cost * 100) / 100;
+                    p.matched_months_active = match.months_active;
+                    p.formula = `${p.matched_yearly_cost.toLocaleString('es-ES')} € ÷ (160h × ${match.months_active} meses) = ${p.resolved_cost_per_hour.toFixed(2)} €/h`;
+                } else if (Number(p.cost_per_hour) > 0) {
+                    p.resolved_source = 'override';
+                    p.resolved_cost_per_hour = Number(p.cost_per_hour);
+                } else {
+                    p.resolved_source = 'unmatched';
+                    p.resolved_cost_per_hour = 0;
+                }
+            }
+        }
+
+        res.json({ persons });
+    } catch (err) {
+        console.error('[profitability] GET manual-persons:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/manual-persons', async (req, res) => {
+    try {
+        const { name, cost_per_hour, department, notes } = req.body || {};
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const { data, error } = await supabase
+            .from('profitability_manual_persons')
+            .insert({
+                name: String(name).trim(),
+                cost_per_hour: Number(cost_per_hour || 0),
+                department: department || null,
+                notes: notes || null,
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        res.json({ person: data });
+    } catch (err) {
+        console.error('[profitability] POST manual-persons:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.put('/manual-persons/:id', async (req, res) => {
+    try {
+        const { name, cost_per_hour, department, notes } = req.body || {};
+        const update = { updated_at: new Date().toISOString() };
+        if (name !== undefined) update.name = String(name).trim();
+        if (cost_per_hour !== undefined) update.cost_per_hour = Number(cost_per_hour || 0);
+        if (department !== undefined) update.department = department || null;
+        if (notes !== undefined) update.notes = notes || null;
+        const { data, error } = await supabase
+            .from('profitability_manual_persons')
+            .update(update)
+            .eq('id', req.params.id)
+            .select()
+            .single();
+        if (error) throw error;
+        res.json({ person: data });
+    } catch (err) {
+        console.error('[profitability] PUT manual-persons:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.delete('/manual-persons/:id', async (req, res) => {
+    try {
+        const { error } = await supabase
+            .from('profitability_manual_persons')
+            .delete()
+            .eq('id', req.params.id);
+        if (error) throw error;
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[profitability] DELETE manual-persons:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Manual hours: horas cargadas manualmente por (cliente, persona manual, año, mes)
+// ──────────────────────────────────────────────────────────────────────────────
+
+router.get('/manual-hours', async (req, res) => {
+    try {
+        const q = supabase
+            .from('profitability_manual_hours')
+            .select('*, manual_person:profitability_manual_persons(id, name, cost_per_hour, department), client:clients(id, name)');
+        if (req.query.year) q.eq('year', parseInt(req.query.year));
+        if (req.query.client_id) q.eq('client_id', req.query.client_id);
+        const { data, error } = await q;
+        if (error) throw error;
+        res.json({ hours: data || [] });
+    } catch (err) {
+        console.error('[profitability] GET manual-hours:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Upsert: si existe (client_id, manual_person_id, year, month) actualiza horas,
+// si no existe inserta. Para borrar usar DELETE /manual-hours/:id.
+router.post('/manual-hours', async (req, res) => {
+    try {
+        const { client_id, manual_person_id, year, month, hours } = req.body || {};
+        if (!client_id || !manual_person_id || !year || !month) {
+            return res.status(400).json({ error: 'client_id, manual_person_id, year, month are required' });
+        }
+        const h = Number(hours);
+        if (!Number.isFinite(h) || h < 0) {
+            return res.status(400).json({ error: 'hours must be a non-negative number' });
+        }
+        const { data, error } = await supabase
+            .from('profitability_manual_hours')
+            .upsert({
+                client_id,
+                manual_person_id,
+                year: parseInt(year),
+                month: parseInt(month),
+                hours: h,
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'client_id,manual_person_id,year,month' })
+            .select('*, manual_person:profitability_manual_persons(id, name, cost_per_hour, department), client:clients(id, name)')
+            .single();
+        if (error) throw error;
+        res.json({ entry: data });
+    } catch (err) {
+        console.error('[profitability] POST manual-hours:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.delete('/manual-hours/:id', async (req, res) => {
+    try {
+        const { error } = await supabase
+            .from('profitability_manual_hours')
+            .delete()
+            .eq('id', req.params.id);
+        if (error) throw error;
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[profitability] DELETE manual-hours:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Hidden items: ocultar clientes / usuarios / personas manuales del modulo
+// ──────────────────────────────────────────────────────────────────────────────
+
+const VALID_HIDDEN_SCOPES = new Set(['client', 'clickup_user', 'manual_person']);
+
+router.get('/hidden-items', async (req, res) => {
+    try {
+        const q = supabase.from('profitability_hidden_items').select('*');
+        if (req.query.scope) q.eq('scope', req.query.scope);
+        const { data, error } = await q;
+        if (error) throw error;
+        res.json({ items: data || [] });
+    } catch (err) {
+        console.error('[profitability] GET hidden-items:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/hidden-items', async (req, res) => {
+    try {
+        const { scope, ref_id } = req.body || {};
+        if (!VALID_HIDDEN_SCOPES.has(scope)) return res.status(400).json({ error: `scope must be one of ${[...VALID_HIDDEN_SCOPES].join(', ')}` });
+        if (!ref_id) return res.status(400).json({ error: 'ref_id required' });
+        const { data, error } = await supabase
+            .from('profitability_hidden_items')
+            .upsert({ scope, ref_id: String(ref_id) }, { onConflict: 'scope,ref_id' })
+            .select()
+            .single();
+        if (error) throw error;
+        res.json({ item: data });
+    } catch (err) {
+        console.error('[profitability] POST hidden-items:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.delete('/hidden-items/:scope/:ref_id', async (req, res) => {
+    try {
+        const { error } = await supabase
+            .from('profitability_hidden_items')
+            .delete()
+            .eq('scope', req.params.scope)
+            .eq('ref_id', req.params.ref_id);
+        if (error) throw error;
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[profitability] DELETE hidden-items:', err);
         res.status(500).json({ error: err.message });
     }
 });

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, AccountProfitability } from '@/lib/api/admin';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { adminApi, AccountProfitability, ProfitabilityMember } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
-import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info, Plus, Trash2, Pencil, Check, Search, ArrowUp, ArrowDown, Eye, EyeOff, TrendingUp } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ProfitabilitySetup } from './ProfitabilitySetup';
 
@@ -21,6 +22,47 @@ function eur(n: number) {
 }
 function eurDec(n: number) {
     return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+}
+function round2(n: number) {
+    return Math.round(n * 100) / 100;
+}
+
+// Dropdown reutilizable para mostrar las cuentas ocultas y poder reactivarlas.
+function HiddenAccountsDropdown({ items, onUnhide }: {
+    items: { id: string; label: string }[];
+    onUnhide: (id: string) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    if (items.length === 0) return null;
+    return (
+        <div className="relative">
+            <button
+                onClick={() => setOpen(o => !o)}
+                className={cn(
+                    'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs transition-colors',
+                    open ? 'border-indigo-400/60 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300' : 'border-border/60 bg-card hover:bg-muted/60 text-muted-foreground'
+                )}
+            >
+                <EyeOff size={11} />Ocultas ({items.length})
+            </button>
+            {open && (
+                <>
+                    <div className="fixed inset-0 z-[55]" onClick={() => setOpen(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-[56] w-64 max-h-80 overflow-auto bg-popover border border-border/60 rounded-lg shadow-xl py-1">
+                        {items.map(it => (
+                            <div key={it.id} className="flex items-center justify-between gap-2 px-3 py-1.5 hover:bg-muted/40 text-xs">
+                                <span className="truncate text-foreground">{it.label}</span>
+                                <button
+                                    onClick={() => onUnhide(it.id)}
+                                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline shrink-0 inline-flex items-center gap-1"
+                                ><Eye size={10} />Mostrar</button>
+                            </div>
+                        ))}
+                    </div>
+                </>
+            )}
+        </div>
+    );
 }
 
 const HINT_KEY = 'fi_profitability_hint_v1';
@@ -143,14 +185,214 @@ function ProfitabilityHint({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 }
 
 // ── Team detail modal ─────────────────────────────────────────────────────────
-function TeamModal({ account, monthIdx, onClose }: {
-    account: AccountProfitability; monthIdx: number | null; onClose: () => void;
+function TeamModal({ account, monthIdx, year, onClose }: {
+    account: AccountProfitability; monthIdx: number | null; year: number; onClose: () => void;
 }) {
+    const qc = useQueryClient();
     const m = monthIdx !== null ? account.monthly[monthIdx] : null;
+
+    // Personas manuales con coste resuelto desde P&L (mismo año que la vista)
+    const { data: personsData } = useQuery({
+        queryKey: ['manual-persons', year],
+        queryFn: () => adminApi.getManualPersons(year),
+        enabled: m !== null,
+    });
+    const persons = personsData?.persons || [];
+
+    const [editingHoursId, setEditingHoursId] = useState<string | null>(null);
+    const [editingValue, setEditingValue] = useState('');
+    const [addingPersonId, setAddingPersonId] = useState<string>('');
+    const [addingHours, setAddingHours] = useState('');
+
+    // Resolver coste/hora final de una persona (auto desde P&L o override)
+    const resolveCost = (personId: string): { cph: number; source: string } => {
+        const p = persons.find(x => x.id === personId);
+        if (!p) return { cph: 0, source: 'manual' };
+        if ((p.resolved_cost_per_hour ?? 0) > 0) {
+            return { cph: p.resolved_cost_per_hour!, source: p.resolved_source === 'matched' ? 'manual-pl' : 'manual' };
+        }
+        return { cph: Number(p.cost_per_hour || 0), source: 'manual' };
+    };
+
+    // Actualización optimista del cache de /accounts/:year sin esperar refetch.
+    // Recalcula hours, labor_cost, gross_profit y margin_pct del mes afectado
+    // y los totales de la cuenta. Si algo se desvía con el backend, el próximo
+    // refetch (cuando recargue la página o cambie de año) reconcilia.
+    const applyOptimistic = (mutator: (acc: AccountProfitability) => AccountProfitability) => {
+        qc.setQueryData(['profitability-accounts', year], (old: any) => {
+            if (!old || !Array.isArray(old.accounts)) return old;
+            return {
+                ...old,
+                accounts: old.accounts.map((acc: AccountProfitability) =>
+                    acc.client_id === account.client_id ? recomputeTotals(mutator(acc)) : acc
+                ),
+            };
+        });
+    };
+
+    const recomputeTotals = (acc: AccountProfitability): AccountProfitability => {
+        const monthly = acc.monthly.map(mo => {
+            const labor = mo.members.reduce((s, mb) => s + mb.labor_cost, 0);
+            const hours = mo.members.reduce((s, mb) => s + mb.hours, 0);
+            const grossProfit = mo.revenue - labor;
+            const marginPct = mo.revenue > 0 && hours > 0 ? (grossProfit / mo.revenue) * 100 : null;
+            return {
+                ...mo,
+                hours: round2(hours),
+                labor_cost: round2(labor),
+                gross_profit: round2(grossProfit),
+                margin_pct: marginPct !== null ? Math.round(marginPct * 10) / 10 : null,
+            };
+        });
+        const totalRevenue = monthly.reduce((s, mo) => s + mo.revenue, 0);
+        const totalLaborCost = monthly.reduce((s, mo) => s + mo.labor_cost, 0);
+        const totalHours = monthly.reduce((s, mo) => s + mo.hours, 0);
+        const totalProfit = totalRevenue - totalLaborCost;
+        const totalMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : null;
+        return {
+            ...acc,
+            monthly,
+            total_revenue: round2(totalRevenue),
+            total_labor_cost: round2(totalLaborCost),
+            total_hours: round2(totalHours),
+            total_profit: round2(totalProfit),
+            total_margin_pct: totalMargin !== null ? Math.round(totalMargin * 10) / 10 : null,
+        };
+    };
+
+    const upsert = useMutation({
+        mutationFn: (params: { manual_person_id: string; hours: number }) =>
+            adminApi.upsertManualHours({
+                client_id: account.client_id,
+                manual_person_id: params.manual_person_id,
+                year,
+                month: (monthIdx ?? 0) + 1,
+                hours: params.hours,
+            }),
+        onSuccess: (response, variables) => {
+            const entry = response.entry;
+            const person = persons.find(p => p.id === variables.manual_person_id);
+            const { cph, source } = resolveCost(variables.manual_person_id);
+            const hours = Number(entry.hours);
+
+            applyOptimistic(acc => {
+                const targetMonth = entry.month - 1;
+                return {
+                    ...acc,
+                    monthly: acc.monthly.map((mo, mi) => {
+                        if (mi !== targetMonth) return mo;
+                        const idx = mo.members.findIndex(mb => mb.manual_person_id === variables.manual_person_id);
+                        const newMember: ProfitabilityMember = {
+                            name: person?.name || entry.manual_person?.name || '',
+                            hours,
+                            labor_cost: round2(hours * cph),
+                            cost_per_hour: cph,
+                            source,
+                            manual_person_id: variables.manual_person_id,
+                            manual_hours_id: entry.id,
+                        };
+                        const members = idx >= 0
+                            ? mo.members.map((mb, i) => i === idx ? newMember : mb)
+                            : [...mo.members, newMember];
+                        return { ...mo, members };
+                    }),
+                };
+            });
+
+            toast.success('Horas guardadas');
+            setEditingHoursId(null);
+            setEditingValue('');
+            setAddingPersonId('');
+            setAddingHours('');
+
+            // Reconciliación silenciosa en background — sin invalidar para que
+            // la UI no se quede en estado "loading". La próxima visita a la
+            // página trae datos frescos.
+            qc.invalidateQueries({ queryKey: ['profitability-accounts', year], refetchType: 'none' });
+        },
+        onError: (e: Error) => toast.error(e.message),
+    });
+
+    const remove = useMutation({
+        mutationFn: (id: string) => adminApi.deleteManualHours(id),
+        onSuccess: (_data, id) => {
+            applyOptimistic(acc => ({
+                ...acc,
+                monthly: acc.monthly.map(mo => ({
+                    ...mo,
+                    members: mo.members.filter(mb => mb.manual_hours_id !== id),
+                })),
+            }));
+            toast.success('Horas borradas');
+            qc.invalidateQueries({ queryKey: ['profitability-accounts', year], refetchType: 'none' });
+        },
+        onError: (e: Error) => toast.error(e.message),
+    });
+
     if (!m) return null;
+
+    // Una entry es "manual" si tiene manual_person_id (cubre tanto 'manual'
+    // como 'manual-pl' que es el caso de coste auto-resuelto desde P&L).
+    const manualMembers = m.members.filter(mb => !!mb.manual_person_id);
+    const clickupMembers = m.members.filter(mb => !mb.manual_person_id);
+    const manualPersonIdsUsed = new Set(manualMembers.map(mb => mb.manual_person_id));
+    const availablePersons = persons.filter(p => !manualPersonIdsUsed.has(p.id));
+
+    const renderMemberRow = (mb: ProfitabilityMember) => {
+        const isManual = !!mb.manual_person_id;
+        const isEditing = isManual && editingHoursId === mb.manual_hours_id;
+        return (
+            <div key={mb.manual_hours_id || mb.name} className="flex items-center justify-between py-1.5 text-xs gap-2">
+                <span className="text-foreground font-medium flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{mb.name}</span>
+                    {isManual && <span className="shrink-0 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">Manual</span>}
+                </span>
+                <span className="text-muted-foreground tabular-nums text-right flex items-center gap-1.5 shrink-0">
+                    {isEditing ? (
+                        <>
+                            <input
+                                type="number" step="0.01" min="0" autoFocus
+                                value={editingValue}
+                                onChange={e => setEditingValue(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') upsert.mutate({ manual_person_id: mb.manual_person_id!, hours: Number(editingValue || 0) });
+                                    if (e.key === 'Escape') { setEditingHoursId(null); setEditingValue(''); }
+                                }}
+                                className="w-20 h-7 px-1.5 rounded border border-indigo-400 bg-background text-xs font-mono text-right"
+                            />
+                            <button onClick={() => upsert.mutate({ manual_person_id: mb.manual_person_id!, hours: Number(editingValue || 0) })} disabled={upsert.isPending} className="h-6 w-6 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-600 flex items-center justify-center"><Check size={12} /></button>
+                            <button onClick={() => { setEditingHoursId(null); setEditingValue(''); }} className="h-6 w-6 rounded hover:bg-muted text-muted-foreground flex items-center justify-center"><X size={12} /></button>
+                        </>
+                    ) : (
+                        <>
+                            <span>
+                                {mb.hours.toFixed(2)}h · {eurDec(mb.labor_cost)}
+                                {mb.cost_per_hour > 0 && <span className="ml-1 opacity-50 text-[10px]">@{mb.cost_per_hour.toFixed(2)}€/h</span>}
+                            </span>
+                            {isManual && (
+                                <span className="flex items-center gap-0.5">
+                                    <button
+                                        onClick={() => { setEditingHoursId(mb.manual_hours_id!); setEditingValue(String(mb.hours)); }}
+                                        className="h-6 w-6 rounded hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center"
+                                        title="Editar horas"
+                                    ><Pencil size={11} /></button>
+                                    <button
+                                        onClick={() => { if (confirm(`¿Borrar las horas manuales de ${mb.name} en ${MONTH_NAMES_FULL[monthIdx!]}?`)) remove.mutate(mb.manual_hours_id!); }}
+                                        className="h-6 w-6 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 flex items-center justify-center"
+                                        title="Borrar"
+                                    ><Trash2 size={11} /></button>
+                                </span>
+                            )}
+                        </>
+                    )}
+                </span>
+            </div>
+        );
+    };
+
     return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-            <div className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+            <div className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3" onClick={e => e.stopPropagation()}>
                 <div className="flex items-start justify-between gap-2">
                     <div>
                         <p className="text-xs text-muted-foreground">{account.client_name}</p>
@@ -159,24 +401,359 @@ function TeamModal({ account, monthIdx, onClose }: {
                     <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground"><X size={14} /></button>
                 </div>
                 <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5"><Users size={11} /> Equipo · {m.hours.toFixed(1)}h</p>
+
                 {m.members.length === 0 ? (
                     <p className="text-xs text-muted-foreground">Sin horas registradas</p>
                 ) : (
                     <div className="divide-y divide-border/30">
-                        {m.members.map(mb => (
-                            <div key={mb.name} className="flex items-center justify-between py-1.5 text-xs">
-                                <span className="text-foreground font-medium">{mb.name}</span>
-                                <span className="text-muted-foreground tabular-nums text-right">
-                                    {mb.hours.toFixed(2)}h · {eurDec(mb.labor_cost)}
-                                    {mb.cost_per_hour > 0 && <span className="ml-1 opacity-50 text-[10px]">@{mb.cost_per_hour.toFixed(2)}€/h</span>}
-                                </span>
-                            </div>
-                        ))}
+                        {clickupMembers.map(renderMemberRow)}
+                        {manualMembers.map(renderMemberRow)}
                     </div>
                 )}
+
+                {/* Añadir persona manual */}
+                <div className="pt-2 border-t border-border/40">
+                    {addingPersonId ? (
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={addingPersonId}
+                                onChange={e => setAddingPersonId(e.target.value)}
+                                className="flex-1 h-8 px-2 rounded-md border border-border/60 bg-background text-xs"
+                            >
+                                {availablePersons.map(p => {
+                                    const cph = (p.resolved_cost_per_hour ?? Number(p.cost_per_hour || 0));
+                                    const label = cph > 0
+                                        ? `${p.name} · ${cph.toFixed(2)}€/h${p.resolved_source === 'matched' ? ' (P&L)' : ''}`
+                                        : `${p.name} · sin coste`;
+                                    return <option key={p.id} value={p.id}>{label}</option>;
+                                })}
+                            </select>
+                            <input
+                                type="number" step="0.01" min="0" autoFocus
+                                placeholder="horas"
+                                value={addingHours}
+                                onChange={e => setAddingHours(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter' && addingPersonId && addingHours) {
+                                        upsert.mutate({ manual_person_id: addingPersonId, hours: Number(addingHours) });
+                                    }
+                                    if (e.key === 'Escape') { setAddingPersonId(''); setAddingHours(''); }
+                                }}
+                                className="w-20 h-8 px-2 rounded-md border border-border/60 bg-background text-xs font-mono text-right"
+                            />
+                            <button
+                                onClick={() => upsert.mutate({ manual_person_id: addingPersonId, hours: Number(addingHours || 0) })}
+                                disabled={!addingPersonId || !addingHours || upsert.isPending}
+                                className="h-8 px-3 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                            >Añadir</button>
+                            <button onClick={() => { setAddingPersonId(''); setAddingHours(''); }} className="h-8 w-8 rounded-md hover:bg-muted text-muted-foreground flex items-center justify-center"><X size={13} /></button>
+                        </div>
+                    ) : (
+                        availablePersons.length > 0 ? (
+                            <button
+                                onClick={() => { setAddingPersonId(availablePersons[0].id); setAddingHours(''); }}
+                                className="w-full h-8 rounded-md text-xs font-medium border border-dashed border-border/80 text-muted-foreground hover:text-foreground hover:bg-muted/40 inline-flex items-center justify-center gap-1.5"
+                            ><Plus size={12} />Añadir horas manuales</button>
+                        ) : (
+                            persons.length === 0 ? (
+                                <p className="text-[11px] text-muted-foreground text-center">
+                                    Crea personas manuales en <span className="font-medium">Configurar</span> para poder añadirles horas.
+                                </p>
+                            ) : null
+                        )
+                    )}
+                </div>
             </div>
         </div>
     );
+}
+
+// ── Annual evolution modal ────────────────────────────────────────────────────
+// Vista de una cuenta concreta a lo largo del año: gráfica multi-serie
+// (Fee, Coste, Beneficio) + tabla de los 12 meses con margen mensual.
+function AnnualEvolutionModal({ account, year, onOpenMonth, onClose }: {
+    account: AccountProfitability; year: number; onOpenMonth: (monthIdx: number) => void; onClose: () => void;
+}) {
+    const monthly = account.monthly;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+            <div className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90dvh] flex flex-col" onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border/40">
+                    <div className="space-y-2">
+                        <div>
+                            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Evolución {year}</p>
+                            <h2 className="text-lg font-bold text-foreground">{account.client_name}</h2>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-5 gap-y-1 text-xs">
+                            <Stat label="Fee total" value={eur(account.total_revenue)} />
+                            <Stat label="Horas" value={`${account.total_hours.toFixed(1)}h`} />
+                            <Stat label="Coste" value={eur(account.total_labor_cost)} />
+                            <Stat label="Beneficio" value={eur(account.total_profit)} tone={account.total_profit >= 0 ? 'good' : 'bad'} />
+                            <Stat label="Margen" value={account.total_margin_pct !== null ? `${account.total_margin_pct.toFixed(1)}%` : '—'} tone={account.total_margin_pct === null ? undefined : account.total_margin_pct >= 60 ? 'good' : account.total_margin_pct >= 40 ? 'warn' : 'bad'} />
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground"><X size={15} /></button>
+                </div>
+
+                {/* Charts: 3 mini-gráficas separadas (Horas, Coste, Beneficio) */}
+                <div className="px-5 pt-4 pb-3 border-b border-border/40">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <MetricChart
+                            label="Horas"
+                            accessor={m => m.hours}
+                            format={v => `${v.toFixed(1)}h`}
+                            line="emerald"
+                            monthly={monthly}
+                            onClickMonth={mi => monthly[mi].hours > 0 && onOpenMonth(mi)}
+                        />
+                        <MetricChart
+                            label="Coste"
+                            accessor={m => m.labor_cost}
+                            format={v => eur(v)}
+                            line="red"
+                            monthly={monthly}
+                            onClickMonth={mi => monthly[mi].hours > 0 && onOpenMonth(mi)}
+                        />
+                        <MetricChart
+                            label="Beneficio"
+                            accessor={m => m.gross_profit}
+                            format={v => eur(v)}
+                            line="indigo"
+                            allowNegative
+                            monthly={monthly}
+                            onClickMonth={mi => monthly[mi].hours > 0 && onOpenMonth(mi)}
+                        />
+                    </div>
+                </div>
+
+                {/* Table */}
+                <div className="overflow-auto flex-1 px-3 py-2">
+                    <table className="w-full text-sm">
+                        <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-card sticky top-0 z-10 shadow-[0_1px_0_0_rgba(0,0,0,0.06)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]">
+                            <tr>
+                                <th className="text-left px-3 py-2 font-medium">Mes</th>
+                                <th className="text-right px-3 py-2 font-medium">Fee</th>
+                                <th className="text-right px-3 py-2 font-medium">Horas</th>
+                                <th className="text-right px-3 py-2 font-medium">Coste</th>
+                                <th className="text-right px-3 py-2 font-medium">Beneficio</th>
+                                <th className="text-right px-3 py-2 font-medium w-24">Margen</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/30">
+                            {monthly.map((mo, mi) => {
+                                const s = semaphoreColor(mo.margin_pct);
+                                const empty = mo.revenue === 0 && mo.hours === 0;
+                                return (
+                                    <tr key={mi} className={cn('hover:bg-muted/20 transition-colors', empty && 'opacity-40')}>
+                                        <td className="px-3 py-1.5 text-xs font-medium">
+                                            {mo.hours > 0 ? (
+                                                <button onClick={() => onOpenMonth(mi)} className="text-foreground hover:text-primary underline decoration-dotted underline-offset-4 decoration-muted-foreground/40">
+                                                    {MONTH_NAMES_FULL[mi]}
+                                                </button>
+                                            ) : <span className="text-foreground">{MONTH_NAMES_FULL[mi]}</span>}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-right text-xs tabular-nums">{mo.revenue > 0 ? eur(mo.revenue) : <span className="text-muted-foreground/40">—</span>}</td>
+                                        <td className="px-3 py-1.5 text-right text-xs tabular-nums">{mo.hours > 0 ? `${mo.hours.toFixed(1)}h` : <span className="text-muted-foreground/40">—</span>}</td>
+                                        <td className="px-3 py-1.5 text-right text-xs tabular-nums">{mo.labor_cost > 0 ? eur(mo.labor_cost) : <span className="text-muted-foreground/40">—</span>}</td>
+                                        <td className={cn('px-3 py-1.5 text-right text-xs tabular-nums font-medium', mo.gross_profit >= 0 ? 'text-foreground' : 'text-red-600 dark:text-red-400')}>
+                                            {mo.revenue > 0 || mo.labor_cost > 0 ? eur(mo.gross_profit) : <span className="text-muted-foreground/40">—</span>}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-right">
+                                            {mo.margin_pct !== null
+                                                ? <span className={cn('inline-block px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums', s.badge)}>{mo.margin_pct.toFixed(1)}%</span>
+                                                : <span className="text-muted-foreground/40 text-[10px]">—</span>}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' | 'warn' }) {
+    return (
+        <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{label}</p>
+            <p className={cn('font-semibold tabular-nums',
+                tone === 'good' ? 'text-emerald-600 dark:text-emerald-400'
+                : tone === 'bad' ? 'text-red-600 dark:text-red-400'
+                : tone === 'warn' ? 'text-amber-600 dark:text-amber-400'
+                : 'text-foreground'
+            )}>{value}</p>
+        </div>
+    );
+}
+
+// ── Mini chart por métrica (Horas / Coste / Beneficio) ───────────────────────
+// Una serie con área + línea + tendencia (regresión lineal). Pensada para
+// usarse en grid de 3 columnas dentro del modal de evolución anual.
+type LineColor = 'emerald' | 'red' | 'indigo';
+const LINE_COLORS: Record<LineColor, { stroke: string; fill: string; dot: string; pos: string; neg: string }> = {
+    emerald: { stroke: 'stroke-emerald-500', fill: 'fill-emerald-400/15 dark:fill-emerald-400/10', dot: 'fill-emerald-500', pos: 'text-emerald-600 dark:text-emerald-400', neg: 'text-red-600 dark:text-red-400' },
+    red:     { stroke: 'stroke-red-500',     fill: 'fill-red-400/15 dark:fill-red-400/10',         dot: 'fill-red-500',     pos: 'text-foreground',                       neg: 'text-foreground' },
+    indigo:  { stroke: 'stroke-indigo-500',  fill: 'fill-indigo-400/15 dark:fill-indigo-400/10',   dot: 'fill-indigo-500',  pos: 'text-emerald-600 dark:text-emerald-400', neg: 'text-red-600 dark:text-red-400' },
+};
+
+function MetricChart({ label, accessor, format, line, allowNegative, monthly, onClickMonth }: {
+    label: string;
+    accessor: (m: { hours: number; labor_cost: number; gross_profit: number; revenue: number; margin_pct: number | null }) => number;
+    format: (v: number) => string;
+    line: LineColor;
+    allowNegative?: boolean;
+    monthly: { hours: number; labor_cost: number; gross_profit: number; revenue: number; margin_pct: number | null }[];
+    onClickMonth: (mi: number) => void;
+}) {
+    const [hover, setHover] = useState<number | null>(null);
+
+    const values = monthly.map(accessor);
+    const colors = LINE_COLORS[line];
+
+    // Último mes con datos (la cuenta tuvo actividad — hours o revenue)
+    let lastIdx = -1;
+    for (let i = 11; i >= 0; i--) if (monthly[i].hours > 0 || monthly[i].revenue > 0) { lastIdx = i; break; }
+    const activeValues = lastIdx >= 0 ? values.slice(0, lastIdx + 1) : [];
+
+    const total = values.reduce((s, v) => s + v, 0);
+
+    // Tendencia (regresión lineal) sobre los meses activos
+    const trend = (() => {
+        if (activeValues.length < 2) return null;
+        const n = activeValues.length;
+        const xs = activeValues.map((_, i) => i);
+        const ys = activeValues;
+        const meanX = xs.reduce((a, b) => a + b, 0) / n;
+        const meanY = ys.reduce((a, b) => a + b, 0) / n;
+        const num = xs.reduce((s, x, i) => s + (x - meanX) * (ys[i] - meanY), 0);
+        const den = xs.reduce((s, x) => s + (x - meanX) ** 2, 0);
+        const slope = den === 0 ? 0 : num / den;
+        const intercept = meanY - slope * meanX;
+        return { slope, valAt: (i: number) => slope * i + intercept };
+    })();
+
+    const W = 320, H = 110;
+    const PAD = { l: 8, r: 8, t: 10, b: 22 };
+    const innerW = W - PAD.l - PAD.r;
+    const innerH = H - PAD.t - PAD.b;
+
+    const maxV = Math.max(...values, 0.001);
+    const minV = allowNegative ? Math.min(...values, 0) : 0;
+    const yMax = niceCeil(maxV);
+    const yMin = allowNegative ? niceFloor(minV) : 0;
+
+    const xFor = (i: number) => PAD.l + (i / 11) * innerW;
+    const yFor = (v: number) => PAD.t + innerH - ((v - yMin) / (yMax - yMin || 1)) * innerH;
+    const y0 = yFor(0);
+
+    const linePath = activeValues.length === 0 ? ''
+        : activeValues.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xFor(i)} ${yFor(v)}`).join(' ');
+    const areaPath = activeValues.length === 0 ? ''
+        : `M ${xFor(0)} ${y0} ` + activeValues.map((v, i) => `L ${xFor(i)} ${yFor(v)}`).join(' ') + ` L ${xFor(activeValues.length - 1)} ${y0} Z`;
+
+    const hoveredValue = hover !== null && hover <= lastIdx ? values[hover] : null;
+    const trendDir = trend ? (trend.slope > 0.0001 ? 'al alza' : trend.slope < -0.0001 ? 'a la baja' : 'estable') : null;
+    const trendCls = trend ? (trend.slope > 0.0001 ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-100/60 dark:bg-emerald-900/30' : trend.slope < -0.0001 ? 'text-red-600 dark:text-red-400 bg-red-100/60 dark:bg-red-900/30' : 'text-muted-foreground bg-muted/60') : '';
+
+    return (
+        <div className="border border-border/50 rounded-xl bg-card/40 p-3 space-y-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</span>
+                {trendDir && (
+                    <span className={cn('text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold', trendCls)}>
+                        {trendDir}
+                    </span>
+                )}
+            </div>
+            <div className="flex items-baseline justify-between gap-2 min-h-[1.75rem]">
+                <span className={cn('text-lg font-bold tabular-nums', total < 0 ? colors.neg : 'text-foreground')}>{format(total)}</span>
+                {hoveredValue !== null && (
+                    <span className="text-[11px] tabular-nums text-muted-foreground">
+                        {MONTH_NAMES[hover!]} · <span className={cn('font-semibold', hoveredValue < 0 ? colors.neg : colors.pos)}>{format(hoveredValue)}</span>
+                    </span>
+                )}
+            </div>
+            <div className="relative">
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="none">
+                    {/* Linea de cero si hay negativos */}
+                    {allowNegative && yMin < 0 && (
+                        <line x1={PAD.l} y1={y0} x2={PAD.l + innerW} y2={y0} className="stroke-border" strokeWidth="0.5" />
+                    )}
+
+                    {/* Área */}
+                    {areaPath && <path d={areaPath} className={colors.fill} />}
+
+                    {/* Línea principal */}
+                    {linePath && <path d={linePath} fill="none" className={colors.stroke} strokeWidth="2" strokeLinejoin="round" />}
+
+                    {/* Línea de tendencia */}
+                    {trend && (
+                        <line
+                            x1={xFor(0)} y1={yFor(trend.valAt(0))}
+                            x2={xFor(11)} y2={yFor(trend.valAt(11))}
+                            className="stroke-foreground/35"
+                            strokeWidth="1.25"
+                            strokeDasharray="3 3"
+                        />
+                    )}
+
+                    {/* X axis labels */}
+                    {monthly.map((_, i) => (
+                        <text key={i} x={xFor(i)} y={H - 6} textAnchor="middle" className={cn('fill-current', i <= lastIdx ? 'text-muted-foreground' : 'text-muted-foreground/30')} style={{ fontSize: 8.5 }}>
+                            {MONTH_NAMES[i][0]}
+                        </text>
+                    ))}
+
+                    {/* Dots + hitboxes */}
+                    {monthly.map((mo, i) => {
+                        const isActive = i <= lastIdx;
+                        return (
+                            <g key={i}>
+                                {isActive && (
+                                    <circle cx={xFor(i)} cy={yFor(values[i])} r={hover === i ? 3.5 : 2.5} className={colors.dot} />
+                                )}
+                                <rect
+                                    x={xFor(i) - innerW / 24}
+                                    y={PAD.t}
+                                    width={innerW / 12}
+                                    height={innerH}
+                                    fill="transparent"
+                                    onMouseEnter={() => setHover(i)}
+                                    onMouseLeave={() => setHover(h => h === i ? null : h)}
+                                    onClick={() => onClickMonth(i)}
+                                    className={cn(isActive && mo.hours > 0 ? 'cursor-pointer' : '')}
+                                />
+                            </g>
+                        );
+                    })}
+
+                    {/* Hover guide */}
+                    {hover !== null && hover <= lastIdx && (
+                        <line x1={xFor(hover)} y1={PAD.t} x2={xFor(hover)} y2={PAD.t + innerH} className="stroke-foreground/25" strokeDasharray="2 3" strokeWidth="1" />
+                    )}
+                </svg>
+            </div>
+        </div>
+    );
+}
+
+// ── helpers de eje ────────────────────────────────────────────────────────────
+function niceCeil(n: number): number {
+    if (n <= 0) return 0;
+    const mag = Math.pow(10, Math.floor(Math.log10(n)));
+    const norm = n / mag;
+    if (norm <= 1)  return mag;
+    if (norm <= 2)  return 2 * mag;
+    if (norm <= 5)  return 5 * mag;
+    return 10 * mag;
+}
+function niceFloor(n: number): number {
+    if (n >= 0) return 0;
+    return -niceCeil(-n);
 }
 
 // ── Column guide modal ────────────────────────────────────────────────────────
@@ -352,11 +929,13 @@ function ColumnGuide({ onClose }: { onClose: () => void }) {
 }
 
 // ── Main table row ────────────────────────────────────────────────────────────
-function Row({ account, monthIdx, annual, onTeam }: {
+function Row({ account, monthIdx, annual, onTeam, onAnnualEvolution, onHide }: {
     account: AccountProfitability;
     monthIdx: number;
     annual: boolean;
     onTeam: (a: AccountProfitability, m: number) => void;
+    onAnnualEvolution: (clientId: string) => void;
+    onHide: (clientId: string) => void;
 }) {
     const m = account.monthly[monthIdx];
     const revenue = annual ? account.total_revenue : m.revenue;
@@ -374,7 +953,21 @@ function Row({ account, monthIdx, annual, onTeam }: {
     return (
         <tr className="border-b border-border/30 hover:bg-muted/20 transition-colors group">
             <td className="px-4 py-2.5 text-sm font-medium text-foreground whitespace-nowrap">
-                {account.client_name}
+                <div className="flex items-center gap-1.5 group/name">
+                    <span>{account.client_name}</span>
+                    {annual && (
+                        <button
+                            onClick={() => onAnnualEvolution(account.client_id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity h-5 w-5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary flex items-center justify-center"
+                            title="Ver evolución mensual"
+                        ><TrendingUp size={12} /></button>
+                    )}
+                    <button
+                        onClick={() => onHide(account.client_id)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity h-5 w-5 rounded hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center"
+                        title="Ocultar cuenta"
+                    ><EyeOff size={12} /></button>
+                </div>
             </td>
             <td className="px-3 py-2.5 text-right text-sm tabular-nums text-foreground">
                 {revenue > 0
@@ -431,14 +1024,20 @@ export default function Profitability() {
     const [month, setMonth] = useState(now.getMonth()); // 0-based, -1 = annual
     const [showSetup, setShowSetup] = useState(false);
     const [showGuide, setShowGuide] = useState(false);
-    const [team, setTeam] = useState<{ account: AccountProfitability; month: number } | null>(null);
+    const [team, setTeam] = useState<{ client_id: string; month: number } | null>(null);
     const { isSuperAdmin } = useAuth();
     const qc = useQueryClient();
 
     const { data, isLoading, error } = useQuery({
         queryKey: ['profitability-accounts', year],
         queryFn: () => adminApi.getProfitabilityAccounts(year),
-        staleTime: 7 * 60_000,
+        // staleTime 0 + refetchOnWindowFocus → al volver de P&L o desde otra
+        // pestaña, refrescamos automáticamente. placeholderData mantiene la
+        // tabla visible mientras refetchea (no flashea spinner).
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        refetchOnMount: 'always',
+        placeholderData: keepPreviousData,
     });
 
     const refreshCache = useMutation({
@@ -449,17 +1048,96 @@ export default function Profitability() {
     const accounts = data?.accounts ?? [];
     const annual = month === -1;
 
-    // Totals for the selected period
-    const totRevenue = accounts.reduce((s, a) => s + (annual ? a.total_revenue : a.monthly[month].revenue), 0);
-    const totCost = accounts.reduce((s, a) => s + (annual ? a.total_labor_cost : a.monthly[month].labor_cost), 0);
-    const totHours = accounts.reduce((s, a) => s + (annual ? a.total_hours : a.monthly[month].hours), 0);
+    // Hidden clients (toggle manual desde la fila o desde Configurar)
+    const { data: hiddenData } = useQuery({
+        queryKey: ['hidden-items', 'client'],
+        queryFn: () => adminApi.getHiddenItems('client'),
+    });
+    const hiddenClientIds = new Set((hiddenData?.items ?? []).map(i => i.ref_id));
+
+    const hideMut = useMutation({
+        mutationFn: (client_id: string) => adminApi.hideItem('client', client_id),
+        onMutate: async (client_id: string) => {
+            await qc.cancelQueries({ queryKey: ['hidden-items', 'client'] });
+            const previous = qc.getQueryData<{ items: any[] }>(['hidden-items', 'client']);
+            qc.setQueryData(['hidden-items', 'client'], (old: any) => ({
+                items: [...(old?.items ?? []), { scope: 'client', ref_id: client_id, hidden_at: new Date().toISOString() }],
+            }));
+            return { previous };
+        },
+        onError: (e: Error, _id, ctx: any) => {
+            if (ctx?.previous) qc.setQueryData(['hidden-items', 'client'], ctx.previous);
+            toast.error(e.message);
+        },
+        onSettled: () => qc.invalidateQueries({ queryKey: ['hidden-items', 'client'], refetchType: 'none' }),
+    });
+    const unhideMut = useMutation({
+        mutationFn: (client_id: string) => adminApi.unhideItem('client', client_id),
+        onMutate: async (client_id: string) => {
+            await qc.cancelQueries({ queryKey: ['hidden-items', 'client'] });
+            const previous = qc.getQueryData<{ items: any[] }>(['hidden-items', 'client']);
+            qc.setQueryData(['hidden-items', 'client'], (old: any) => ({
+                items: (old?.items ?? []).filter((i: any) => i.ref_id !== client_id),
+            }));
+            return { previous };
+        },
+        onError: (e: Error, _id, ctx: any) => {
+            if (ctx?.previous) qc.setQueryData(['hidden-items', 'client'], ctx.previous);
+            toast.error(e.message);
+        },
+        onSettled: () => qc.invalidateQueries({ queryKey: ['hidden-items', 'client'], refetchType: 'none' }),
+    });
+
+    // Búsqueda + orden
+    const [search, setSearch] = useState('');
+    type SortKey = 'name' | 'margin' | 'hours' | 'revenue';
+    const [sortBy, setSortBy] = useState<SortKey>('name');
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [evolutionFor, setEvolutionFor] = useState<string | null>(null);
+
+    // Cuentas con datos en el periodo seleccionado
+    const hasData = (a: AccountProfitability) => annual
+        ? (a.total_revenue > 0 || a.total_hours > 0)
+        : (a.monthly[month].revenue > 0 || a.monthly[month].hours > 0);
+
+    // 1) periodo con datos · 2) no ocultas · 3) búsqueda
+    const searchLower = search.trim().toLowerCase();
+    const filteredAccounts = accounts.filter(a => {
+        if (!hasData(a)) return false;
+        if (hiddenClientIds.has(a.client_id)) return false;
+        if (searchLower && !a.client_name.toLowerCase().includes(searchLower)) return false;
+        return true;
+    });
+
+    // Items ocultos para el dropdown (con nombre)
+    const hiddenItemsForDropdown = accounts
+        .filter(a => hiddenClientIds.has(a.client_id))
+        .map(a => ({ id: a.client_id, label: a.client_name }));
+
+    const sortAccessor = (a: AccountProfitability): number | string => {
+        if (sortBy === 'name') return a.client_name.toLowerCase();
+        if (sortBy === 'revenue') return annual ? a.total_revenue : a.monthly[month].revenue;
+        if (sortBy === 'hours')   return annual ? a.total_hours   : a.monthly[month].hours;
+        // margin: null al final
+        const v = annual ? a.total_margin_pct : a.monthly[month].margin_pct;
+        return v === null ? Number.NEGATIVE_INFINITY : v;
+    };
+    const visibleAccounts = [...filteredAccounts].sort((a, b) => {
+        const va = sortAccessor(a);
+        const vb = sortAccessor(b);
+        if (typeof va === 'string' && typeof vb === 'string') {
+            return sortDir === 'asc' ? va.localeCompare(vb, 'es') : vb.localeCompare(va, 'es');
+        }
+        const na = va as number, nb = vb as number;
+        return sortDir === 'asc' ? na - nb : nb - na;
+    });
+
+    // Totals (sobre las visibles tras filtrado)
+    const totRevenue = visibleAccounts.reduce((s, a) => s + (annual ? a.total_revenue : a.monthly[month].revenue), 0);
+    const totCost = visibleAccounts.reduce((s, a) => s + (annual ? a.total_labor_cost : a.monthly[month].labor_cost), 0);
+    const totHours = visibleAccounts.reduce((s, a) => s + (annual ? a.total_hours : a.monthly[month].hours), 0);
     const totProfit = totRevenue - totCost;
     const totMargin = totRevenue > 0 && totHours > 0 ? (totProfit / totRevenue) * 100 : null;
-
-    // Filter out empty rows for the selected month
-    const visibleAccounts = annual
-        ? accounts.filter(a => a.total_revenue > 0 || a.total_hours > 0)
-        : accounts.filter(a => a.monthly[month].revenue > 0 || a.monthly[month].hours > 0);
 
     if (showSetup) return <ProfitabilitySetup onBack={() => setShowSetup(false)} year={year} />;
 
@@ -526,6 +1204,41 @@ export default function Profitability() {
                         </button>
                     )}
                 </div>
+            </div>
+
+            {/* Toolbar: buscador + ordenación + mostrar ocultas */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <div className="relative flex-1 max-w-sm">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
+                    <input
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        placeholder="Buscar cuenta…"
+                        className="w-full h-8 pl-8 pr-7 rounded-lg border border-border/60 bg-card text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400/60"
+                    />
+                    {search && (
+                        <button onClick={() => setSearch('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-5 rounded hover:bg-muted text-muted-foreground flex items-center justify-center">
+                            <X size={11} />
+                        </button>
+                    )}
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                    <label className="text-muted-foreground">Ordenar:</label>
+                    <select value={sortBy} onChange={e => setSortBy(e.target.value as SortKey)} className="h-8 px-2 rounded-md border border-border/60 bg-card text-xs">
+                        <option value="name">Alfabético</option>
+                        <option value="margin">Rentabilidad</option>
+                        <option value="hours">Horas</option>
+                        <option value="revenue">Fee</option>
+                    </select>
+                    <button
+                        onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                        className="h-8 w-8 rounded-md border border-border/60 bg-card hover:bg-muted flex items-center justify-center text-muted-foreground"
+                        title={sortDir === 'asc' ? 'Ascendente' : 'Descendente'}
+                    >
+                        {sortDir === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
+                    </button>
+                </div>
+                <HiddenAccountsDropdown items={hiddenItemsForDropdown} onUnhide={(id) => unhideMut.mutate(id)} />
             </div>
 
             {/* ClickUp debug — visible when no hours loaded */}
@@ -619,7 +1332,9 @@ export default function Profitability() {
                                                 account={a}
                                                 monthIdx={annual ? 0 : month}
                                                 annual={annual}
-                                                onTeam={(acc, m) => setTeam({ account: acc, month: m })}
+                                                onTeam={(acc, m) => setTeam({ client_id: acc.client_id, month: m })}
+                                                onAnnualEvolution={(cid) => setEvolutionFor(cid)}
+                                                onHide={(cid) => hideMut.mutate(cid)}
                                             />
                                         ))
                                 }
@@ -663,9 +1378,16 @@ export default function Profitability() {
                 </div>
             )}
 
-            {team && (
-                <TeamModal account={team.account} monthIdx={team.month} onClose={() => setTeam(null)} />
-            )}
+            {team && (() => {
+                const freshAccount = data?.accounts.find(a => a.client_id === team.client_id);
+                if (!freshAccount) { setTeam(null); return null; }
+                return <TeamModal account={freshAccount} monthIdx={team.month} year={year} onClose={() => setTeam(null)} />;
+            })()}
+            {evolutionFor && (() => {
+                const acc = data?.accounts.find(a => a.client_id === evolutionFor);
+                if (!acc) { setEvolutionFor(null); return null; }
+                return <AnnualEvolutionModal account={acc} year={year} onOpenMonth={(mi) => { setTeam({ client_id: acc.client_id, month: mi }); }} onClose={() => setEvolutionFor(null)} />;
+            })()}
             {showGuide && <ColumnGuide onClose={() => setShowGuide(false)} />}
             <ProfitabilityHint isSuperAdmin={isSuperAdmin()} />
         </div>
