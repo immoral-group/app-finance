@@ -1023,13 +1023,35 @@ export default function Profitability() {
 
     const hideMut = useMutation({
         mutationFn: (client_id: string) => adminApi.hideItem('client', client_id),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['hidden-items', 'client'] }),
-        onError: (e: Error) => toast.error(e.message),
+        onMutate: async (client_id: string) => {
+            await qc.cancelQueries({ queryKey: ['hidden-items', 'client'] });
+            const previous = qc.getQueryData<{ items: any[] }>(['hidden-items', 'client']);
+            qc.setQueryData(['hidden-items', 'client'], (old: any) => ({
+                items: [...(old?.items ?? []), { scope: 'client', ref_id: client_id, hidden_at: new Date().toISOString() }],
+            }));
+            return { previous };
+        },
+        onError: (e: Error, _id, ctx: any) => {
+            if (ctx?.previous) qc.setQueryData(['hidden-items', 'client'], ctx.previous);
+            toast.error(e.message);
+        },
+        onSettled: () => qc.invalidateQueries({ queryKey: ['hidden-items', 'client'], refetchType: 'none' }),
     });
     const unhideMut = useMutation({
         mutationFn: (client_id: string) => adminApi.unhideItem('client', client_id),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['hidden-items', 'client'] }),
-        onError: (e: Error) => toast.error(e.message),
+        onMutate: async (client_id: string) => {
+            await qc.cancelQueries({ queryKey: ['hidden-items', 'client'] });
+            const previous = qc.getQueryData<{ items: any[] }>(['hidden-items', 'client']);
+            qc.setQueryData(['hidden-items', 'client'], (old: any) => ({
+                items: (old?.items ?? []).filter((i: any) => i.ref_id !== client_id),
+            }));
+            return { previous };
+        },
+        onError: (e: Error, _id, ctx: any) => {
+            if (ctx?.previous) qc.setQueryData(['hidden-items', 'client'], ctx.previous);
+            toast.error(e.message);
+        },
+        onSettled: () => qc.invalidateQueries({ queryKey: ['hidden-items', 'client'], refetchType: 'none' }),
     });
 
     // Búsqueda + orden + mostrar/ocultar

@@ -5,24 +5,54 @@ import { ArrowLeft, CheckCircle2, AlertCircle, Info, RefreshCw, ChevronDown, Spa
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
-// Pequeño hook para usar items ocultos por scope
+// Pequeño hook para usar items ocultos por scope.
+// Hace actualización optimista en cache: el UI se refresca al instante,
+// sin esperar al round-trip del backend. Si el POST falla, hace rollback.
 function useHiddenSet(scope: 'client' | 'clickup_user' | 'manual_person') {
     const qc = useQueryClient();
+    const queryKey = ['hidden-items', scope] as const;
     const { data } = useQuery({
-        queryKey: ['hidden-items', scope],
+        queryKey,
         queryFn: () => adminApi.getHiddenItems(scope),
     });
     const set = new Set((data?.items ?? []).map(i => i.ref_id));
+
     const hide = useMutation({
         mutationFn: (ref_id: string) => adminApi.hideItem(scope, ref_id),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['hidden-items', scope] }),
-        onError: (e: Error) => toast.error(e.message),
+        onMutate: async (ref_id: string) => {
+            await qc.cancelQueries({ queryKey });
+            const previous = qc.getQueryData<{ items: { scope: string; ref_id: string; hidden_at: string }[] }>(queryKey);
+            qc.setQueryData(queryKey, (old: any) => ({
+                items: [...(old?.items ?? []), { scope, ref_id, hidden_at: new Date().toISOString() }],
+            }));
+            return { previous };
+        },
+        onError: (e: Error, _ref_id, ctx: any) => {
+            if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
+            toast.error(e.message);
+        },
+        // No refetch: el cache ya tiene el estado correcto. Marcamos stale por
+        // si otro tab cambió algo, pero sin disparar fetch.
+        onSettled: () => qc.invalidateQueries({ queryKey, refetchType: 'none' }),
     });
+
     const unhide = useMutation({
         mutationFn: (ref_id: string) => adminApi.unhideItem(scope, ref_id),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['hidden-items', scope] }),
-        onError: (e: Error) => toast.error(e.message),
+        onMutate: async (ref_id: string) => {
+            await qc.cancelQueries({ queryKey });
+            const previous = qc.getQueryData<{ items: { scope: string; ref_id: string; hidden_at: string }[] }>(queryKey);
+            qc.setQueryData(queryKey, (old: any) => ({
+                items: (old?.items ?? []).filter((i: any) => i.ref_id !== ref_id),
+            }));
+            return { previous };
+        },
+        onError: (e: Error, _ref_id, ctx: any) => {
+            if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
+            toast.error(e.message);
+        },
+        onSettled: () => qc.invalidateQueries({ queryKey, refetchType: 'none' }),
     });
+
     return { hiddenIds: set, hide: hide.mutate, unhide: unhide.mutate };
 }
 
