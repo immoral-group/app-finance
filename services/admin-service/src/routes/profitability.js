@@ -632,37 +632,37 @@ async function computeRealCostPerPerson(year) {
         personData[lookup.canonical].monthly[mIdx] += amount;
     });
 
-    // 5. cost_per_hour por persona con CARRY-FORWARD entre meses con datos.
-    //    Logica: encontrar firstMonth y lastMonth con sueldo > 0. Para cualquier
-    //    mes intermedio sin datos, propagar el valor del ultimo mes con datos.
-    //    Asi al añadir un nuevo mes (ej. junio) months_active sube a 6 y el
-    //    total incluye el efectivo de junio, no se queda con 5 meses.
+    // 5. cost_per_hour por persona.
+    //
+    //    months_active = número de meses DONDE EFECTIVAMENTE hay un registro
+    //    de sueldo > 0 en P&L. Sin rellenar huecos ni proyectar al futuro.
+    //    Si Julián cobra en mayo → 1 mes. Si añades junio → 2 meses. Si tiene
+    //    enero+febrero+abril (sin marzo) → 3 meses, no 4.
+    //
+    //    yearly_cost = suma real de los meses con datos.
+    //    cost_per_hour = yearly_cost / (160 × months_active).
     const personByName = {};
     Object.entries(personData).forEach(([name, info]) => {
         const monthly = info.monthly;
+        let monthsActive = 0;
+        let yearlyCost = 0;
         let firstMonth = -1, lastMonth = -1;
         for (let i = 0; i < 12; i++) {
             if (monthly[i] > 0) {
+                monthsActive++;
+                yearlyCost += monthly[i];
                 if (firstMonth === -1) firstMonth = i;
                 lastMonth = i;
             }
         }
-        if (firstMonth === -1) return; // sin datos para este año
+        if (monthsActive === 0) return; // sin datos este año
 
-        let lastValue = 0;
-        let effectiveTotal = 0;
-        for (let i = firstMonth; i <= lastMonth; i++) {
-            if (monthly[i] > 0) lastValue = monthly[i];
-            effectiveTotal += lastValue;
-        }
-
-        const monthsActive = lastMonth - firstMonth + 1;
         const totalHours = HOURS_PER_PERSON_MONTH * monthsActive;
         personByName[norm(name)] = {
             canonical: name,
             dept: info.dept,
-            cost_per_hour: totalHours > 0 ? effectiveTotal / totalHours : 0,
-            yearly_cost: effectiveTotal,
+            cost_per_hour: totalHours > 0 ? yearlyCost / totalHours : 0,
+            yearly_cost: yearlyCost,
             months_active: monthsActive,
             hours_used: totalHours,
             first_month: firstMonth + 1,
