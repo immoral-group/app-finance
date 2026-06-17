@@ -717,24 +717,6 @@ function niceFloor(n: number): number {
     if (n >= 0) return 0;
     return -niceCeil(-n);
 }
-function niceTicks(min: number, max: number, count: number): number[] {
-    if (max <= min) return [min];
-    const step = (max - min) / count;
-    const mag = Math.pow(10, Math.floor(Math.log10(step)));
-    const norm = step / mag;
-    const niceStep = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
-    const out: number[] = [];
-    const start = Math.ceil(min / niceStep) * niceStep;
-    for (let v = start; v <= max + niceStep * 0.001; v += niceStep) out.push(Math.round(v * 100) / 100);
-    if (out[0] !== min) out.unshift(min);
-    if (out[out.length - 1] !== max) out.push(max);
-    return [...new Set(out)].sort((a, b) => a - b);
-}
-function formatAxis(n: number): string {
-    const abs = Math.abs(n);
-    if (abs >= 1000) return `${(n / 1000).toFixed(abs >= 10000 ? 0 : 1)}k €`;
-    return `${n.toFixed(0)} €`;
-}
 
 // ── Column guide modal ────────────────────────────────────────────────────────
 const COLUMN_GUIDE = [
