@@ -431,81 +431,74 @@ function TeamModal({ account, monthIdx, year, onClose }: {
 }
 
 // ── Annual evolution modal ────────────────────────────────────────────────────
-// Vista mensual de una cuenta concreta en formato tabular + sparkline visual,
-// disponible al hacer click en el icono de "evolución" en modo Anual.
+// Vista de una cuenta concreta a lo largo del año: gráfica multi-serie
+// (Fee, Coste, Beneficio) + tabla de los 12 meses con margen mensual.
 function AnnualEvolutionModal({ account, year, onOpenMonth, onClose }: {
     account: AccountProfitability; year: number; onOpenMonth: (monthIdx: number) => void; onClose: () => void;
 }) {
     const monthly = account.monthly;
-    const maxHours = Math.max(...monthly.map(m => m.hours), 0.001);
-    const maxRevenue = Math.max(...monthly.map(m => m.revenue), 0.001);
 
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
-            <div className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85dvh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90dvh] flex flex-col" onClick={e => e.stopPropagation()}>
+                {/* Header */}
                 <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border/40">
-                    <div>
-                        <p className="text-xs text-muted-foreground">Evolución {year}</p>
-                        <p className="text-base font-bold text-foreground">{account.client_name}</p>
-                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground tabular-nums">
-                            <span>Total fee · <span className="font-semibold text-foreground">{eur(account.total_revenue)}</span></span>
-                            <span>Horas · <span className="font-semibold text-foreground">{account.total_hours.toFixed(1)}h</span></span>
-                            <span>Coste · <span className="font-semibold text-foreground">{eur(account.total_labor_cost)}</span></span>
-                            <span>Beneficio · <span className={cn('font-semibold', account.total_profit >= 0 ? 'text-emerald-600' : 'text-red-600')}>{eur(account.total_profit)}</span></span>
-                            {account.total_margin_pct !== null && (
-                                <span>Margen · <span className={cn('font-semibold', semaphoreColor(account.total_margin_pct).cell)}>{account.total_margin_pct.toFixed(1)}%</span></span>
-                            )}
+                    <div className="space-y-2">
+                        <div>
+                            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Evolución {year}</p>
+                            <h2 className="text-lg font-bold text-foreground">{account.client_name}</h2>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-5 gap-y-1 text-xs">
+                            <Stat label="Fee total" value={eur(account.total_revenue)} />
+                            <Stat label="Horas" value={`${account.total_hours.toFixed(1)}h`} />
+                            <Stat label="Coste" value={eur(account.total_labor_cost)} />
+                            <Stat label="Beneficio" value={eur(account.total_profit)} tone={account.total_profit >= 0 ? 'good' : 'bad'} />
+                            <Stat label="Margen" value={account.total_margin_pct !== null ? `${account.total_margin_pct.toFixed(1)}%` : '—'} tone={account.total_margin_pct === null ? undefined : account.total_margin_pct >= 60 ? 'good' : account.total_margin_pct >= 40 ? 'warn' : 'bad'} />
                         </div>
                     </div>
                     <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground"><X size={15} /></button>
                 </div>
+
+                {/* Chart */}
+                <div className="px-5 pt-4 pb-2 border-b border-border/40">
+                    <EvolutionChart monthly={monthly} onClickMonth={mi => monthly[mi].hours > 0 && onOpenMonth(mi)} />
+                </div>
+
+                {/* Table */}
                 <div className="overflow-auto flex-1 px-3 py-2">
                     <table className="w-full text-sm">
-                        <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/30">
+                        <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/30 sticky top-0">
                             <tr>
-                                <th className="text-left px-2 py-2 font-medium">Mes</th>
-                                <th className="text-right px-2 py-2 font-medium">Fee</th>
-                                <th className="text-right px-2 py-2 font-medium">Horas</th>
-                                <th className="px-2 py-2 font-medium w-32 text-center">Volumen</th>
-                                <th className="text-right px-2 py-2 font-medium">Coste</th>
-                                <th className="text-right px-2 py-2 font-medium">Beneficio</th>
-                                <th className="text-right px-2 py-2 font-medium">Margen</th>
+                                <th className="text-left px-3 py-2 font-medium">Mes</th>
+                                <th className="text-right px-3 py-2 font-medium">Fee</th>
+                                <th className="text-right px-3 py-2 font-medium">Horas</th>
+                                <th className="text-right px-3 py-2 font-medium">Coste</th>
+                                <th className="text-right px-3 py-2 font-medium">Beneficio</th>
+                                <th className="text-right px-3 py-2 font-medium w-24">Margen</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border/30">
                             {monthly.map((mo, mi) => {
                                 const s = semaphoreColor(mo.margin_pct);
                                 const empty = mo.revenue === 0 && mo.hours === 0;
-                                const hoursPct = (mo.hours / maxHours) * 100;
-                                const revPct = (mo.revenue / maxRevenue) * 100;
                                 return (
-                                    <tr key={mi} className={cn('group', empty && 'opacity-40')}>
-                                        <td className="px-2 py-1.5 text-xs font-medium text-foreground">
+                                    <tr key={mi} className={cn('hover:bg-muted/20 transition-colors', empty && 'opacity-40')}>
+                                        <td className="px-3 py-1.5 text-xs font-medium">
                                             {mo.hours > 0 ? (
-                                                <button onClick={() => onOpenMonth(mi)} className="hover:text-primary underline decoration-dotted underline-offset-4 decoration-muted-foreground/40">
+                                                <button onClick={() => onOpenMonth(mi)} className="text-foreground hover:text-primary underline decoration-dotted underline-offset-4 decoration-muted-foreground/40">
                                                     {MONTH_NAMES_FULL[mi]}
                                                 </button>
-                                            ) : MONTH_NAMES_FULL[mi]}
+                                            ) : <span className="text-foreground">{MONTH_NAMES_FULL[mi]}</span>}
                                         </td>
-                                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">{mo.revenue > 0 ? eur(mo.revenue) : <span className="text-muted-foreground/40">—</span>}</td>
-                                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">{mo.hours > 0 ? `${mo.hours.toFixed(1)}h` : <span className="text-muted-foreground/40">—</span>}</td>
-                                        <td className="px-2 py-1.5">
-                                            <div className="flex items-center gap-0.5 h-3">
-                                                <div className="flex-1 h-full bg-muted/30 rounded-sm overflow-hidden">
-                                                    <div className="h-full bg-indigo-400/70" style={{ width: `${revPct}%` }} title={`Fee: ${eur(mo.revenue)}`} />
-                                                </div>
-                                                <div className="flex-1 h-full bg-muted/30 rounded-sm overflow-hidden">
-                                                    <div className="h-full bg-emerald-400/70" style={{ width: `${hoursPct}%` }} title={`Horas: ${mo.hours.toFixed(1)}h`} />
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">{mo.labor_cost > 0 ? eur(mo.labor_cost) : <span className="text-muted-foreground/40">—</span>}</td>
-                                        <td className={cn('px-2 py-1.5 text-right text-xs tabular-nums font-medium', mo.gross_profit >= 0 ? 'text-foreground' : 'text-red-600 dark:text-red-400')}>
+                                        <td className="px-3 py-1.5 text-right text-xs tabular-nums">{mo.revenue > 0 ? eur(mo.revenue) : <span className="text-muted-foreground/40">—</span>}</td>
+                                        <td className="px-3 py-1.5 text-right text-xs tabular-nums">{mo.hours > 0 ? `${mo.hours.toFixed(1)}h` : <span className="text-muted-foreground/40">—</span>}</td>
+                                        <td className="px-3 py-1.5 text-right text-xs tabular-nums">{mo.labor_cost > 0 ? eur(mo.labor_cost) : <span className="text-muted-foreground/40">—</span>}</td>
+                                        <td className={cn('px-3 py-1.5 text-right text-xs tabular-nums font-medium', mo.gross_profit >= 0 ? 'text-foreground' : 'text-red-600 dark:text-red-400')}>
                                             {mo.revenue > 0 || mo.labor_cost > 0 ? eur(mo.gross_profit) : <span className="text-muted-foreground/40">—</span>}
                                         </td>
-                                        <td className="px-2 py-1.5 text-right">
+                                        <td className="px-3 py-1.5 text-right">
                                             {mo.margin_pct !== null
-                                                ? <span className={cn('inline-block px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums', s.badge)}>{mo.margin_pct.toFixed(1)}%</span>
+                                                ? <span className={cn('inline-block px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums', s.badge)}>{mo.margin_pct.toFixed(1)}%</span>
                                                 : <span className="text-muted-foreground/40 text-[10px]">—</span>}
                                         </td>
                                     </tr>
@@ -513,15 +506,255 @@ function AnnualEvolutionModal({ account, year, onOpenMonth, onClose }: {
                             })}
                         </tbody>
                     </table>
-                    <div className="flex items-center gap-3 mt-2 px-2 text-[10px] text-muted-foreground">
-                        <span className="inline-flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-indigo-400/70 rounded-sm" />Fee</span>
-                        <span className="inline-flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-emerald-400/70 rounded-sm" />Horas</span>
-                        <span className="ml-auto">Click en el nombre del mes para ver detalle de equipo</span>
-                    </div>
                 </div>
             </div>
         </div>
     );
+}
+
+function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' | 'warn' }) {
+    return (
+        <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{label}</p>
+            <p className={cn('font-semibold tabular-nums',
+                tone === 'good' ? 'text-emerald-600 dark:text-emerald-400'
+                : tone === 'bad' ? 'text-red-600 dark:text-red-400'
+                : tone === 'warn' ? 'text-amber-600 dark:text-amber-400'
+                : 'text-foreground'
+            )}>{value}</p>
+        </div>
+    );
+}
+
+// ── Multi-line evolution chart ────────────────────────────────────────────────
+// 12 puntos (uno por mes). 3 series: Fee (indigo), Coste (rojo), Beneficio
+// (verde/rojo según signo, con área de fondo). Linea de tendencia (dashed)
+// sobre el beneficio mostrando dirección (regresión lineal simple). Tooltip
+// al hover mostrando los 3 valores y el margen del mes.
+function EvolutionChart({ monthly, onClickMonth }: {
+    monthly: { revenue: number; labor_cost: number; gross_profit: number; hours: number; margin_pct: number | null }[];
+    onClickMonth: (mi: number) => void;
+}) {
+    const [hover, setHover] = useState<number | null>(null);
+
+    const W = 760, H = 240;
+    const PAD = { l: 48, r: 16, t: 16, b: 28 };
+    const innerW = W - PAD.l - PAD.r;
+    const innerH = H - PAD.t - PAD.b;
+
+    // Domain: incluimos beneficio negativo en magnitud para que el área sea simétrica
+    const maxRev   = Math.max(...monthly.map(m => m.revenue));
+    const maxCost  = Math.max(...monthly.map(m => m.labor_cost));
+    const maxProf  = Math.max(...monthly.map(m => m.gross_profit));
+    const minProf  = Math.min(...monthly.map(m => m.gross_profit));
+    const upper = Math.max(maxRev, maxCost, maxProf, 1);
+    const lower = Math.min(minProf, 0);
+    const yMin = niceFloor(lower);
+    const yMax = niceCeil(upper);
+
+    const xFor = (i: number) => PAD.l + (i / 11) * innerW;
+    const yFor = (v: number) => PAD.t + innerH - ((v - yMin) / (yMax - yMin || 1)) * innerH;
+    const y0 = yFor(0);
+
+    // Sólo dibujamos hasta el último mes con datos para no extender líneas en ceros futuros
+    const lastIdx = (() => {
+        for (let i = 11; i >= 0; i--) if (monthly[i].revenue > 0 || monthly[i].hours > 0) return i;
+        return -1;
+    })();
+    const activeMonths = lastIdx >= 0 ? monthly.slice(0, lastIdx + 1) : [];
+
+    const pathFor = (key: 'revenue' | 'labor_cost' | 'gross_profit') =>
+        activeMonths.length === 0 ? '' :
+        activeMonths.map((m, i) => `${i === 0 ? 'M' : 'L'} ${xFor(i)} ${yFor(m[key])}`).join(' ');
+
+    // Área de beneficio (desde la línea de profit hasta y=0)
+    const profitArea = activeMonths.length === 0 ? '' :
+        `M ${xFor(0)} ${y0} ` +
+        activeMonths.map((m, i) => `L ${xFor(i)} ${yFor(m.gross_profit)}`).join(' ') +
+        ` L ${xFor(activeMonths.length - 1)} ${y0} Z`;
+
+    // Línea de tendencia (regresión lineal simple sobre beneficio de meses con datos)
+    const trend = (() => {
+        if (activeMonths.length < 2) return null;
+        const n = activeMonths.length;
+        const xs = activeMonths.map((_, i) => i);
+        const ys = activeMonths.map(m => m.gross_profit);
+        const meanX = xs.reduce((a, b) => a + b, 0) / n;
+        const meanY = ys.reduce((a, b) => a + b, 0) / n;
+        const num = xs.reduce((s, x, i) => s + (x - meanX) * (ys[i] - meanY), 0);
+        const den = xs.reduce((s, x) => s + (x - meanX) ** 2, 0);
+        const slope = den === 0 ? 0 : num / den;
+        const intercept = meanY - slope * meanX;
+        const valAt = (i: number) => slope * i + intercept;
+        return { from: [xFor(0), yFor(valAt(0))], to: [xFor(11), yFor(valAt(11))], slope };
+    })();
+
+    // Y axis ticks
+    const ticks = niceTicks(yMin, yMax, 4);
+
+    return (
+        <div className="relative">
+            <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="none">
+                {/* Grid + Y labels */}
+                {ticks.map((t, ti) => (
+                    <g key={ti}>
+                        <line x1={PAD.l} y1={yFor(t)} x2={PAD.l + innerW} y2={yFor(t)} className="stroke-border/40" strokeDasharray={t === 0 ? '0' : '2 4'} strokeWidth={t === 0 ? 1 : 0.5} />
+                        <text x={PAD.l - 6} y={yFor(t) + 3} textAnchor="end" className="fill-current text-muted-foreground" style={{ fontSize: 9 }}>
+                            {formatAxis(t)}
+                        </text>
+                    </g>
+                ))}
+
+                {/* Beneficio area */}
+                {profitArea && <path d={profitArea} className="fill-emerald-400/15 dark:fill-emerald-400/10" />}
+
+                {/* Lines */}
+                <path d={pathFor('revenue')}     fill="none" className="stroke-indigo-500"  strokeWidth="2" />
+                <path d={pathFor('labor_cost')}  fill="none" className="stroke-red-500"     strokeWidth="2" />
+                <path d={pathFor('gross_profit')} fill="none" className="stroke-emerald-500" strokeWidth="2" />
+
+                {/* Trend line */}
+                {trend && (
+                    <line
+                        x1={trend.from[0]} y1={trend.from[1]}
+                        x2={trend.to[0]}   y2={trend.to[1]}
+                        className="stroke-foreground/40"
+                        strokeWidth="1.5"
+                        strokeDasharray="4 4"
+                    />
+                )}
+
+                {/* X axis labels */}
+                {monthly.map((_, i) => (
+                    <text key={i} x={xFor(i)} y={H - PAD.b + 14} textAnchor="middle" className="fill-current text-muted-foreground" style={{ fontSize: 10 }}>
+                        {MONTH_NAMES[i]}
+                    </text>
+                ))}
+
+                {/* Points (sólo activos) + hover hitbox per month */}
+                {monthly.map((m, i) => {
+                    const isActive = i <= lastIdx;
+                    return (
+                        <g key={i}>
+                            {isActive && (
+                                <>
+                                    <circle cx={xFor(i)} cy={yFor(m.revenue)} r={hover === i ? 4 : 3} className="fill-indigo-500" />
+                                    <circle cx={xFor(i)} cy={yFor(m.labor_cost)} r={hover === i ? 4 : 3} className="fill-red-500" />
+                                    <circle cx={xFor(i)} cy={yFor(m.gross_profit)} r={hover === i ? 4 : 3} className="fill-emerald-500" />
+                                </>
+                            )}
+                            {/* Hitbox transparente para hover/click */}
+                            <rect
+                                x={xFor(i) - innerW / 24}
+                                y={PAD.t}
+                                width={innerW / 12}
+                                height={innerH}
+                                fill="transparent"
+                                onMouseEnter={() => setHover(i)}
+                                onMouseLeave={() => setHover(h => h === i ? null : h)}
+                                onClick={() => onClickMonth(i)}
+                                className={cn(isActive && m.hours > 0 ? 'cursor-pointer' : '')}
+                            />
+                        </g>
+                    );
+                })}
+
+                {/* Hover guide line */}
+                {hover !== null && (
+                    <line x1={xFor(hover)} y1={PAD.t} x2={xFor(hover)} y2={PAD.t + innerH} className="stroke-foreground/30" strokeDasharray="2 3" strokeWidth="1" />
+                )}
+            </svg>
+
+            {/* Tooltip */}
+            {hover !== null && (() => {
+                const m = monthly[hover];
+                const isActive = hover <= lastIdx;
+                if (!isActive) return null;
+                const left = (xFor(hover) / W) * 100;
+                const onLeft = left > 60;
+                return (
+                    <div
+                        className="absolute z-10 bg-popover border border-border/60 rounded-lg shadow-xl p-2.5 text-xs space-y-1 pointer-events-none"
+                        style={{
+                            top: 12,
+                            left: onLeft ? undefined : `calc(${left}% + 14px)`,
+                            right: onLeft ? `calc(${100 - left}% + 14px)` : undefined,
+                            minWidth: 150,
+                        }}
+                    >
+                        <p className="font-semibold text-foreground">{MONTH_NAMES_FULL[hover]}</p>
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="w-2 h-2 rounded-full bg-indigo-500" />Fee</span>
+                            <span className="font-mono tabular-nums text-foreground">{m.revenue > 0 ? eur(m.revenue) : '—'}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="w-2 h-2 rounded-full bg-red-500" />Coste</span>
+                            <span className="font-mono tabular-nums text-foreground">{m.labor_cost > 0 ? eur(m.labor_cost) : '—'}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="w-2 h-2 rounded-full bg-emerald-500" />Beneficio</span>
+                            <span className={cn('font-mono tabular-nums font-medium', m.gross_profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>{eur(m.gross_profit)}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/40">
+                            <span className="text-muted-foreground">Margen</span>
+                            <span className="font-mono tabular-nums">{m.margin_pct !== null ? `${m.margin_pct.toFixed(1)}%` : '—'}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-muted-foreground">Horas</span>
+                            <span className="font-mono tabular-nums">{m.hours > 0 ? `${m.hours.toFixed(1)}h` : '—'}</span>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* Legend */}
+            <div className="flex items-center gap-4 mt-2 text-[11px] text-muted-foreground flex-wrap">
+                <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 bg-indigo-500" />Fee</span>
+                <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 bg-red-500" />Coste</span>
+                <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 bg-emerald-500" />Beneficio</span>
+                <span className="inline-flex items-center gap-1.5"><svg width="14" height="3" className="inline"><line x1="0" y1="1.5" x2="14" y2="1.5" className="stroke-foreground/40" strokeWidth="1.5" strokeDasharray="3 3" /></svg>Tendencia beneficio</span>
+                {(() => {
+                    if (!trend) return null;
+                    const dir = trend.slope > 0 ? 'al alza' : trend.slope < 0 ? 'a la baja' : 'estable';
+                    const cls = trend.slope > 0 ? 'text-emerald-600 dark:text-emerald-400' : trend.slope < 0 ? 'text-red-600 dark:text-red-400' : '';
+                    return <span className={cn('ml-auto font-medium', cls)}>Tendencia {dir}</span>;
+                })()}
+            </div>
+        </div>
+    );
+}
+
+// ── helpers de eje ────────────────────────────────────────────────────────────
+function niceCeil(n: number): number {
+    if (n <= 0) return 0;
+    const mag = Math.pow(10, Math.floor(Math.log10(n)));
+    const norm = n / mag;
+    if (norm <= 1)  return mag;
+    if (norm <= 2)  return 2 * mag;
+    if (norm <= 5)  return 5 * mag;
+    return 10 * mag;
+}
+function niceFloor(n: number): number {
+    if (n >= 0) return 0;
+    return -niceCeil(-n);
+}
+function niceTicks(min: number, max: number, count: number): number[] {
+    if (max <= min) return [min];
+    const step = (max - min) / count;
+    const mag = Math.pow(10, Math.floor(Math.log10(step)));
+    const norm = step / mag;
+    const niceStep = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+    const out: number[] = [];
+    const start = Math.ceil(min / niceStep) * niceStep;
+    for (let v = start; v <= max + niceStep * 0.001; v += niceStep) out.push(Math.round(v * 100) / 100);
+    if (out[0] !== min) out.unshift(min);
+    if (out[out.length - 1] !== max) out.push(max);
+    return [...new Set(out)].sort((a, b) => a - b);
+}
+function formatAxis(n: number): string {
+    const abs = Math.abs(n);
+    if (abs >= 1000) return `${(n / 1000).toFixed(abs >= 10000 ? 0 : 1)}k €`;
+    return `${n.toFixed(0)} €`;
 }
 
 // ── Column guide modal ────────────────────────────────────────────────────────
