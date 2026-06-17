@@ -560,12 +560,13 @@ async function computeRealCostPerPerson(year) {
     // Use full names where there may be ambiguity (e.g. multiple "Andrés" in ClickUp)
     // Algunas personas tienen su sueldo repartido entre varios departamentos
     // del P&L según el mes (p. ej. Yure aparece unos meses en Immedia y otros
-    // en Immoralia). Registrarlas en todos los deptos donde puedan figurar
+    // en Immoral). Registrarlas en todos los deptos donde puedan figurar
     // permite sumar todas sus líneas en lugar de quedarnos sólo con una.
     const PERSONAL_ITEMS = {
         Immedia: ['Alba', 'Andrés Barrios', 'Leidy', 'Yure'],
         Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'],
-        Immoralia: ['David', 'Manel', 'Julian', 'Yure'],
+        Immoralia: ['David', 'Manel', 'Julian'],
+        Immoral: ['Yure'],
     };
 
     // 1. departments id → name
