@@ -353,7 +353,7 @@ function TeamModal({ account, monthIdx, year, onClose }: {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
             <div className="bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3" onClick={e => e.stopPropagation()}>
                 <div className="flex items-start justify-between gap-2">
                     <div>
@@ -459,15 +459,41 @@ function AnnualEvolutionModal({ account, year, onOpenMonth, onClose }: {
                     <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground"><X size={15} /></button>
                 </div>
 
-                {/* Chart */}
-                <div className="px-5 pt-4 pb-2 border-b border-border/40">
-                    <EvolutionChart monthly={monthly} onClickMonth={mi => monthly[mi].hours > 0 && onOpenMonth(mi)} />
+                {/* Charts: 3 mini-gráficas separadas (Horas, Coste, Beneficio) */}
+                <div className="px-5 pt-4 pb-3 border-b border-border/40">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <MetricChart
+                            label="Horas"
+                            accessor={m => m.hours}
+                            format={v => `${v.toFixed(1)}h`}
+                            line="emerald"
+                            monthly={monthly}
+                            onClickMonth={mi => monthly[mi].hours > 0 && onOpenMonth(mi)}
+                        />
+                        <MetricChart
+                            label="Coste"
+                            accessor={m => m.labor_cost}
+                            format={v => eur(v)}
+                            line="red"
+                            monthly={monthly}
+                            onClickMonth={mi => monthly[mi].hours > 0 && onOpenMonth(mi)}
+                        />
+                        <MetricChart
+                            label="Beneficio"
+                            accessor={m => m.gross_profit}
+                            format={v => eur(v)}
+                            line="indigo"
+                            allowNegative
+                            monthly={monthly}
+                            onClickMonth={mi => monthly[mi].hours > 0 && onOpenMonth(mi)}
+                        />
+                    </div>
                 </div>
 
                 {/* Table */}
                 <div className="overflow-auto flex-1 px-3 py-2">
                     <table className="w-full text-sm">
-                        <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/30 sticky top-0">
+                        <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-card sticky top-0 z-10 shadow-[0_1px_0_0_rgba(0,0,0,0.06)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]">
                             <tr>
                                 <th className="text-left px-3 py-2 font-medium">Mes</th>
                                 <th className="text-right px-3 py-2 font-medium">Fee</th>
@@ -526,199 +552,152 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
     );
 }
 
-// ── Multi-line evolution chart ────────────────────────────────────────────────
-// 12 puntos (uno por mes). 3 series: Fee (indigo), Coste (rojo), Beneficio
-// (verde/rojo según signo, con área de fondo). Linea de tendencia (dashed)
-// sobre el beneficio mostrando dirección (regresión lineal simple). Tooltip
-// al hover mostrando los 3 valores y el margen del mes.
-function EvolutionChart({ monthly, onClickMonth }: {
-    monthly: { revenue: number; labor_cost: number; gross_profit: number; hours: number; margin_pct: number | null }[];
+// ── Mini chart por métrica (Horas / Coste / Beneficio) ───────────────────────
+// Una serie con área + línea + tendencia (regresión lineal). Pensada para
+// usarse en grid de 3 columnas dentro del modal de evolución anual.
+type LineColor = 'emerald' | 'red' | 'indigo';
+const LINE_COLORS: Record<LineColor, { stroke: string; fill: string; dot: string; pos: string; neg: string }> = {
+    emerald: { stroke: 'stroke-emerald-500', fill: 'fill-emerald-400/15 dark:fill-emerald-400/10', dot: 'fill-emerald-500', pos: 'text-emerald-600 dark:text-emerald-400', neg: 'text-red-600 dark:text-red-400' },
+    red:     { stroke: 'stroke-red-500',     fill: 'fill-red-400/15 dark:fill-red-400/10',         dot: 'fill-red-500',     pos: 'text-foreground',                       neg: 'text-foreground' },
+    indigo:  { stroke: 'stroke-indigo-500',  fill: 'fill-indigo-400/15 dark:fill-indigo-400/10',   dot: 'fill-indigo-500',  pos: 'text-emerald-600 dark:text-emerald-400', neg: 'text-red-600 dark:text-red-400' },
+};
+
+function MetricChart({ label, accessor, format, line, allowNegative, monthly, onClickMonth }: {
+    label: string;
+    accessor: (m: { hours: number; labor_cost: number; gross_profit: number; revenue: number; margin_pct: number | null }) => number;
+    format: (v: number) => string;
+    line: LineColor;
+    allowNegative?: boolean;
+    monthly: { hours: number; labor_cost: number; gross_profit: number; revenue: number; margin_pct: number | null }[];
     onClickMonth: (mi: number) => void;
 }) {
     const [hover, setHover] = useState<number | null>(null);
 
-    const W = 760, H = 240;
-    const PAD = { l: 48, r: 16, t: 16, b: 28 };
-    const innerW = W - PAD.l - PAD.r;
-    const innerH = H - PAD.t - PAD.b;
+    const values = monthly.map(accessor);
+    const colors = LINE_COLORS[line];
 
-    // Domain: incluimos beneficio negativo en magnitud para que el área sea simétrica
-    const maxRev   = Math.max(...monthly.map(m => m.revenue));
-    const maxCost  = Math.max(...monthly.map(m => m.labor_cost));
-    const maxProf  = Math.max(...monthly.map(m => m.gross_profit));
-    const minProf  = Math.min(...monthly.map(m => m.gross_profit));
-    const upper = Math.max(maxRev, maxCost, maxProf, 1);
-    const lower = Math.min(minProf, 0);
-    const yMin = niceFloor(lower);
-    const yMax = niceCeil(upper);
+    // Último mes con datos (la cuenta tuvo actividad — hours o revenue)
+    let lastIdx = -1;
+    for (let i = 11; i >= 0; i--) if (monthly[i].hours > 0 || monthly[i].revenue > 0) { lastIdx = i; break; }
+    const activeValues = lastIdx >= 0 ? values.slice(0, lastIdx + 1) : [];
 
-    const xFor = (i: number) => PAD.l + (i / 11) * innerW;
-    const yFor = (v: number) => PAD.t + innerH - ((v - yMin) / (yMax - yMin || 1)) * innerH;
-    const y0 = yFor(0);
+    const total = values.reduce((s, v) => s + v, 0);
 
-    // Sólo dibujamos hasta el último mes con datos para no extender líneas en ceros futuros
-    const lastIdx = (() => {
-        for (let i = 11; i >= 0; i--) if (monthly[i].revenue > 0 || monthly[i].hours > 0) return i;
-        return -1;
-    })();
-    const activeMonths = lastIdx >= 0 ? monthly.slice(0, lastIdx + 1) : [];
-
-    const pathFor = (key: 'revenue' | 'labor_cost' | 'gross_profit') =>
-        activeMonths.length === 0 ? '' :
-        activeMonths.map((m, i) => `${i === 0 ? 'M' : 'L'} ${xFor(i)} ${yFor(m[key])}`).join(' ');
-
-    // Área de beneficio (desde la línea de profit hasta y=0)
-    const profitArea = activeMonths.length === 0 ? '' :
-        `M ${xFor(0)} ${y0} ` +
-        activeMonths.map((m, i) => `L ${xFor(i)} ${yFor(m.gross_profit)}`).join(' ') +
-        ` L ${xFor(activeMonths.length - 1)} ${y0} Z`;
-
-    // Línea de tendencia (regresión lineal simple sobre beneficio de meses con datos)
+    // Tendencia (regresión lineal) sobre los meses activos
     const trend = (() => {
-        if (activeMonths.length < 2) return null;
-        const n = activeMonths.length;
-        const xs = activeMonths.map((_, i) => i);
-        const ys = activeMonths.map(m => m.gross_profit);
+        if (activeValues.length < 2) return null;
+        const n = activeValues.length;
+        const xs = activeValues.map((_, i) => i);
+        const ys = activeValues;
         const meanX = xs.reduce((a, b) => a + b, 0) / n;
         const meanY = ys.reduce((a, b) => a + b, 0) / n;
         const num = xs.reduce((s, x, i) => s + (x - meanX) * (ys[i] - meanY), 0);
         const den = xs.reduce((s, x) => s + (x - meanX) ** 2, 0);
         const slope = den === 0 ? 0 : num / den;
         const intercept = meanY - slope * meanX;
-        const valAt = (i: number) => slope * i + intercept;
-        return { from: [xFor(0), yFor(valAt(0))], to: [xFor(11), yFor(valAt(11))], slope };
+        return { slope, valAt: (i: number) => slope * i + intercept };
     })();
 
-    // Y axis ticks
-    const ticks = niceTicks(yMin, yMax, 4);
+    const W = 320, H = 110;
+    const PAD = { l: 8, r: 8, t: 10, b: 22 };
+    const innerW = W - PAD.l - PAD.r;
+    const innerH = H - PAD.t - PAD.b;
+
+    const maxV = Math.max(...values, 0.001);
+    const minV = allowNegative ? Math.min(...values, 0) : 0;
+    const yMax = niceCeil(maxV);
+    const yMin = allowNegative ? niceFloor(minV) : 0;
+
+    const xFor = (i: number) => PAD.l + (i / 11) * innerW;
+    const yFor = (v: number) => PAD.t + innerH - ((v - yMin) / (yMax - yMin || 1)) * innerH;
+    const y0 = yFor(0);
+
+    const linePath = activeValues.length === 0 ? ''
+        : activeValues.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xFor(i)} ${yFor(v)}`).join(' ');
+    const areaPath = activeValues.length === 0 ? ''
+        : `M ${xFor(0)} ${y0} ` + activeValues.map((v, i) => `L ${xFor(i)} ${yFor(v)}`).join(' ') + ` L ${xFor(activeValues.length - 1)} ${y0} Z`;
+
+    const hoveredValue = hover !== null && hover <= lastIdx ? values[hover] : null;
+    const trendDir = trend ? (trend.slope > 0.0001 ? 'al alza' : trend.slope < -0.0001 ? 'a la baja' : 'estable') : null;
+    const trendCls = trend ? (trend.slope > 0.0001 ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-100/60 dark:bg-emerald-900/30' : trend.slope < -0.0001 ? 'text-red-600 dark:text-red-400 bg-red-100/60 dark:bg-red-900/30' : 'text-muted-foreground bg-muted/60') : '';
 
     return (
-        <div className="relative">
-            <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="none">
-                {/* Grid + Y labels */}
-                {ticks.map((t, ti) => (
-                    <g key={ti}>
-                        <line x1={PAD.l} y1={yFor(t)} x2={PAD.l + innerW} y2={yFor(t)} className="stroke-border/40" strokeDasharray={t === 0 ? '0' : '2 4'} strokeWidth={t === 0 ? 1 : 0.5} />
-                        <text x={PAD.l - 6} y={yFor(t) + 3} textAnchor="end" className="fill-current text-muted-foreground" style={{ fontSize: 9 }}>
-                            {formatAxis(t)}
+        <div className="border border-border/50 rounded-xl bg-card/40 p-3 space-y-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</span>
+                {trendDir && (
+                    <span className={cn('text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full font-semibold', trendCls)}>
+                        {trendDir}
+                    </span>
+                )}
+            </div>
+            <div className="flex items-baseline justify-between gap-2 min-h-[1.75rem]">
+                <span className={cn('text-lg font-bold tabular-nums', total < 0 ? colors.neg : 'text-foreground')}>{format(total)}</span>
+                {hoveredValue !== null && (
+                    <span className="text-[11px] tabular-nums text-muted-foreground">
+                        {MONTH_NAMES[hover!]} · <span className={cn('font-semibold', hoveredValue < 0 ? colors.neg : colors.pos)}>{format(hoveredValue)}</span>
+                    </span>
+                )}
+            </div>
+            <div className="relative">
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="none">
+                    {/* Linea de cero si hay negativos */}
+                    {allowNegative && yMin < 0 && (
+                        <line x1={PAD.l} y1={y0} x2={PAD.l + innerW} y2={y0} className="stroke-border" strokeWidth="0.5" />
+                    )}
+
+                    {/* Área */}
+                    {areaPath && <path d={areaPath} className={colors.fill} />}
+
+                    {/* Línea principal */}
+                    {linePath && <path d={linePath} fill="none" className={colors.stroke} strokeWidth="2" strokeLinejoin="round" />}
+
+                    {/* Línea de tendencia */}
+                    {trend && (
+                        <line
+                            x1={xFor(0)} y1={yFor(trend.valAt(0))}
+                            x2={xFor(11)} y2={yFor(trend.valAt(11))}
+                            className="stroke-foreground/35"
+                            strokeWidth="1.25"
+                            strokeDasharray="3 3"
+                        />
+                    )}
+
+                    {/* X axis labels */}
+                    {monthly.map((_, i) => (
+                        <text key={i} x={xFor(i)} y={H - 6} textAnchor="middle" className={cn('fill-current', i <= lastIdx ? 'text-muted-foreground' : 'text-muted-foreground/30')} style={{ fontSize: 8.5 }}>
+                            {MONTH_NAMES[i][0]}
                         </text>
-                    </g>
-                ))}
+                    ))}
 
-                {/* Beneficio area */}
-                {profitArea && <path d={profitArea} className="fill-emerald-400/15 dark:fill-emerald-400/10" />}
+                    {/* Dots + hitboxes */}
+                    {monthly.map((mo, i) => {
+                        const isActive = i <= lastIdx;
+                        return (
+                            <g key={i}>
+                                {isActive && (
+                                    <circle cx={xFor(i)} cy={yFor(values[i])} r={hover === i ? 3.5 : 2.5} className={colors.dot} />
+                                )}
+                                <rect
+                                    x={xFor(i) - innerW / 24}
+                                    y={PAD.t}
+                                    width={innerW / 12}
+                                    height={innerH}
+                                    fill="transparent"
+                                    onMouseEnter={() => setHover(i)}
+                                    onMouseLeave={() => setHover(h => h === i ? null : h)}
+                                    onClick={() => onClickMonth(i)}
+                                    className={cn(isActive && mo.hours > 0 ? 'cursor-pointer' : '')}
+                                />
+                            </g>
+                        );
+                    })}
 
-                {/* Lines */}
-                <path d={pathFor('revenue')}     fill="none" className="stroke-indigo-500"  strokeWidth="2" />
-                <path d={pathFor('labor_cost')}  fill="none" className="stroke-red-500"     strokeWidth="2" />
-                <path d={pathFor('gross_profit')} fill="none" className="stroke-emerald-500" strokeWidth="2" />
-
-                {/* Trend line */}
-                {trend && (
-                    <line
-                        x1={trend.from[0]} y1={trend.from[1]}
-                        x2={trend.to[0]}   y2={trend.to[1]}
-                        className="stroke-foreground/40"
-                        strokeWidth="1.5"
-                        strokeDasharray="4 4"
-                    />
-                )}
-
-                {/* X axis labels */}
-                {monthly.map((_, i) => (
-                    <text key={i} x={xFor(i)} y={H - PAD.b + 14} textAnchor="middle" className="fill-current text-muted-foreground" style={{ fontSize: 10 }}>
-                        {MONTH_NAMES[i]}
-                    </text>
-                ))}
-
-                {/* Points (sólo activos) + hover hitbox per month */}
-                {monthly.map((m, i) => {
-                    const isActive = i <= lastIdx;
-                    return (
-                        <g key={i}>
-                            {isActive && (
-                                <>
-                                    <circle cx={xFor(i)} cy={yFor(m.revenue)} r={hover === i ? 4 : 3} className="fill-indigo-500" />
-                                    <circle cx={xFor(i)} cy={yFor(m.labor_cost)} r={hover === i ? 4 : 3} className="fill-red-500" />
-                                    <circle cx={xFor(i)} cy={yFor(m.gross_profit)} r={hover === i ? 4 : 3} className="fill-emerald-500" />
-                                </>
-                            )}
-                            {/* Hitbox transparente para hover/click */}
-                            <rect
-                                x={xFor(i) - innerW / 24}
-                                y={PAD.t}
-                                width={innerW / 12}
-                                height={innerH}
-                                fill="transparent"
-                                onMouseEnter={() => setHover(i)}
-                                onMouseLeave={() => setHover(h => h === i ? null : h)}
-                                onClick={() => onClickMonth(i)}
-                                className={cn(isActive && m.hours > 0 ? 'cursor-pointer' : '')}
-                            />
-                        </g>
-                    );
-                })}
-
-                {/* Hover guide line */}
-                {hover !== null && (
-                    <line x1={xFor(hover)} y1={PAD.t} x2={xFor(hover)} y2={PAD.t + innerH} className="stroke-foreground/30" strokeDasharray="2 3" strokeWidth="1" />
-                )}
-            </svg>
-
-            {/* Tooltip */}
-            {hover !== null && (() => {
-                const m = monthly[hover];
-                const isActive = hover <= lastIdx;
-                if (!isActive) return null;
-                const left = (xFor(hover) / W) * 100;
-                const onLeft = left > 60;
-                return (
-                    <div
-                        className="absolute z-10 bg-popover border border-border/60 rounded-lg shadow-xl p-2.5 text-xs space-y-1 pointer-events-none"
-                        style={{
-                            top: 12,
-                            left: onLeft ? undefined : `calc(${left}% + 14px)`,
-                            right: onLeft ? `calc(${100 - left}% + 14px)` : undefined,
-                            minWidth: 150,
-                        }}
-                    >
-                        <p className="font-semibold text-foreground">{MONTH_NAMES_FULL[hover]}</p>
-                        <div className="flex items-center justify-between gap-3">
-                            <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="w-2 h-2 rounded-full bg-indigo-500" />Fee</span>
-                            <span className="font-mono tabular-nums text-foreground">{m.revenue > 0 ? eur(m.revenue) : '—'}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                            <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="w-2 h-2 rounded-full bg-red-500" />Coste</span>
-                            <span className="font-mono tabular-nums text-foreground">{m.labor_cost > 0 ? eur(m.labor_cost) : '—'}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                            <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="w-2 h-2 rounded-full bg-emerald-500" />Beneficio</span>
-                            <span className={cn('font-mono tabular-nums font-medium', m.gross_profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>{eur(m.gross_profit)}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/40">
-                            <span className="text-muted-foreground">Margen</span>
-                            <span className="font-mono tabular-nums">{m.margin_pct !== null ? `${m.margin_pct.toFixed(1)}%` : '—'}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                            <span className="text-muted-foreground">Horas</span>
-                            <span className="font-mono tabular-nums">{m.hours > 0 ? `${m.hours.toFixed(1)}h` : '—'}</span>
-                        </div>
-                    </div>
-                );
-            })()}
-
-            {/* Legend */}
-            <div className="flex items-center gap-4 mt-2 text-[11px] text-muted-foreground flex-wrap">
-                <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 bg-indigo-500" />Fee</span>
-                <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 bg-red-500" />Coste</span>
-                <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 bg-emerald-500" />Beneficio</span>
-                <span className="inline-flex items-center gap-1.5"><svg width="14" height="3" className="inline"><line x1="0" y1="1.5" x2="14" y2="1.5" className="stroke-foreground/40" strokeWidth="1.5" strokeDasharray="3 3" /></svg>Tendencia beneficio</span>
-                {(() => {
-                    if (!trend) return null;
-                    const dir = trend.slope > 0 ? 'al alza' : trend.slope < 0 ? 'a la baja' : 'estable';
-                    const cls = trend.slope > 0 ? 'text-emerald-600 dark:text-emerald-400' : trend.slope < 0 ? 'text-red-600 dark:text-red-400' : '';
-                    return <span className={cn('ml-auto font-medium', cls)}>Tendencia {dir}</span>;
-                })()}
+                    {/* Hover guide */}
+                    {hover !== null && hover <= lastIdx && (
+                        <line x1={xFor(hover)} y1={PAD.t} x2={xFor(hover)} y2={PAD.t + innerH} className="stroke-foreground/25" strokeDasharray="2 3" strokeWidth="1" />
+                    )}
+                </svg>
             </div>
         </div>
     );
