@@ -56,13 +56,50 @@ function useHiddenSet(scope: 'client' | 'clickup_user' | 'manual_person') {
     return { hiddenIds: set, hide: hide.mutate, unhide: unhide.mutate };
 }
 
-// Toolbar reutilizable: buscador + toggle "mostrar ocultos"
-function SectionToolbar({ search, onSearch, hiddenCount, showHidden, onShowHidden, placeholder }: {
+// Dropdown con los items ocultos del bloque. Click en "Mostrar" reactiva.
+function HiddenDropdown({ items, onUnhide }: {
+    items: { id: string; label: string }[];
+    onUnhide: (id: string) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    if (items.length === 0) return null;
+    return (
+        <div className="relative">
+            <button
+                onClick={() => setOpen(o => !o)}
+                className={cn(
+                    'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs transition-colors',
+                    open ? 'border-indigo-400/60 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300' : 'border-border/60 bg-card hover:bg-muted/60 text-muted-foreground'
+                )}
+            >
+                <EyeOff size={11} />Ocultos ({items.length})<ChevronDown size={10} />
+            </button>
+            {open && (
+                <>
+                    <div className="fixed inset-0 z-[55]" onClick={() => setOpen(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-[56] w-64 max-h-72 overflow-auto bg-popover border border-border/60 rounded-lg shadow-xl py-1">
+                        {items.map(it => (
+                            <div key={it.id} className="flex items-center justify-between gap-2 px-3 py-1.5 hover:bg-muted/40 text-xs">
+                                <span className="truncate text-foreground">{it.label}</span>
+                                <button
+                                    onClick={() => onUnhide(it.id)}
+                                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline shrink-0 inline-flex items-center gap-1"
+                                ><Eye size={10} />Mostrar</button>
+                            </div>
+                        ))}
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
+// Toolbar reutilizable: buscador + dropdown de ocultos
+function SectionToolbar({ search, onSearch, hiddenItems, onUnhide, placeholder }: {
     search: string;
     onSearch: (v: string) => void;
-    hiddenCount: number;
-    showHidden: boolean;
-    onShowHidden: (v: boolean) => void;
+    hiddenItems: { id: string; label: string }[];
+    onUnhide: (id: string) => void;
     placeholder?: string;
 }) {
     return (
@@ -79,12 +116,7 @@ function SectionToolbar({ search, onSearch, hiddenCount, showHidden, onShowHidde
                     <button onClick={() => onSearch('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-5 rounded hover:bg-muted text-muted-foreground flex items-center justify-center"><X size={10} /></button>
                 )}
             </div>
-            {hiddenCount > 0 && (
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none">
-                    <input type="checkbox" checked={showHidden} onChange={e => onShowHidden(e.target.checked)} className="h-3.5 w-3.5" />
-                    Mostrar ocultos ({hiddenCount})
-                </label>
-            )}
+            <HiddenDropdown items={hiddenItems} onUnhide={onUnhide} />
         </div>
     );
 }
@@ -137,7 +169,6 @@ function AutoMappingSection({ year }: { year: number }) {
     });
     const { hiddenIds, hide, unhide } = useHiddenSet('clickup_user');
     const [search, setSearch] = useState('');
-    const [showHidden, setShowHidden] = useState(false);
 
     if (isLoading) return <Section title="Coste por hora (auto)"><p className="text-xs text-muted-foreground text-center py-4">Calculando…</p></Section>;
 
@@ -148,13 +179,15 @@ function AutoMappingSection({ year }: { year: number }) {
 
     const searchLower = search.trim().toLowerCase();
     const mappings = allMappings.filter(m => {
-        if (!showHidden && hiddenIds.has(m.clickup_user_id)) return false;
+        if (hiddenIds.has(m.clickup_user_id)) return false;
         if (!searchLower) return true;
         return (m.clickup_username || '').toLowerCase().includes(searchLower)
             || (m.matched_employee || '').toLowerCase().includes(searchLower)
             || (m.department || '').toLowerCase().includes(searchLower);
     });
-    const hiddenCount = allMappings.filter(m => hiddenIds.has(m.clickup_user_id)).length;
+    const hiddenItems = allMappings
+        .filter(m => hiddenIds.has(m.clickup_user_id))
+        .map(m => ({ id: m.clickup_user_id, label: m.clickup_username || m.clickup_user_id }));
 
     return (
         <Section title="Coste por hora (calculado automáticamente)">
@@ -173,7 +206,7 @@ function AutoMappingSection({ year }: { year: number }) {
 
             <SectionToolbar
                 search={search} onSearch={setSearch}
-                hiddenCount={hiddenCount} showHidden={showHidden} onShowHidden={setShowHidden}
+                hiddenItems={hiddenItems} onUnhide={unhide}
                 placeholder="Buscar usuario, empleado, depto…"
             />
 
@@ -194,9 +227,8 @@ function AutoMappingSection({ year }: { year: number }) {
                             <tr><td colSpan={6} className="py-4 text-center text-xs text-muted-foreground">Sin resultados</td></tr>
                         )}
                         {mappings.map(m => {
-                            const isHidden = hiddenIds.has(m.clickup_user_id);
                             return (
-                                <tr key={m.clickup_user_id} className={cn('border-b border-border/30 group', isHidden && 'opacity-50')}>
+                                <tr key={m.clickup_user_id} className="border-b border-border/30 group">
                                     <td className="py-2 pr-3 font-medium text-foreground text-xs">{m.clickup_username}</td>
                                     <td className="py-2 pr-3 text-muted-foreground text-xs">{m.matched_employee || '—'}</td>
                                     <td className="py-2 pr-3 text-muted-foreground text-xs">{m.department || '—'}</td>
@@ -224,11 +256,7 @@ function AutoMappingSection({ year }: { year: number }) {
                                         )}
                                     </td>
                                     <td className="py-2">
-                                        {isHidden ? (
-                                            <button onClick={() => unhide(m.clickup_user_id)} className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-muted-foreground hover:text-emerald-600 flex items-center justify-center" title="Mostrar"><Eye size={11} /></button>
-                                        ) : (
-                                            <button onClick={() => hide(m.clickup_user_id)} className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-muted text-muted-foreground flex items-center justify-center" title="Ocultar"><EyeOff size={11} /></button>
-                                        )}
+                                        <button onClick={() => hide(m.clickup_user_id)} className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-muted text-muted-foreground flex items-center justify-center" title="Ocultar"><EyeOff size={11} /></button>
                                     </td>
                                 </tr>
                             );
@@ -291,7 +319,6 @@ function ClientListsSection({ year }: { year: number }) {
 
     const { hiddenIds, hide, unhide } = useHiddenSet('client');
     const [search, setSearch] = useState('');
-    const [showHidden, setShowHidden] = useState(false);
 
     const targets = data?.targets ?? [];
     const allMatches = data?.client_matches ?? [];
@@ -300,11 +327,13 @@ function ClientListsSection({ year }: { year: number }) {
 
     const searchLower = search.trim().toLowerCase();
     const matches = allMatches.filter(cm => {
-        if (!showHidden && hiddenIds.has(cm.client_id)) return false;
+        if (hiddenIds.has(cm.client_id)) return false;
         if (searchLower && !cm.client_name.toLowerCase().includes(searchLower)) return false;
         return true;
     });
-    const hiddenCount = allMatches.filter(cm => hiddenIds.has(cm.client_id)).length;
+    const hiddenItems = allMatches
+        .filter(cm => hiddenIds.has(cm.client_id))
+        .map(cm => ({ id: cm.client_id, label: cm.client_name }));
 
     if (isLoading) return (
         <Section title="Clientes → Carpetas ClickUp">
@@ -327,7 +356,7 @@ function ClientListsSection({ year }: { year: number }) {
 
                 <SectionToolbar
                     search={search} onSearch={setSearch}
-                    hiddenCount={hiddenCount} showHidden={showHidden} onShowHidden={setShowHidden}
+                    hiddenItems={hiddenItems} onUnhide={unhide}
                     placeholder="Buscar cliente…"
                 />
 
@@ -351,9 +380,8 @@ function ClientListsSection({ year }: { year: number }) {
                                 const target = targets.find(t => t.id === selected);
                                 const isAuto = cm.suggested?.id === selected && cm.configured.length === 0;
                                 const isSaved = cm.configured.some(c => c.id === selected);
-                                const isHidden = hiddenIds.has(cm.client_id);
                                 return (
-                                    <tr key={cm.client_id} className={cn('border-b border-border/30 hover:bg-muted/10 group', isHidden && 'opacity-50')}>
+                                    <tr key={cm.client_id} className="border-b border-border/30 hover:bg-muted/10 group">
                                         <td className="py-2 pr-4 text-foreground font-medium text-xs">{cm.client_name}</td>
                                         <td className="py-2 pr-4">
                                             <div className="relative">
@@ -385,11 +413,7 @@ function ClientListsSection({ year }: { year: number }) {
                                             {!selected && <span className="text-muted-foreground/30 text-[10px]">—</span>}
                                         </td>
                                         <td className="py-2">
-                                            {isHidden ? (
-                                                <button onClick={() => unhide(cm.client_id)} className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-muted-foreground hover:text-emerald-600 flex items-center justify-center" title="Mostrar"><Eye size={11} /></button>
-                                            ) : (
-                                                <button onClick={() => hide(cm.client_id)} className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-muted text-muted-foreground flex items-center justify-center" title="Ocultar"><EyeOff size={11} /></button>
-                                            )}
+                                            <button onClick={() => hide(cm.client_id)} className="opacity-0 group-hover:opacity-100 h-6 w-6 rounded hover:bg-muted text-muted-foreground flex items-center justify-center" title="Ocultar"><EyeOff size={11} /></button>
                                         </td>
                                     </tr>
                                 );
@@ -430,7 +454,6 @@ function ManualPersonsSection({ year }: { year: number }) {
     });
     const { hiddenIds, hide, unhide } = useHiddenSet('manual_person');
     const [search, setSearch] = useState('');
-    const [showHidden, setShowHidden] = useState(false);
 
     const [editing, setEditing] = useState<ManualPerson | null>(null);
     const [draft, setDraft] = useState<{ name: string; cost_per_hour: string; department: string; notes: string }>({ name: '', cost_per_hour: '', department: '', notes: '' });
@@ -484,11 +507,13 @@ function ManualPersonsSection({ year }: { year: number }) {
     const allPersons = data?.persons || [];
     const searchLower = search.trim().toLowerCase();
     const persons = allPersons.filter(p => {
-        if (!showHidden && hiddenIds.has(p.id)) return false;
+        if (hiddenIds.has(p.id)) return false;
         if (searchLower && !p.name.toLowerCase().includes(searchLower) && !(p.matched_employee || '').toLowerCase().includes(searchLower)) return false;
         return true;
     });
-    const hiddenCount = allPersons.filter(p => hiddenIds.has(p.id)).length;
+    const hiddenItems = allPersons
+        .filter(p => hiddenIds.has(p.id))
+        .map(p => ({ id: p.id, label: p.name }));
 
     return (
         <Section title="Personas manuales">
@@ -502,7 +527,7 @@ function ManualPersonsSection({ year }: { year: number }) {
 
                 <SectionToolbar
                     search={search} onSearch={setSearch}
-                    hiddenCount={hiddenCount} showHidden={showHidden} onShowHidden={setShowHidden}
+                    hiddenItems={hiddenItems} onUnhide={unhide}
                     placeholder="Buscar persona manual…"
                 />
 
@@ -529,9 +554,8 @@ function ManualPersonsSection({ year }: { year: number }) {
                                     const resolved = p.resolved_cost_per_hour ?? 0;
                                     const matched = p.resolved_source === 'matched';
                                     const isOverride = p.resolved_source === 'override';
-                                    const isHidden = hiddenIds.has(p.id);
                                     return (
-                                        <tr key={p.id} className={cn('hover:bg-muted/30 group', isHidden && 'opacity-50')}>
+                                        <tr key={p.id} className="hover:bg-muted/30 group">
                                             <td className="px-3 py-2 font-medium text-foreground">{p.name}</td>
                                             <td className="px-3 py-2 text-xs">
                                                 {matched
@@ -554,11 +578,7 @@ function ManualPersonsSection({ year }: { year: number }) {
                                             </td>
                                             <td className="px-3 py-2">
                                                 <div className="flex items-center gap-1 justify-end">
-                                                    {isHidden ? (
-                                                        <button onClick={() => unhide(p.id)} className="h-7 w-7 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-muted-foreground hover:text-emerald-600 flex items-center justify-center" title="Mostrar"><Eye size={13} /></button>
-                                                    ) : (
-                                                        <button onClick={() => hide(p.id)} className="h-7 w-7 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center" title="Ocultar"><EyeOff size={13} /></button>
-                                                    )}
+                                                    <button onClick={() => hide(p.id)} className="h-7 w-7 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center" title="Ocultar"><EyeOff size={13} /></button>
                                                     <button onClick={() => startEdit(p)} className="h-7 w-7 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center" title="Editar"><Pencil size={13} /></button>
                                                     <button onClick={() => { if (confirm(`¿Borrar a ${p.name}? Se borran también sus horas manuales en todas las cuentas.`)) remove.mutate(p.id); }} className="h-7 w-7 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-muted-foreground hover:text-red-600 flex items-center justify-center" title="Borrar"><Trash2 size={13} /></button>
                                                 </div>

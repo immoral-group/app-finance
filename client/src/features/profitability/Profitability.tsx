@@ -27,6 +27,44 @@ function round2(n: number) {
     return Math.round(n * 100) / 100;
 }
 
+// Dropdown reutilizable para mostrar las cuentas ocultas y poder reactivarlas.
+function HiddenAccountsDropdown({ items, onUnhide }: {
+    items: { id: string; label: string }[];
+    onUnhide: (id: string) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    if (items.length === 0) return null;
+    return (
+        <div className="relative">
+            <button
+                onClick={() => setOpen(o => !o)}
+                className={cn(
+                    'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs transition-colors',
+                    open ? 'border-indigo-400/60 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300' : 'border-border/60 bg-card hover:bg-muted/60 text-muted-foreground'
+                )}
+            >
+                <EyeOff size={11} />Ocultas ({items.length})
+            </button>
+            {open && (
+                <>
+                    <div className="fixed inset-0 z-[55]" onClick={() => setOpen(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-[56] w-64 max-h-80 overflow-auto bg-popover border border-border/60 rounded-lg shadow-xl py-1">
+                        {items.map(it => (
+                            <div key={it.id} className="flex items-center justify-between gap-2 px-3 py-1.5 hover:bg-muted/40 text-xs">
+                                <span className="truncate text-foreground">{it.label}</span>
+                                <button
+                                    onClick={() => onUnhide(it.id)}
+                                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline shrink-0 inline-flex items-center gap-1"
+                                ><Eye size={10} />Mostrar</button>
+                            </div>
+                        ))}
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
 const HINT_KEY = 'fi_profitability_hint_v1';
 
 // ── First-visit hint card ─────────────────────────────────────────────────────
@@ -891,15 +929,13 @@ function ColumnGuide({ onClose }: { onClose: () => void }) {
 }
 
 // ── Main table row ────────────────────────────────────────────────────────────
-function Row({ account, monthIdx, annual, onTeam, onAnnualEvolution, onHide, onUnhide, isHidden }: {
+function Row({ account, monthIdx, annual, onTeam, onAnnualEvolution, onHide }: {
     account: AccountProfitability;
     monthIdx: number;
     annual: boolean;
     onTeam: (a: AccountProfitability, m: number) => void;
     onAnnualEvolution: (clientId: string) => void;
     onHide: (clientId: string) => void;
-    onUnhide: (clientId: string) => void;
-    isHidden: boolean;
 }) {
     const m = account.monthly[monthIdx];
     const revenue = annual ? account.total_revenue : m.revenue;
@@ -915,7 +951,7 @@ function Row({ account, monthIdx, annual, onTeam, onAnnualEvolution, onHide, onU
     if (!annual && revenue === 0 && hours === 0) return null; // no data this month
 
     return (
-        <tr className={cn('border-b border-border/30 hover:bg-muted/20 transition-colors group', isHidden && 'opacity-50')}>
+        <tr className="border-b border-border/30 hover:bg-muted/20 transition-colors group">
             <td className="px-4 py-2.5 text-sm font-medium text-foreground whitespace-nowrap">
                 <div className="flex items-center gap-1.5 group/name">
                     <span>{account.client_name}</span>
@@ -926,19 +962,11 @@ function Row({ account, monthIdx, annual, onTeam, onAnnualEvolution, onHide, onU
                             title="Ver evolución mensual"
                         ><TrendingUp size={12} /></button>
                     )}
-                    {isHidden ? (
-                        <button
-                            onClick={() => onUnhide(account.client_id)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity h-5 w-5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-muted-foreground hover:text-emerald-600 flex items-center justify-center"
-                            title="Mostrar cuenta"
-                        ><Eye size={12} /></button>
-                    ) : (
-                        <button
-                            onClick={() => onHide(account.client_id)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity h-5 w-5 rounded hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center"
-                            title="Ocultar cuenta"
-                        ><EyeOff size={12} /></button>
-                    )}
+                    <button
+                        onClick={() => onHide(account.client_id)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity h-5 w-5 rounded hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center"
+                        title="Ocultar cuenta"
+                    ><EyeOff size={12} /></button>
                 </div>
             </td>
             <td className="px-3 py-2.5 text-right text-sm tabular-nums text-foreground">
@@ -1054,12 +1082,11 @@ export default function Profitability() {
         onSettled: () => qc.invalidateQueries({ queryKey: ['hidden-items', 'client'], refetchType: 'none' }),
     });
 
-    // Búsqueda + orden + mostrar/ocultar
+    // Búsqueda + orden
     const [search, setSearch] = useState('');
     type SortKey = 'name' | 'margin' | 'hours' | 'revenue';
     const [sortBy, setSortBy] = useState<SortKey>('name');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-    const [showHidden, setShowHidden] = useState(false);
     const [evolutionFor, setEvolutionFor] = useState<string | null>(null);
 
     // Cuentas con datos en el periodo seleccionado
@@ -1067,17 +1094,19 @@ export default function Profitability() {
         ? (a.total_revenue > 0 || a.total_hours > 0)
         : (a.monthly[month].revenue > 0 || a.monthly[month].hours > 0);
 
-    // 1) periodo con datos · 2) no ocultas (salvo showHidden) · 3) búsqueda
+    // 1) periodo con datos · 2) no ocultas · 3) búsqueda
     const searchLower = search.trim().toLowerCase();
     const filteredAccounts = accounts.filter(a => {
         if (!hasData(a)) return false;
-        if (!showHidden && hiddenClientIds.has(a.client_id)) return false;
+        if (hiddenClientIds.has(a.client_id)) return false;
         if (searchLower && !a.client_name.toLowerCase().includes(searchLower)) return false;
         return true;
     });
 
-    // Hidden count para el toggle (siempre con datos pero ocultas)
-    const hiddenWithData = accounts.filter(a => hasData(a) && hiddenClientIds.has(a.client_id)).length;
+    // Items ocultos para el dropdown (con nombre)
+    const hiddenItemsForDropdown = accounts
+        .filter(a => hiddenClientIds.has(a.client_id))
+        .map(a => ({ id: a.client_id, label: a.client_name }));
 
     const sortAccessor = (a: AccountProfitability): number | string => {
         if (sortBy === 'name') return a.client_name.toLowerCase();
@@ -1203,12 +1232,7 @@ export default function Profitability() {
                         {sortDir === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
                     </button>
                 </div>
-                {hiddenWithData > 0 && (
-                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-                        <input type="checkbox" checked={showHidden} onChange={e => setShowHidden(e.target.checked)} className="h-3.5 w-3.5" />
-                        Mostrar ocultas ({hiddenWithData})
-                    </label>
-                )}
+                <HiddenAccountsDropdown items={hiddenItemsForDropdown} onUnhide={(id) => unhideMut.mutate(id)} />
             </div>
 
             {/* ClickUp debug — visible when no hours loaded */}
@@ -1305,8 +1329,6 @@ export default function Profitability() {
                                                 onTeam={(acc, m) => setTeam({ client_id: acc.client_id, month: m })}
                                                 onAnnualEvolution={(cid) => setEvolutionFor(cid)}
                                                 onHide={(cid) => hideMut.mutate(cid)}
-                                                onUnhide={(cid) => unhideMut.mutate(cid)}
-                                                isHidden={hiddenClientIds.has(a.client_id)}
                                             />
                                         ))
                                 }

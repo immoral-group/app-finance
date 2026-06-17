@@ -607,10 +607,11 @@ async function computeRealCostPerPerson(year) {
         .select('amount, fiscal_month, department_id, description, category:expense_categories(name)')
         .eq('fiscal_year', year);
 
-    // 4. Sum expense per person across the year
-    // We treat any expense row where: section is 'personal' OR the category name matches a known personal name → as that person's salary
-    const personYearly = {}; // canonicalName → { cost, dept, months_active }
-    const personMonths = {}; // canonicalName → Set<monthIdx> where cost > 0
+    // 4. Sum expense per person × mes
+    // Se trata cualquier expense cuya categoría matche un nombre conocido como
+    // sueldo de esa persona. Guardamos por mes (no solo el total anual) para
+    // poder aplicar carry-forward de meses intermedios sin datos.
+    const personData = {}; // canonicalName → { dept, monthly: number[12] }
 
     (expenses || []).forEach(exp => {
         const deptName = deptIdMap[exp.department_id];
@@ -624,26 +625,48 @@ async function computeRealCostPerPerson(year) {
         const amount = Number(exp.amount || 0);
         if (amount <= 0) return;
 
-        if (!personYearly[lookup.canonical]) {
-            personYearly[lookup.canonical] = { cost: 0, dept: lookup.dept };
-            personMonths[lookup.canonical] = new Set();
+        if (!personData[lookup.canonical]) {
+            personData[lookup.canonical] = { dept: lookup.dept, monthly: Array(12).fill(0) };
         }
-        personYearly[lookup.canonical].cost += amount;
-        personMonths[lookup.canonical].add(exp.fiscal_month - 1);
+        const mIdx = (exp.fiscal_month || 1) - 1;
+        personData[lookup.canonical].monthly[mIdx] += amount;
     });
 
-    // 5. cost_per_hour = total cost / (160 * months_active)
+    // 5. cost_per_hour por persona con CARRY-FORWARD entre meses con datos.
+    //    Logica: encontrar firstMonth y lastMonth con sueldo > 0. Para cualquier
+    //    mes intermedio sin datos, propagar el valor del ultimo mes con datos.
+    //    Asi al añadir un nuevo mes (ej. junio) months_active sube a 6 y el
+    //    total incluye el efectivo de junio, no se queda con 5 meses.
     const personByName = {};
-    Object.entries(personYearly).forEach(([name, info]) => {
-        const monthsActive = personMonths[name].size || 1;
+    Object.entries(personData).forEach(([name, info]) => {
+        const monthly = info.monthly;
+        let firstMonth = -1, lastMonth = -1;
+        for (let i = 0; i < 12; i++) {
+            if (monthly[i] > 0) {
+                if (firstMonth === -1) firstMonth = i;
+                lastMonth = i;
+            }
+        }
+        if (firstMonth === -1) return; // sin datos para este año
+
+        let lastValue = 0;
+        let effectiveTotal = 0;
+        for (let i = firstMonth; i <= lastMonth; i++) {
+            if (monthly[i] > 0) lastValue = monthly[i];
+            effectiveTotal += lastValue;
+        }
+
+        const monthsActive = lastMonth - firstMonth + 1;
         const totalHours = HOURS_PER_PERSON_MONTH * monthsActive;
         personByName[norm(name)] = {
             canonical: name,
             dept: info.dept,
-            cost_per_hour: totalHours > 0 ? info.cost / totalHours : 0,
-            yearly_cost: info.cost,
+            cost_per_hour: totalHours > 0 ? effectiveTotal / totalHours : 0,
+            yearly_cost: effectiveTotal,
             months_active: monthsActive,
             hours_used: totalHours,
+            first_month: firstMonth + 1,
+            last_month: lastMonth + 1,
         };
     });
 
