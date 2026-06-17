@@ -23,6 +23,36 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.40-rentabilidad-tiempo-real',
+        date: '2026-06-16',
+        title: 'Rentabilidad: actualización en tiempo real',
+        description: 'Los cambios en P&L (sueldos) y en horas manuales se reflejan al instante en Rentabilidad por Cuenta sin necesidad de recargar la página. El cálculo de €/hora cuenta automáticamente sólo los meses con sueldo > 0 registrados (sin rellenar huecos): al añadir un mes nuevo en P&L, la fórmula se actualiza sola.',
+        type: 'improvement',
+        moduleKey: 'profitability',
+        icon: 'Zap',
+        highlight: true,
+    },
+    {
+        id: 'v1.39-rentabilidad-buscador-evolucion',
+        date: '2026-06-16',
+        title: 'Rentabilidad: buscador, ordenación y evolución anual',
+        description: 'Buscador de cuentas, ordenación configurable (alfabético, rentabilidad, horas, fee) y opción de ocultar cuentas con un dropdown "Ocultos (N)" para reactivarlas cuando quieras. En modo Anual, click en el icono de tendencia abre un panel con la evolución mensual de cada cuenta: 3 mini-gráficas independientes (Horas, Coste, Beneficio) con línea de tendencia, hover detallado y click en cualquier mes para ver el equipo.',
+        type: 'improvement',
+        moduleKey: 'profitability',
+        icon: 'Search',
+        highlight: true,
+    },
+    {
+        id: 'v1.38-rentabilidad-horas-manuales',
+        date: '2026-06-16',
+        title: 'Rentabilidad: horas manuales por persona',
+        description: 'Para usuarios que ya no están en ClickUp (desactivados) o freelancers no enlazados, ahora puedes cargar manualmente sus horas en cada cuenta y mes. Configura la persona una sola vez en "Configurar > Personas manuales" (el coste/hora se calcula desde su sueldo en P&L automáticamente si su nombre coincide con una categoría de gasto). Luego, en el modal mensual de cada cuenta, "+ Añadir horas manuales" para meter las horas. Aparecen en el desglose del equipo igual que los detectados desde ClickUp.',
+        type: 'improvement',
+        moduleKey: 'profitability',
+        icon: 'Users',
+        highlight: true,
+    },
+    {
         id: 'v1.37-mobile-rendering',
         date: '2026-06-11',
         title: 'Renderizado Móvil Mejorado',

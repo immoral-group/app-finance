@@ -706,10 +706,78 @@ El loop que construye `alertMonths` no diferenciaba meses con datos Real de mese
 
 ---
 
+---
+
+## Sesión 2026-06-16 — Rentabilidad por Cuenta: horas manuales, buscador, evolución anual, tiempo real
+
+**Rama:** `fix/rentabilidadxcuentas` (no se ha tocado `main`)
+
+### Contexto del problema original
+El dashboard de ClickUp mostraba para Ángela Navarro mayo 2026 `60:28:01` (60.47 h) pero la app marcaba `58.3 h`. Las 2 entries que faltaban eran de **Alba Ortega** y **Leidy Puentes Gómez**, ambas **usuarias desactivadas** en ClickUp — sus IDs no aparecen ya en `/team/{id}.members` ni en `/list/{id}/member`, y `?assignee=<uid>` con sus IDs históricos tampoco devuelve nada con el token actual. Después de probar varias vías (location sweep, IDs históricos en `profitability_user_mappings`, etc.) decidimos NO depender de ClickUp para esos casos y abrir un camino de **horas manuales**.
+
+### Cambios funcionales
+
+| # | Tipo | Cambio | Archivos clave |
+|---|---|---|---|
+| 1 | Feature | **Personas manuales y horas por cliente×mes**. Tabla nueva en Supabase: `profitability_manual_persons` (id, name, cost_per_hour override, dept, notas) y `profitability_manual_hours` (client_id, manual_person_id, year, month, hours, UNIQUE). El coste/h se resuelve por P&L si el nombre matchea una categoría; si no, se usa el override. Aparece en el desglose del modal mensual como una persona más con `source: 'manual-pl'` o `'manual'`. | `services/admin-service/src/routes/profitability.js` (endpoints CRUD + paso 8b de `/accounts/:year`), `client/src/features/profitability/Profitability.tsx` (TeamModal con + Añadir horas manuales), `client/src/features/profitability/ProfitabilitySetup.tsx` (ManualPersonsSection) |
+| 2 | Feature | **Buscador + ordenación + ocultar cuentas** en la vista principal y en cada bloque de Configurar. Buscador por nombre. Ordenación: alfabético (default), rentabilidad, horas, fee, asc/desc. Ocultar/mostrar via botón "Ocultos (N)" que abre un dropdown con los items ocultos y "Mostrar" por cada uno. Tabla nueva `profitability_hidden_items (scope, ref_id)` genérica para 3 scopes: `client`, `clickup_user`, `manual_person`. | `Profitability.tsx`, `ProfitabilitySetup.tsx` (hook `useHiddenSet` + `HiddenDropdown` reutilizable), `services/admin-service/src/routes/profitability.js` (endpoints `/hidden-items`) |
+| 3 | Feature | **Evolución anual por cuenta**. En modo Anual, click en el icono TrendingUp de la fila abre un modal con 3 mini-gráficas SVG independientes (Horas verde, Coste rojo, Beneficio índigo con área), cada una con línea de tendencia (regresión lineal) y badge "al alza/baja/estable". Hover muestra valor del mes. Click en mes con horas abre el TeamModal de ese mes. Tabla bajo las gráficas con Mes/Fee/Horas/Coste/Beneficio/Margen. | `Profitability.tsx` (`AnnualEvolutionModal`, `MetricChart`) |
+| 4 | Fix | **months_active correcto**: contador literal de meses con sueldo > 0 (sin rellenar huecos ni proyectar). Si Julian sólo tiene mayo → 1 mes; al añadir junio → 2 meses; persona con enero+febrero+abril sin marzo → 3 meses, no 4. | `services/admin-service/src/routes/profitability.js` (`computeRealCostPerPerson`) |
+| 5 | Fix | **Sincronía cross-feature en tiempo real**. Todas las queries del módulo con `staleTime: 0`, `refetchOnWindowFocus: true`, `refetchOnMount: 'always'` y `placeholderData: keepPreviousData`. Al editar P&L y volver a Rentabilidad, los datos se actualizan solos sin recargar. Optimistic update en horas manuales (`setQueryData` directo) y en hide/unhide (`onMutate` + rollback). | `Profitability.tsx`, `ProfitabilitySetup.tsx` |
+| 6 | Fix | **Cálculo €/h y desglose en Configurar > Personas manuales**. La sección ahora muestra Match P&L + Depto + €/h con su fórmula sueldo_anual ÷ (160h × meses) + Fuente (matched/override/sin coste), igual que la sección de empleados activos arriba. | `ProfitabilitySetup.tsx` (`ManualPersonsSection`), `services/admin-service/src/routes/profitability.js` (`GET /manual-persons?year=`) |
+| 7 | Feature | **Changelog**: 3 entradas nuevas (v1.38, v1.39, v1.40) en `client/src/lib/changelog.ts` + iconos `Users`, `Search`, `Zap` añadidos al `ICON_MAP` de `WhatsNew.tsx`. | `client/src/lib/changelog.ts`, `client/src/components/shared/WhatsNew.tsx` |
+
+### Migrations SQL a ejecutar en Supabase
+
+```sql
+-- 1. database/migration_profitability_manual.sql
+CREATE TABLE IF NOT EXISTS profitability_manual_persons (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  cost_per_hour DECIMAL(8,2) NOT NULL DEFAULT 0,
+  department TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS profitability_manual_hours (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  manual_person_id UUID NOT NULL REFERENCES profitability_manual_persons(id) ON DELETE CASCADE,
+  year INT NOT NULL,
+  month INT NOT NULL CHECK (month >= 1 AND month <= 12),
+  hours DECIMAL(8,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (client_id, manual_person_id, year, month)
+);
+CREATE INDEX IF NOT EXISTS idx_pmh_client_year ON profitability_manual_hours(client_id, year);
+CREATE INDEX IF NOT EXISTS idx_pmh_person ON profitability_manual_hours(manual_person_id);
+
+-- 2. database/migration_profitability_hidden.sql
+CREATE TABLE IF NOT EXISTS profitability_hidden_items (
+  scope TEXT NOT NULL,
+  ref_id TEXT NOT NULL,
+  hidden_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (scope, ref_id)
+);
+```
+
+### Notas operacionales
+- **Para que las horas faltantes de mayo de Ángela aparezcan**: dar de alta a Alba Ortega y Leidy Puentes Gómez en Configurar → Personas manuales (dejando coste/h en 0 → se calcula desde P&L). Luego en el modal de Ángela · Mayo → + Añadir horas manuales → cargar `1.14` y `1.06`.
+- **Mismo patrón aplica a cualquier futuro caso**: persona desactivada de ClickUp con horas pasadas no recuperables → meter como persona manual + cargar horas en los meses que hicieron falta.
+- **Workers eliminados de ClickUp**: desaparecen de Configurar > Coste por hora (esa tabla viene de `/team/{id}` de ClickUp), pero su coste/h sigue calculándose desde P&L y aplicándose a entries pasadas via name matching. NO se pierde nada.
+- **Cuentas eliminadas/archivadas en ClickUp**: el mapeo en `profitability_client_lists` permanece. Las entries históricas (si las hubo) siguen sumando. Si la lista deja de existir, futuros entries=0 y la cuenta aparece con fee y 0 horas, lo cual es correcto.
+
+---
+
 ## Pendientes
 - Ejecutar en Supabase los 2 SQL de migración listados arriba (sesión 2026-04-27) antes de que las nuevas columnas aparezcan en Billing Matrix
+- Ejecutar en Supabase los 2 SQL de migración de la sesión 2026-06-16 (`migration_profitability_manual.sql` y `migration_profitability_hidden.sql`) para que las funcionalidades nuevas de Rentabilidad funcionen
 - Verificar en producción que los fixes del historial de cambios (Creado/Editado/Eliminado) funcionan correctamente
 - Considerar añadir opción de ocultar/mostrar clientes también en P&L Matrix si el usuario lo requiere
+- (Diferido) Permitir asociar cuentas a listas de ClickUp aunque la lista no tenga horas trackeadas este año (caso Bobo Choses)
 
 ---
 
