@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { adminApi, type ManualPerson } from '@/lib/api/admin';
 import { ArrowLeft, CheckCircle2, AlertCircle, Info, RefreshCw, ChevronDown, Sparkles, Save, Plus, Trash2, Pencil, Search, X, Eye, EyeOff } from 'lucide-react';
@@ -122,13 +122,36 @@ function SectionToolbar({ search, onSearch, hiddenItems, onUnhide, placeholder }
 }
 
 // ── Formula tooltip (replaces browser title= which doesn't show on macOS) ────
+// Usa coordenadas fijas calculadas desde el icono para que el popover no quede
+// recortado por contenedores con overflow-hidden/overflow-x-auto (como la
+// tabla de mappings) y se abra arriba si no hay espacio debajo.
 function FormulaTip({ formula }: { formula: string }) {
     const [open, setOpen] = useState(false);
+    const btnRef = useRef<HTMLButtonElement | null>(null);
+    const [pos, setPos] = useState<{ top: number; left: number; placement: 'below' | 'above' }>({ top: 0, left: 0, placement: 'below' });
     const close = useCallback(() => setOpen(false), []);
+
+    const handleOpen = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!open && btnRef.current) {
+            const r = btnRef.current.getBoundingClientRect();
+            const POPOVER_W = 288; // w-72
+            const POPOVER_H = 96;
+            const margin = 8;
+            const spaceBelow = window.innerHeight - r.bottom;
+            const placement: 'below' | 'above' = spaceBelow < POPOVER_H + margin ? 'above' : 'below';
+            const top = placement === 'below' ? r.bottom + margin : r.top - POPOVER_H - margin;
+            const left = Math.min(Math.max(8, r.right - POPOVER_W), window.innerWidth - POPOVER_W - 8);
+            setPos({ top, left, placement });
+        }
+        setOpen(o => !o);
+    };
+
     return (
-        <span className="relative inline-flex items-center align-middle ml-0.5">
+        <span className="inline-flex items-center align-middle ml-0.5">
             <button
-                onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
+                ref={btnRef}
+                onClick={handleOpen}
                 className="text-muted-foreground/40 hover:text-indigo-500 transition-colors focus:outline-none"
                 tabIndex={-1}
             >
@@ -138,7 +161,8 @@ function FormulaTip({ formula }: { formula: string }) {
                 <>
                     <div className="fixed inset-0 z-[60]" onClick={close} />
                     <div
-                        className="absolute top-full right-0 mt-2 z-[61] w-72 bg-popover border border-border/60 rounded-xl shadow-2xl p-3 text-left space-y-1"
+                        className="fixed z-[61] w-72 bg-popover border border-border/60 rounded-xl shadow-2xl p-3 text-left space-y-1"
+                        style={{ top: pos.top, left: pos.left }}
                         onClick={e => e.stopPropagation()}
                     >
                         <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 mb-1">Fórmula</p>

@@ -558,10 +558,15 @@ router.put('/client-lists', async (req, res) => {
 async function computeRealCostPerPerson(year) {
     const HOURS_PER_PERSON_MONTH = 160;
     // Use full names where there may be ambiguity (e.g. multiple "Andrés" in ClickUp)
+    // Algunas personas tienen su sueldo repartido entre varios departamentos
+    // del P&L según el mes (p. ej. Yure aparece unos meses en Immedia y otros
+    // en Immoral). Registrarlas en todos los deptos donde puedan figurar
+    // permite sumar todas sus líneas en lugar de quedarnos sólo con una.
     const PERSONAL_ITEMS = {
         Immedia: ['Alba', 'Andrés Barrios', 'Leidy', 'Yure'],
         Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'],
         Immoralia: ['David', 'Manel', 'Julian'],
+        Immoral: ['Yure'],
     };
 
     // 1. departments id → name
@@ -587,16 +592,26 @@ async function computeRealCostPerPerson(year) {
         if (!deptToNames[cr.dept].includes(cr.item_name)) deptToNames[cr.dept].push(cr.item_name);
     });
 
-    // Reverse: normalized name → dept (no accents for matching)
-    // For multi-word names (e.g. "Andrés Barrios"), also register the first-name alias
-    // so that expense categories named "Andrés" still resolve correctly.
+    // Reverse: normalized name → { canonical, dept (primario), depts (Set) }.
+    // Para multi-word names (p. ej. "Andrés Barrios") también registramos el
+    // alias del primer token. `depts` acumula todos los departamentos donde esa
+    // persona aparezca, para poder aceptar gastos de cualquiera de ellos
+    // (caso Yure, que tiene líneas tanto en Immedia como en Immoralia).
     const nameToDept = {};
+    const registerName = (key, canonical, dept) => {
+        if (!nameToDept[key]) {
+            nameToDept[key] = { canonical, dept, depts: new Set([dept]) };
+        } else {
+            nameToDept[key].depts.add(dept);
+        }
+    };
     Object.entries(deptToNames).forEach(([dept, names]) => {
         names.forEach(n => {
-            nameToDept[norm(n)] = { canonical: n, dept };
-            const firstToken = norm(n).split(/\s+/)[0];
-            if (firstToken && firstToken !== norm(n) && !nameToDept[firstToken]) {
-                nameToDept[firstToken] = { canonical: n, dept };
+            const key = norm(n);
+            registerName(key, n, dept);
+            const firstToken = key.split(/\s+/)[0];
+            if (firstToken && firstToken !== key) {
+                registerName(firstToken, n, dept);
             }
         });
     });
@@ -619,8 +634,10 @@ async function computeRealCostPerPerson(year) {
         const lookup = nameToDept[norm(catName)];
 
         if (!lookup) return; // not a known person
-        // require dept matches (avoid Imcontent's "Bruno" expense leaking into Immedia)
-        if (deptName && deptName !== lookup.dept) return;
+        // require dept matches (avoid Imcontent's "Bruno" expense leaking into Immedia).
+        // Una persona puede estar registrada en varios deptos (p. ej. Yure en
+        // Immedia + Immoralia): aceptamos el gasto si su depto está en `depts`.
+        if (deptName && !lookup.depts.has(deptName)) return;
 
         const amount = Number(exp.amount || 0);
         if (amount <= 0) return;
