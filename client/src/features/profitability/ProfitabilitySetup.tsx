@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { adminApi, type ManualPerson } from '@/lib/api/admin';
 import { ArrowLeft, CheckCircle2, AlertCircle, Info, RefreshCw, ChevronDown, Sparkles, Save, Plus, Trash2, Pencil, Search, X, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
@@ -166,6 +166,10 @@ function AutoMappingSection({ year }: { year: number }) {
     const { data, isLoading } = useQuery({
         queryKey: ['profitability-auto-mapping', year],
         queryFn: () => adminApi.getProfitabilityAutoMapping(year),
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        refetchOnMount: 'always',
+        placeholderData: keepPreviousData,
     });
     const { hiddenIds, hide, unhide } = useHiddenSet('clickup_user');
     const [search, setSearch] = useState('');
@@ -280,7 +284,10 @@ function ClientListsSection({ year }: { year: number }) {
     const { data, isLoading, refetch, isFetching } = useQuery({
         queryKey: ['profitability-auto-match', year],
         queryFn: () => adminApi.getProfitabilityAutoMatchClients(year),
-        staleTime: 2 * 60_000,
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        refetchOnMount: 'always',
+        placeholderData: keepPreviousData,
     });
 
     // Inicializar: si ya hay config guardada, úsala; si no, aplica sugerencia
@@ -451,6 +458,10 @@ function ManualPersonsSection({ year }: { year: number }) {
     const { data, isLoading } = useQuery({
         queryKey: ['manual-persons', year],
         queryFn: () => adminApi.getManualPersons(year),
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        refetchOnMount: 'always',
+        placeholderData: keepPreviousData,
     });
     const { hiddenIds, hide, unhide } = useHiddenSet('manual_person');
     const [search, setSearch] = useState('');

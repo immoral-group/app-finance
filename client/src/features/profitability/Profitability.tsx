@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { adminApi, AccountProfitability, ProfitabilityMember } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
 import { Settings, ChevronLeft, ChevronRight, AlertTriangle, Users, X, RefreshCw, HelpCircle, Info, Plus, Trash2, Pencil, Check, Search, ArrowUp, ArrowDown, Eye, EyeOff, TrendingUp } from 'lucide-react';
@@ -1031,7 +1031,13 @@ export default function Profitability() {
     const { data, isLoading, error } = useQuery({
         queryKey: ['profitability-accounts', year],
         queryFn: () => adminApi.getProfitabilityAccounts(year),
-        staleTime: 7 * 60_000,
+        // staleTime 0 + refetchOnWindowFocus → al volver de P&L o desde otra
+        // pestaña, refrescamos automáticamente. placeholderData mantiene la
+        // tabla visible mientras refetchea (no flashea spinner).
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        refetchOnMount: 'always',
+        placeholderData: keepPreviousData,
     });
 
     const refreshCache = useMutation({
