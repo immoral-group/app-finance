@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
 
-const TABS = ['Real', 'Presupuesto', 'Comparación', 'Real Estimado'] as const;
+const TABS = ['Real', 'Presupuesto', 'Comparación', 'Forecast'] as const;
 type TabType = typeof TABS[number];
 type StructureGroup = { dept: string; items?: string[]; services?: string[] };
 
@@ -392,7 +392,7 @@ export default function PLMatrix() {
 
     const typeParam: 'budget' | 'real' | 'estimated' =
         activeTab === 'Presupuesto' ? 'budget' :
-        activeTab === 'Real Estimado' ? 'estimated' :
+        activeTab === 'Forecast' ? 'estimated' :
         'real';
 
     // ── Queries ──────────────────────────────────────────────────────────────
@@ -590,7 +590,7 @@ export default function PLMatrix() {
     const handleTabChange = (tab: TabType) => {
         const targetType =
             tab === 'Presupuesto' ? 'budget' :
-            tab === 'Real Estimado' ? 'estimated' :
+            tab === 'Forecast' ? 'estimated' :
             tab === 'Real' ? 'real' : null;
         if (targetType) {
             queryClient.removeQueries({ queryKey: ['pl-matrix', year, targetType] });
@@ -1010,7 +1010,7 @@ export default function PLMatrix() {
     const renderRevenueRows = () => {
         const rows: React.ReactNode[] = [];
         // Budget tab: always editable. Real tab: only editable for past years (manual entry)
-        const isRevenueEditable = activeTab === 'Presupuesto' || activeTab === 'Real Estimado' || (activeTab === 'Real' && isPastYear);
+        const isRevenueEditable = activeTab === 'Presupuesto' || activeTab === 'Forecast' || (activeTab === 'Real' && isPastYear);
         mergedRevenueStructure.forEach((group, groupIdx) => {
             group.services.forEach((service, serviceIdx) => {
                 rows.push(
@@ -1255,7 +1255,7 @@ export default function PLMatrix() {
             <div className="bg-white border-b px-6 py-3 flex items-center justify-between sticky top-0 z-20">
                 <div className="flex items-center gap-4">
                     <h1 className="text-lg font-bold text-gray-900">
-                        {activeTab === 'Real' ? 'P&L REAL' : activeTab === 'Presupuesto' ? 'PRESUPUESTO' : activeTab === 'Real Estimado' ? 'REAL ESTIMADO' : 'COMPARACIÓN REAL vs PRESUPUESTO'} {year}
+                        {activeTab === 'Real' ? 'P&L REAL' : activeTab === 'Presupuesto' ? 'PRESUPUESTO' : activeTab === 'Forecast' ? 'FORECAST' : 'COMPARACIÓN REAL vs PRESUPUESTO'} {year}
                     </h1>
                     <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                         {TABS.map(tab => (

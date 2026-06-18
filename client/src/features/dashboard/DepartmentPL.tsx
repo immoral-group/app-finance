@@ -38,7 +38,7 @@ function PremiumTooltip({ active, payload, label, formatter }: any) {
     );
 }
 
-const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Real Estimado', 'Solicitudes'] as const;
+const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Forecast', 'Solicitudes'] as const;
 type TabType = typeof TABS[number];
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -174,7 +174,7 @@ export default function DepartmentPL() {
 
     const typeParam: 'budget' | 'real' | 'estimated' =
         activeTab === 'Presupuesto' ? 'budget' :
-        activeTab === 'Real Estimado' ? 'estimated' :
+        activeTab === 'Forecast' ? 'estimated' :
         'real';
 
     // ── Notes state ───────────────────────────────────────────────────────────
@@ -183,7 +183,7 @@ export default function DepartmentPL() {
     type DeptNoteType = 'dept-real' | 'dept-budget' | 'dept-comparison' | 'dept-estimated';
     const deptNoteType: DeptNoteType =
         activeTab === 'Presupuesto' ? 'dept-budget' :
-            activeTab === 'Real Estimado' ? 'dept-estimated' :
+            activeTab === 'Forecast' ? 'dept-estimated' :
                 activeTab === 'Comparación' ? 'dept-comparison' :
                     'dept-real';
 
@@ -2318,7 +2318,7 @@ export default function DepartmentPL() {
 
     return (
         <div className="space-y-4 -mx-6 -mt-6">
-            {renderHeader(`P&L ${deptLabel.toUpperCase()} — ${activeTab === 'Real' ? 'REAL' : activeTab === 'Real Estimado' ? 'REAL ESTIMADO' : 'PRESUPUESTO'} ${year}`)}
+            {renderHeader(`P&L ${deptLabel.toUpperCase()} — ${activeTab === 'Real' ? 'REAL' : activeTab === 'Forecast' ? 'FORECAST' : 'PRESUPUESTO'} ${year}`)}
 
             {/* Spreadsheet (read-only) */}
             <div className="overflow-x-auto px-2">
