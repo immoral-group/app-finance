@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
-import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil, FileSpreadsheet, FileText, Info, Sparkles } from 'lucide-react';
+import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil, FileSpreadsheet, FileText, Info, Sparkles, Save, Users } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
@@ -416,10 +416,29 @@ export default function PLMatrix() {
     // Escenario independiente por pestaña (Forecast / Presupuesto). Cada uno guarda su propia simulación.
     const [forecastScenario, setForecastScenario] = useState<ForecastScenario | null>(null);
     const [budgetScenario, setBudgetScenario] = useState<ForecastScenario | null>(null);
+    // Si el escenario activo proviene de uno guardado, recordamos su id para ofrecer "Actualizar".
+    const [forecastFromId, setForecastFromId] = useState<string | null>(null);
+    const [budgetFromId, setBudgetFromId] = useState<string | null>(null);
     const activeScenario = activeTab === 'Forecast' ? forecastScenario : activeTab === 'Presupuesto' ? budgetScenario : null;
-    const setActiveScenario = (s: ForecastScenario | null) => {
-        if (activeTab === 'Forecast') setForecastScenario(s);
-        else if (activeTab === 'Presupuesto') setBudgetScenario(s);
+    const activeFromId = activeTab === 'Forecast' ? forecastFromId : activeTab === 'Presupuesto' ? budgetFromId : null;
+    const setActiveScenario = (s: ForecastScenario | null, fromId?: string) => {
+        if (activeTab === 'Forecast') {
+            setForecastScenario(s);
+            setForecastFromId(s ? (fromId || null) : null);
+        } else if (activeTab === 'Presupuesto') {
+            setBudgetScenario(s);
+            setBudgetFromId(s ? (fromId || null) : null);
+        }
+    };
+    // Popover de guardar (desde el chip)
+    const [saveBoxOpen, setSaveBoxOpen] = useState(false);
+    const [saveName, setSaveName] = useState('');
+    const [saveSharedDepts, setSaveSharedDepts] = useState<string[]>([]);
+    const openSaveBox = () => {
+        const fromSaved = activeFromId ? savedScenarios.find(s => s.id === activeFromId) : null;
+        setSaveName(activeScenario?.name || fromSaved?.name || '');
+        setSaveSharedDepts(fromSaved ? [...fromSaved.shared_with_depts] : []);
+        setSaveBoxOpen(true);
     };
     const [scenarioBtnSeen, setScenarioBtnSeen] = useState(() => localStorage.getItem('forecast_scenarios_seen') === '1');
 
@@ -440,6 +459,16 @@ export default function PLMatrix() {
             toast.success(`Escenario "${vars.name}" guardado`);
         },
         onError: (err: any) => toast.error(err?.message || 'Error al guardar escenario'),
+    });
+
+    const updateScenarioMutation = useMutation({
+        mutationFn: (vars: { id: string; patch: { name?: string; scenario?: ForecastScenario; shared_with_depts?: string[] } }) =>
+            adminApi.updateForecastScenario(vars.id, vars.patch),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['forecast-scenarios'] });
+            toast.success('Escenario actualizado');
+        },
+        onError: (err: any) => toast.error(err?.message || 'Error al actualizar escenario'),
     });
 
     const deleteScenarioMutation = useMutation({
@@ -1421,21 +1450,105 @@ export default function PLMatrix() {
                             </span>
                         )}
                         {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && activeScenario && !isScenarioEmpty(activeScenario) && (
-                            <span
-                                className="ml-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white shadow"
-                                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
-                                title={scenarioSummary(activeScenario)}
-                            >
-                                <Sparkles size={11} />
-                                <span>{activeScenario.name || 'Escenario'}</span>
-                                <span className="opacity-80 font-normal max-w-[260px] truncate">· {scenarioSummary(activeScenario)}</span>
-                                <button
-                                    onClick={() => setActiveScenario(null)}
-                                    className="ml-1 h-4 w-4 rounded-full bg-white/20 hover:bg-white/35 inline-flex items-center justify-center"
-                                    title="Volver al Forecast base"
+                            <span className="relative inline-flex items-center">
+                                <span
+                                    className="ml-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white shadow"
+                                    style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                                    title={scenarioSummary(activeScenario)}
                                 >
-                                    <X size={10} />
-                                </button>
+                                    <Sparkles size={11} />
+                                    <span>{activeScenario.name || 'Escenario'}</span>
+                                    <span className="opacity-80 font-normal max-w-[260px] truncate">· {scenarioSummary(activeScenario)}</span>
+                                    <button
+                                        onClick={openSaveBox}
+                                        className="ml-1 h-4 w-4 rounded-full bg-white/20 hover:bg-white/35 inline-flex items-center justify-center"
+                                        title={activeFromId ? 'Actualizar o guardar como nuevo' : 'Guardar este escenario'}
+                                    >
+                                        <Save size={10} />
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveScenario(null)}
+                                        className="h-4 w-4 rounded-full bg-white/20 hover:bg-white/35 inline-flex items-center justify-center"
+                                        title="Volver a la vista base"
+                                    >
+                                        <X size={10} />
+                                    </button>
+                                </span>
+                                {saveBoxOpen && (() => {
+                                    const allDepts = Array.from(new Set([
+                                        ...mergedRevenueStructure.map((g: any) => g.dept),
+                                        ...Object.values(mergedExpenseStructure).flatMap((arr: any[]) => arr.map((g: any) => g.dept)),
+                                    ])).sort();
+                                    const fromSaved = activeFromId ? savedScenarios.find(s => s.id === activeFromId) : null;
+                                    const doSave = (asNew: boolean) => {
+                                        const finalName = saveName.trim() || activeScenario.name.trim() || 'Sin nombre';
+                                        const finalScenario = { ...activeScenario, name: finalName };
+                                        if (fromSaved && !asNew) {
+                                            updateScenarioMutation.mutate({
+                                                id: fromSaved.id,
+                                                patch: { name: finalName, scenario: finalScenario, shared_with_depts: saveSharedDepts },
+                                            });
+                                            setActiveScenario(finalScenario, fromSaved.id);
+                                        } else {
+                                            saveScenarioMutation.mutate(
+                                                { name: finalName, scenario: finalScenario, shared_with_depts: saveSharedDepts },
+                                                {
+                                                    onSuccess: (data: any) => {
+                                                        if (data?.scenario?.id) setActiveScenario(finalScenario, data.scenario.id);
+                                                    },
+                                                }
+                                            );
+                                        }
+                                        setSaveBoxOpen(false);
+                                    };
+                                    return (
+                                        <>
+                                            <div className="fixed inset-0 z-[150]" onClick={() => setSaveBoxOpen(false)} />
+                                            <div className="absolute top-full left-0 mt-2 z-[151] w-[340px] bg-white rounded-lg shadow-2xl ring-1 ring-black/5 p-3 space-y-3">
+                                                <div className="text-xs font-bold text-gray-800">
+                                                    {fromSaved ? `Guardar cambios en "${fromSaved.name}"` : 'Guardar escenario'}
+                                                </div>
+                                                <input
+                                                    autoFocus
+                                                    value={saveName}
+                                                    onChange={e => setSaveName(e.target.value)}
+                                                    placeholder="Nombre del escenario..."
+                                                    className="w-full h-8 px-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                />
+                                                {allDepts.length > 0 && (
+                                                    <div>
+                                                        <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-600 mb-1">
+                                                            <Users size={11} /> Compartir con depto (opcional)
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {allDepts.map(d => {
+                                                                const active = saveSharedDepts.includes(d);
+                                                                return (
+                                                                    <button
+                                                                        key={d}
+                                                                        onClick={() => setSaveSharedDepts(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])}
+                                                                        className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-gray-200 text-gray-700 hover:border-indigo-300'}`}
+                                                                    >
+                                                                        {d}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div className="flex justify-end gap-1.5 pt-1">
+                                                    <Button variant="outline" size="sm" onClick={() => setSaveBoxOpen(false)} className="text-xs">Cancelar</Button>
+                                                    {fromSaved && (
+                                                        <Button variant="outline" size="sm" onClick={() => doSave(true)} className="text-xs">Guardar como nuevo</Button>
+                                                    )}
+                                                    <Button size="sm" onClick={() => doSave(false)} className="gap-1 text-xs">
+                                                        <Save size={11} /> {fromSaved ? 'Actualizar' : 'Guardar'}
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
                             </span>
                         )}
                     </h1>
@@ -1531,10 +1644,8 @@ export default function PLMatrix() {
                         savedList={savedScenarios}
                         canEdit={true}
                         shareableDepts={allDepts}
-                        onApply={(s) => setActiveScenario(isScenarioEmpty(s) ? null : s)}
-                        onSave={(name, scenario, shared_with_depts) =>
-                            saveScenarioMutation.mutate({ name, scenario, shared_with_depts })
-                        }
+                        onApply={(s, fromId) => setActiveScenario(isScenarioEmpty(s) ? null : s, fromId)}
+                        onUpdate={(id, patch) => updateScenarioMutation.mutate({ id, patch })}
                         onDelete={(id, name) => {
                             if (!confirm(`¿Eliminar "${name}"?`)) return;
                             deleteScenarioMutation.mutate(id);

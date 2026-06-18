@@ -2411,7 +2411,7 @@ export default function DepartmentPL() {
                     canEdit={false}
                     shareableDepts={[]}
                     onApply={(s) => setActiveScenario(isScenarioEmpty(s) ? null : s)}
-                    onSave={() => { /* dept heads no pueden guardar */ }}
+                    onUpdate={() => { /* dept heads no pueden actualizar */ }}
                     onDelete={() => { /* dept heads no pueden borrar */ }}
                     onClose={() => setScenarioOpen(false)}
                 />

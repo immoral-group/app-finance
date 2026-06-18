@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { X, Sparkles, RotateCcw, Check, Save, Trash2, Bookmark, Users } from 'lucide-react';
+import { X, Sparkles, RotateCcw, Check, Trash2, Bookmark, Users, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
 // ============================================================
@@ -235,42 +235,42 @@ interface ModalProps {
     savedList: SavedScenario[];
     canEdit: boolean;  // false para jefes de depto (solo ven/aplican)
     shareableDepts: string[];  // depts con los que se puede compartir (solo admins lo usan)
-    onApply: (s: ForecastScenario) => void;
-    onSave: (name: string, scenario: ForecastScenario, sharedWithDepts: string[]) => void;
+    onApply: (s: ForecastScenario, fromSavedId?: string) => void;
+    onUpdate: (id: string, patch: { name?: string; scenario?: ForecastScenario; shared_with_depts?: string[] }) => void;
     onDelete: (id: string, name: string) => void;
     onClose: () => void;
 }
 
 export const ForecastScenariosModal = ({
     initial, revenueDepts, expenseDepts, savedList, canEdit, shareableDepts,
-    onApply, onSave, onDelete, onClose
+    onApply, onUpdate, onDelete, onClose
 }: ModalProps) => {
     const [draft, setDraft] = useState<ForecastScenario>(() => initial ? structuredClone(initial) : structuredClone(EMPTY_SCENARIO));
     const [leaving, setLeaving] = useState(false);
-    const [showSaveInput, setShowSaveInput] = useState(false);
-    const [saveName, setSaveName] = useState('');
-    const [saveSharedDepts, setSaveSharedDepts] = useState<string[]>([]);
-
-    const handleSaveCurrent = () => {
-        const finalName = saveName.trim() || draft.name.trim() || 'Sin nombre';
-        const finalScenario = { ...draft, name: finalName };
-        onSave(finalName, finalScenario, saveSharedDepts);
-        setShowSaveInput(false);
-        setSaveName('');
-        setSaveSharedDepts([]);
-        setDraft(finalScenario);
-    };
+    const [loadedFromId, setLoadedFromId] = useState<string | null>(null);
+    // Edicion inline de un item guardado: { id, name, depts }
+    const [editing, setEditing] = useState<{ id: string; name: string; depts: string[] } | null>(null);
 
     const handleLoadSaved = (s: SavedScenario) => {
         setDraft(structuredClone(s.scenario));
+        setLoadedFromId(s.id);
     };
 
     const handleDeleteSaved = (id: string, name: string) => {
         onDelete(id, name);
+        if (loadedFromId === id) setLoadedFromId(null);
     };
 
-    const toggleShareDept = (d: string) => {
-        setSaveSharedDepts(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+    const startEdit = (s: SavedScenario) => {
+        setEditing({ id: s.id, name: s.name, depts: [...s.shared_with_depts] });
+    };
+    const toggleEditDept = (d: string) => {
+        setEditing(e => e ? { ...e, depts: e.depts.includes(d) ? e.depts.filter(x => x !== d) : [...e.depts, d] } : e);
+    };
+    const saveEdit = () => {
+        if (!editing) return;
+        onUpdate(editing.id, { name: editing.name.trim() || 'Sin nombre', shared_with_depts: editing.depts });
+        setEditing(null);
     };
 
     const dismiss = () => {
@@ -292,7 +292,7 @@ export const ForecastScenariosModal = ({
             ...draft,
             name: draft.name || (hasChanges ? 'Escenario personalizado' : ''),
         };
-        onApply(finalScenario);
+        onApply(finalScenario, loadedFromId || undefined);
         dismiss();
     };
 
@@ -341,42 +341,91 @@ export const ForecastScenariosModal = ({
                                 </span>
                             </h3>
                             <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
-                                {savedList.map(s => (
-                                    <div
-                                        key={s.id}
-                                        className="group flex items-center gap-2 rounded-lg border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/40 px-2.5 py-1.5 transition-colors"
-                                    >
-                                        <button
-                                            onClick={() => {
-                                                if (canEdit) {
-                                                    handleLoadSaved(s);
-                                                } else {
-                                                    onApply(s.scenario);
-                                                    dismiss();
-                                                }
-                                            }}
-                                            className="flex-1 text-left min-w-0"
-                                            title={canEdit ? 'Cargar este escenario' : 'Aplicar este escenario'}
+                                {savedList.map(s => {
+                                    const isEditing = editing?.id === s.id;
+                                    if (isEditing && canEdit) {
+                                        return (
+                                            <div key={s.id} className="rounded-lg border border-indigo-300 bg-indigo-50/40 px-2.5 py-2 space-y-2">
+                                                <input
+                                                    value={editing!.name}
+                                                    onChange={e => setEditing(prev => prev ? { ...prev, name: e.target.value } : prev)}
+                                                    className="w-full h-7 px-2 text-xs rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                                    placeholder="Nombre del escenario"
+                                                />
+                                                {shareableDepts.length > 0 && (
+                                                    <div>
+                                                        <div className="flex items-center gap-1 text-[10px] font-semibold text-gray-600 mb-1">
+                                                            <Users size={10} /> Compartir con:
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {shareableDepts.map(d => {
+                                                                const active = editing!.depts.includes(d);
+                                                                return (
+                                                                    <button
+                                                                        key={d}
+                                                                        onClick={() => toggleEditDept(d)}
+                                                                        className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-gray-200 text-gray-700 hover:border-indigo-300'}`}
+                                                                    >
+                                                                        {d}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div className="flex justify-end gap-1.5">
+                                                    <Button variant="outline" size="sm" onClick={() => setEditing(null)} className="text-[11px] h-6">Cancelar</Button>
+                                                    <Button size="sm" onClick={saveEdit} className="text-[11px] h-6 gap-1"><Check size={10} /> Guardar</Button>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+                                    return (
+                                        <div
+                                            key={s.id}
+                                            className={`group flex items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${loadedFromId === s.id ? 'border-indigo-400 bg-indigo-50/40' : 'border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/40'}`}
                                         >
-                                            <div className="text-xs font-semibold text-gray-800 truncate">{s.name}</div>
-                                            <div className="text-[10px] text-gray-500 truncate">{scenarioSummary(s.scenario)}</div>
-                                            {canEdit && s.shared_with_depts.length > 0 && (
-                                                <div className="mt-0.5 flex items-center gap-1 text-[9px] text-indigo-700">
-                                                    <Users size={9} /> {s.shared_with_depts.join(', ')}
+                                            <button
+                                                onClick={() => {
+                                                    if (canEdit) {
+                                                        handleLoadSaved(s);
+                                                    } else {
+                                                        onApply(s.scenario, s.id);
+                                                        dismiss();
+                                                    }
+                                                }}
+                                                className="flex-1 text-left min-w-0"
+                                                title={canEdit ? 'Cargar este escenario' : 'Aplicar este escenario'}
+                                            >
+                                                <div className="text-xs font-semibold text-gray-800 truncate">{s.name}</div>
+                                                <div className="text-[10px] text-gray-500 truncate">{scenarioSummary(s.scenario)}</div>
+                                                {canEdit && s.shared_with_depts.length > 0 && (
+                                                    <div className="mt-0.5 flex items-center gap-1 text-[9px] text-indigo-700">
+                                                        <Users size={9} /> {s.shared_with_depts.join(', ')}
+                                                    </div>
+                                                )}
+                                            </button>
+                                            {canEdit && (
+                                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={() => startEdit(s)}
+                                                        className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+                                                        title="Renombrar y compartir"
+                                                    >
+                                                        <Pencil size={12} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteSaved(s.id, s.name)}
+                                                        className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                                                        title="Eliminar"
+                                                    >
+                                                        <Trash2 size={12} />
+                                                    </button>
                                                 </div>
                                             )}
-                                        </button>
-                                        {canEdit && (
-                                            <button
-                                                onClick={() => handleDeleteSaved(s.id, s.name)}
-                                                className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
-                                                title="Eliminar"
-                                            >
-                                                <Trash2 size={12} />
-                                            </button>
-                                        )}
-                                    </div>
-                                ))}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </section>
                     )}
@@ -550,70 +599,19 @@ export const ForecastScenariosModal = ({
                 </div>
 
                 {/* Footer */}
-                <div className="border-t bg-gray-50">
-                    {canEdit && showSaveInput && (
-                        <div className="px-5 pt-3 pb-3 border-b space-y-2">
-                            <div className="flex items-center gap-2">
-                                <input
-                                    autoFocus
-                                    value={saveName}
-                                    onChange={e => setSaveName(e.target.value)}
-                                    onKeyDown={e => { if (e.key === 'Enter') handleSaveCurrent(); if (e.key === 'Escape') { setShowSaveInput(false); setSaveName(''); } }}
-                                    placeholder="Nombre del escenario..."
-                                    className="flex-1 h-8 px-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                />
-                                <Button size="sm" onClick={handleSaveCurrent} className="text-xs gap-1.5">
-                                    <Save size={12} /> Guardar
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => { setShowSaveInput(false); setSaveName(''); setSaveSharedDepts([]); }} className="text-xs">Cancelar</Button>
-                            </div>
-                            {shareableDepts.length > 0 && (
-                                <div>
-                                    <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-600 mb-1">
-                                        <Users size={11} /> Compartir con departamento (opcional):
-                                    </div>
-                                    <div className="flex flex-wrap gap-1">
-                                        {shareableDepts.map(d => {
-                                            const active = saveSharedDepts.includes(d);
-                                            return (
-                                                <button
-                                                    key={d}
-                                                    onClick={() => toggleShareDept(d)}
-                                                    className={`text-[11px] px-2.5 py-0.5 rounded-full border transition-colors ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-gray-200 text-gray-700 hover:border-indigo-300'}`}
-                                                >
-                                                    {d}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                    <p className="text-[10px] text-gray-500 italic mt-1">
-                                        Si seleccionas algún departamento, su jefe verá este escenario en su vista.
-                                    </p>
-                                </div>
-                            )}
-                        </div>
+                <div className="border-t bg-gray-50 px-5 py-3 flex items-center gap-2">
+                    {canEdit && (
+                        <Button variant="outline" size="sm" onClick={reset} className="gap-1.5 text-xs">
+                            <RotateCcw size={12} /> Limpiar
+                        </Button>
                     )}
-                    <div className="px-5 py-3 flex items-center gap-2">
-                        {canEdit && (
-                            <>
-                                <Button variant="outline" size="sm" onClick={reset} className="gap-1.5 text-xs">
-                                    <RotateCcw size={12} /> Limpiar
-                                </Button>
-                                {isDirty && !showSaveInput && (
-                                    <Button variant="outline" size="sm" onClick={() => { setSaveName(draft.name || ''); setShowSaveInput(true); }} className="gap-1.5 text-xs">
-                                        <Save size={12} /> Guardar como…
-                                    </Button>
-                                )}
-                            </>
-                        )}
-                        <div className="flex-1" />
-                        <Button variant="outline" size="sm" onClick={dismiss} className="text-xs">{canEdit ? 'Cancelar' : 'Cerrar'}</Button>
-                        {canEdit && (
-                            <Button size="sm" onClick={handleApply} disabled={!isDirty} className="gap-1.5 text-xs">
-                                <Check size={12} /> Aplicar
-                            </Button>
-                        )}
-                    </div>
+                    <div className="flex-1" />
+                    <Button variant="outline" size="sm" onClick={dismiss} className="text-xs">{canEdit ? 'Cancelar' : 'Cerrar'}</Button>
+                    {canEdit && (
+                        <Button size="sm" onClick={handleApply} disabled={!isDirty} className="gap-1.5 text-xs">
+                            <Check size={12} /> Aplicar
+                        </Button>
+                    )}
                 </div>
             </aside>
         </>
