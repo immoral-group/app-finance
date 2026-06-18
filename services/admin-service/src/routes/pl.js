@@ -1569,4 +1569,97 @@ router.get('/cost-per-hour/:year/:dept', async (req, res) => {
     }
 });
 
+// ================================================
+// FORECAST SCENARIOS — biblioteca persistente
+// ================================================
+
+/**
+ * GET /pl/scenarios?dept=X
+ * Lista todos los escenarios. Si se pasa ?dept=X, filtra los compartidos con ese depto.
+ */
+router.get('/scenarios', async (req, res) => {
+    const { dept } = req.query;
+    try {
+        let query = supabase
+            .from('forecast_scenarios')
+            .select('*')
+            .order('created_at', { ascending: false });
+        if (dept) query = query.contains('shared_with_depts', [dept]);
+        const { data, error } = await query;
+        if (error) throw error;
+        res.json({ scenarios: data || [] });
+    } catch (err) {
+        console.error('Error fetching scenarios:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /pl/scenarios
+ * Crea un escenario nuevo. body: { name, scenario, shared_with_depts }
+ */
+router.post('/scenarios', async (req, res) => {
+    const { name, scenario, shared_with_depts } = req.body;
+    if (!name || !scenario) return res.status(400).json({ error: 'name and scenario are required' });
+    try {
+        const { userId, userEmail } = extractUser(req);
+        const { data, error } = await supabase
+            .from('forecast_scenarios')
+            .insert({
+                name,
+                scenario,
+                shared_with_depts: Array.isArray(shared_with_depts) ? shared_with_depts : [],
+                created_by: userId,
+                created_by_email: userEmail,
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        res.json({ scenario: data });
+    } catch (err) {
+        console.error('Error creating scenario:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * PATCH /pl/scenarios/:id
+ * Actualiza nombre, escenario o sharing.
+ */
+router.patch('/scenarios/:id', async (req, res) => {
+    const { name, scenario, shared_with_depts } = req.body;
+    const updates = { updated_at: new Date().toISOString() };
+    if (name !== undefined) updates.name = name;
+    if (scenario !== undefined) updates.scenario = scenario;
+    if (shared_with_depts !== undefined) updates.shared_with_depts = Array.isArray(shared_with_depts) ? shared_with_depts : [];
+    try {
+        const { error } = await supabase
+            .from('forecast_scenarios')
+            .update(updates)
+            .eq('id', req.params.id);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error updating scenario:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * DELETE /pl/scenarios/:id
+ */
+router.delete('/scenarios/:id', async (req, res) => {
+    try {
+        const { error } = await supabase
+            .from('forecast_scenarios')
+            .delete()
+            .eq('id', req.params.id);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error deleting scenario:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 export default router;

@@ -11,6 +11,8 @@ import {
     ReferenceLine
 } from 'recharts';
 import { CommentModal, ForecastInfoModal } from '@/features/pl/PLMatrix';
+import { ForecastScenariosModal, resolveMultiplier, isScenarioEmpty, scenarioSummary, type ForecastScenario, type SavedScenario } from '@/features/pl/ForecastScenarios';
+import { Sparkles } from 'lucide-react';
 import { useUrlState } from '@/hooks/useUrlState';
 import NutfruitBudget from './NutfruitBudget';
 import IcexBudget from './IcexBudget';
@@ -162,6 +164,18 @@ export default function DepartmentPL() {
     const [bannerMonth, setBannerMonth] = useState<number | 'ytd'>('ytd');
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen') === '1');
+    const [scenarioOpen, setScenarioOpen] = useState(false);
+    const [activeScenario, setActiveScenario] = useState<ForecastScenario | null>(null);
+
+    // Escenarios compartidos con este depto (solo lectura)
+    const { data: scenariosData } = useQuery({
+        queryKey: ['forecast-scenarios', deptLabel],
+        queryFn: () => adminApi.getForecastScenarios(deptLabel),
+        enabled: !!deptLabel,
+        staleTime: 30000,
+    });
+    const sharedScenarios: SavedScenario[] = scenariosData?.scenarios || [];
+    const sharedScenariosCount = sharedScenarios.length;
     const openForecastInfo = () => {
         setForecastInfoOpen(true);
         if (!forecastInfoSeen) {
@@ -637,7 +651,12 @@ export default function DepartmentPL() {
     };
 
     const getCellValue = (section: string, dept: string, item: string, monthIdx: number): number => {
-        return cellValues[getCellKey(section, dept, item, monthIdx)] || 0;
+        const base = cellValues[getCellKey(section, dept, item, monthIdx)] || 0;
+        const tabAllows = activeTab === 'Forecast' || activeTab === 'Presupuesto';
+        if (!tabAllows || !activeScenario) return base;
+        const mult = resolveMultiplier(activeScenario, section, dept, monthIdx);
+        if (mult === 1) return base;
+        return Math.round(base * mult * 100) / 100;
     };
 
     const fmtCurrency = (val: number) => Math.round(val * 100) / 100;
@@ -1730,6 +1749,24 @@ export default function DepartmentPL() {
                             )}
                         </span>
                     )}
+                    {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && activeScenario && !isScenarioEmpty(activeScenario) && (
+                        <span
+                            className="ml-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white shadow"
+                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                            title={scenarioSummary(activeScenario)}
+                        >
+                            <Sparkles size={11} />
+                            <span>{activeScenario.name || 'Escenario'}</span>
+                            <span className="opacity-80 font-normal max-w-[220px] truncate">· {scenarioSummary(activeScenario)}</span>
+                            <button
+                                onClick={() => setActiveScenario(null)}
+                                className="ml-1 h-4 w-4 rounded-full bg-white/20 hover:bg-white/35 inline-flex items-center justify-center"
+                                title="Volver a la vista base"
+                            >
+                                <X size={10} />
+                            </button>
+                        </span>
+                    )}
                 </h1>
                 <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                     {TABS.map(tab => (
@@ -1752,6 +1789,22 @@ export default function DepartmentPL() {
                 <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year + 1)}>
                     {year + 1} →
                 </Button>
+                {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && sharedScenariosCount > 0 && (
+                    <Button
+                        size="sm"
+                        onClick={() => setScenarioOpen(true)}
+                        className="relative gap-1 h-7 text-xs text-white border-0 shadow-md ml-2"
+                        style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
+                    >
+                        <Sparkles size={12} /> Escenarios
+                        <span
+                            className="ml-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-white text-indigo-700 text-[10px] font-bold shadow-sm"
+                            title={`${sharedScenariosCount} compartido${sharedScenariosCount > 1 ? 's' : ''}`}
+                        >
+                            {sharedScenariosCount}
+                        </span>
+                    </Button>
+                )}
                 {activeTab !== 'Dashboard' && activeTab !== 'Solicitudes' && (
                     <Button size="sm" className="gap-1 ml-2 h-7 text-xs">
                         <Download size={12} />
@@ -2349,6 +2402,20 @@ export default function DepartmentPL() {
             {renderHeader(`P&L ${deptLabel.toUpperCase()} — ${activeTab === 'Real' ? 'REAL' : activeTab === 'Forecast' ? 'FORECAST' : 'PRESUPUESTO'} ${year}`)}
 
             {forecastInfoOpen && <ForecastInfoModal onClose={() => setForecastInfoOpen(false)} />}
+            {scenarioOpen && (
+                <ForecastScenariosModal
+                    initial={activeScenario}
+                    revenueDepts={deptNames}
+                    expenseDepts={deptNames}
+                    savedList={sharedScenarios}
+                    canEdit={false}
+                    shareableDepts={[]}
+                    onApply={(s) => setActiveScenario(isScenarioEmpty(s) ? null : s)}
+                    onSave={() => { /* dept heads no pueden guardar */ }}
+                    onDelete={() => { /* dept heads no pueden borrar */ }}
+                    onClose={() => setScenarioOpen(false)}
+                />
+            )}
 
             {/* Spreadsheet (read-only) */}
             <div className="overflow-x-auto px-2">

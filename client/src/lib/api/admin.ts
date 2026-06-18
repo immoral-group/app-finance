@@ -249,6 +249,29 @@ export const adminApi = {
         });
     },
 
+    // Forecast scenarios
+    getForecastScenarios: (dept?: string) => {
+        const qs = dept ? `?dept=${encodeURIComponent(dept)}` : '';
+        return fetchApi<{ scenarios: any[] }>(`/pl/scenarios${qs}`);
+    },
+    saveForecastScenario: (data: { name: string; scenario: any; shared_with_depts?: string[] }) => {
+        return fetchApi<{ scenario: any }>(`/pl/scenarios`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
+    updateForecastScenario: (id: string, data: { name?: string; scenario?: any; shared_with_depts?: string[] }) => {
+        return fetchApi(`/pl/scenarios/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+    },
+    deleteForecastScenario: (id: string) => {
+        return fetchApi(`/pl/scenarios/${id}`, {
+            method: 'DELETE',
+        });
+    },
+
     // Chat IA
     sendChatMessage: (data: {
         message: string;

@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
-import { ForecastScenariosModal, resolveMultiplier, isScenarioEmpty, scenarioSummary, type ForecastScenario } from './ForecastScenarios';
+import { ForecastScenariosModal, resolveMultiplier, isScenarioEmpty, scenarioSummary, type ForecastScenario, type SavedScenario } from './ForecastScenarios';
 
 const TABS = ['Real', 'Presupuesto', 'Comparación', 'Forecast'] as const;
 type TabType = typeof TABS[number];
@@ -413,8 +413,43 @@ export default function PLMatrix() {
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen') === '1');
     const [scenarioOpen, setScenarioOpen] = useState(false);
-    const [activeScenario, setActiveScenario] = useState<ForecastScenario | null>(null);
+    // Escenario independiente por pestaña (Forecast / Presupuesto). Cada uno guarda su propia simulación.
+    const [forecastScenario, setForecastScenario] = useState<ForecastScenario | null>(null);
+    const [budgetScenario, setBudgetScenario] = useState<ForecastScenario | null>(null);
+    const activeScenario = activeTab === 'Forecast' ? forecastScenario : activeTab === 'Presupuesto' ? budgetScenario : null;
+    const setActiveScenario = (s: ForecastScenario | null) => {
+        if (activeTab === 'Forecast') setForecastScenario(s);
+        else if (activeTab === 'Presupuesto') setBudgetScenario(s);
+    };
     const [scenarioBtnSeen, setScenarioBtnSeen] = useState(() => localStorage.getItem('forecast_scenarios_seen') === '1');
+
+    // Biblioteca de escenarios (DB)
+    const { data: scenariosData } = useQuery({
+        queryKey: ['forecast-scenarios'],
+        queryFn: () => adminApi.getForecastScenarios(),
+        staleTime: 30000,
+    });
+    const savedScenarios: SavedScenario[] = scenariosData?.scenarios || [];
+    const savedScenariosCount = savedScenarios.length;
+
+    const saveScenarioMutation = useMutation({
+        mutationFn: (payload: { name: string; scenario: ForecastScenario; shared_with_depts: string[] }) =>
+            adminApi.saveForecastScenario(payload),
+        onSuccess: (_, vars) => {
+            queryClient.invalidateQueries({ queryKey: ['forecast-scenarios'] });
+            toast.success(`Escenario "${vars.name}" guardado`);
+        },
+        onError: (err: any) => toast.error(err?.message || 'Error al guardar escenario'),
+    });
+
+    const deleteScenarioMutation = useMutation({
+        mutationFn: (id: string) => adminApi.deleteForecastScenario(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['forecast-scenarios'] });
+            toast.success('Escenario eliminado');
+        },
+        onError: () => toast.error('Error al eliminar escenario'),
+    });
     const openScenarioPanel = () => {
         setScenarioOpen(true);
         if (!scenarioBtnSeen) {
@@ -722,7 +757,8 @@ export default function PLMatrix() {
 
     const getCellValue = (section: string, dept: string, item: string, monthIdx: number): CellData => {
         const base = cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 };
-        if (activeTab !== 'Forecast' || !activeScenario) return base;
+        const tabAllowsScenario = activeTab === 'Forecast' || activeTab === 'Presupuesto';
+        if (!tabAllowsScenario || !activeScenario) return base;
         const mult = resolveMultiplier(activeScenario, section, dept, monthIdx);
         if (mult === 1) return base;
         return { ...base, value: Math.round(base.value * mult * 100) / 100 };
@@ -1066,7 +1102,7 @@ export default function PLMatrix() {
         const saveSection = section === 'revenue' ? 'revenue' : 'expense';
         const sectionKeyForSave = section === 'revenue' ? undefined : section;
         const currentVal = cell.value;
-        const scenarioActive = activeTab === 'Forecast' && !!activeScenario && !isScenarioEmpty(activeScenario);
+        const scenarioActive = (activeTab === 'Forecast' || activeTab === 'Presupuesto') && !!activeScenario && !isScenarioEmpty(activeScenario);
 
         if (scenarioActive) {
             const mult = resolveMultiplier(activeScenario, section, dept, monthIdx);
@@ -1118,7 +1154,7 @@ export default function PLMatrix() {
     const renderRevenueRows = () => {
         const rows: React.ReactNode[] = [];
         // Budget tab: always editable. Real tab: only editable for past years (manual entry)
-        const scenarioActive = activeTab === 'Forecast' && !!activeScenario && !isScenarioEmpty(activeScenario);
+        const scenarioActive = (activeTab === 'Forecast' || activeTab === 'Presupuesto') && !!activeScenario && !isScenarioEmpty(activeScenario);
         const isRevenueEditable = !scenarioActive && (activeTab === 'Presupuesto' || activeTab === 'Forecast' || (activeTab === 'Real' && isPastYear));
         mergedRevenueStructure.forEach((group, groupIdx) => {
             group.services.forEach((service, serviceIdx) => {
@@ -1384,7 +1420,7 @@ export default function PLMatrix() {
                                 )}
                             </span>
                         )}
-                        {activeTab === 'Forecast' && activeScenario && !isScenarioEmpty(activeScenario) && (
+                        {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && activeScenario && !isScenarioEmpty(activeScenario) && (
                             <span
                                 className="ml-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white shadow"
                                 style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
@@ -1419,7 +1455,7 @@ export default function PLMatrix() {
                 <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year - 1)}>← {year - 1}</Button>
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year + 1)}>{year + 1} →</Button>
-                    {activeTab === 'Forecast' && (
+                    {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && (
                         <div className="relative inline-flex items-center">
                             {!scenarioBtnSeen && (
                                 <>
@@ -1434,6 +1470,14 @@ export default function PLMatrix() {
                                 style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
                             >
                                 <Sparkles size={12} className={scenarioBtnSeen ? '' : 'animate-pulse'} /> Escenarios
+                                {savedScenariosCount > 0 && (
+                                    <span
+                                        className="ml-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-white text-indigo-700 text-[10px] font-bold shadow-sm"
+                                        title={`${savedScenariosCount} escenario${savedScenariosCount > 1 ? 's' : ''} guardado${savedScenariosCount > 1 ? 's' : ''}`}
+                                    >
+                                        {savedScenariosCount}
+                                    </span>
+                                )}
                             </Button>
                             {!scenarioBtnSeen && (
                                 <span
@@ -1473,17 +1517,32 @@ export default function PLMatrix() {
             )}
 
             {/* Panel Escenarios Forecast */}
-            {scenarioOpen && (
-                <ForecastScenariosModal
-                    initial={activeScenario}
-                    revenueDepts={Array.from(new Set(mergedRevenueStructure.map(g => g.dept)))}
-                    expenseDepts={Array.from(new Set(
-                        Object.values(mergedExpenseStructure).flatMap((arr: any[]) => arr.map(g => g.dept))
-                    ))}
-                    onApply={(s) => setActiveScenario(isScenarioEmpty(s) ? null : s)}
-                    onClose={() => setScenarioOpen(false)}
-                />
-            )}
+            {scenarioOpen && (() => {
+                const revenueDepts = Array.from(new Set(mergedRevenueStructure.map(g => g.dept)));
+                const expenseDepts = Array.from(new Set(
+                    Object.values(mergedExpenseStructure).flatMap((arr: any[]) => arr.map(g => g.dept))
+                ));
+                const allDepts = Array.from(new Set([...revenueDepts, ...expenseDepts])).sort();
+                return (
+                    <ForecastScenariosModal
+                        initial={activeScenario}
+                        revenueDepts={revenueDepts}
+                        expenseDepts={expenseDepts}
+                        savedList={savedScenarios}
+                        canEdit={true}
+                        shareableDepts={allDepts}
+                        onApply={(s) => setActiveScenario(isScenarioEmpty(s) ? null : s)}
+                        onSave={(name, scenario, shared_with_depts) =>
+                            saveScenarioMutation.mutate({ name, scenario, shared_with_depts })
+                        }
+                        onDelete={(id, name) => {
+                            if (!confirm(`¿Eliminar "${name}"?`)) return;
+                            deleteScenarioMutation.mutate(id);
+                        }}
+                        onClose={() => setScenarioOpen(false)}
+                    />
+                );
+            })()}
 
             {/* Context Menu (right-click) */}
             {contextMenu && (
