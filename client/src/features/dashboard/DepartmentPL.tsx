@@ -38,7 +38,7 @@ function PremiumTooltip({ active, payload, label, formatter }: any) {
     );
 }
 
-const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Real Estimado', 'Comparación', 'Solicitudes'] as const;
+const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Real Estimado', 'Solicitudes'] as const;
 type TabType = typeof TABS[number];
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',

@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
 
-const TABS = ['Real', 'Presupuesto', 'Real Estimado', 'Comparación'] as const;
+const TABS = ['Real', 'Presupuesto', 'Comparación', 'Real Estimado'] as const;
 type TabType = typeof TABS[number];
 type StructureGroup = { dept: string; items?: string[]; services?: string[] };
 
