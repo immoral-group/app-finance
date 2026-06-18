@@ -11,7 +11,7 @@ import {
     ReferenceLine
 } from 'recharts';
 import { CommentModal, ForecastInfoModal } from '@/features/pl/PLMatrix';
-import { ForecastScenariosModal, resolveMultiplier, isScenarioEmpty, scenarioSummary, type ForecastScenario, type SavedScenario } from '@/features/pl/ForecastScenarios';
+import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, scenarioSummary, type ForecastScenario, type SavedScenario } from '@/features/pl/ForecastScenarios';
 import { Sparkles } from 'lucide-react';
 import { useUrlState } from '@/hooks/useUrlState';
 import NutfruitBudget from './NutfruitBudget';
@@ -1743,9 +1743,12 @@ export default function DepartmentPL() {
                                 <InfoIcon size={15} />
                             </button>
                             {!forecastInfoSeen && (
-                                <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2.5 py-0.5 text-[10px] font-semibold text-white shadow-md animate-bounce">
-                                    Léeme 👈
-                                </span>
+                                <NewFeatureBubble
+                                    title="Qué es Forecast"
+                                    description="Lee cómo se proyecta el cierre de año"
+                                    onDismiss={() => { localStorage.setItem('forecast_info_seen', '1'); setForecastInfoSeen(true); }}
+                                    position="right"
+                                />
                             )}
                         </span>
                     )}

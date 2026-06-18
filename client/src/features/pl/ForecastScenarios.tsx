@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { X, Sparkles, RotateCcw, Check, Trash2, Bookmark, Users, Pencil } from 'lucide-react';
+import { X, Sparkles, RotateCcw, Check, Trash2, Bookmark, Users, Pencil, Wand2, CalendarRange, SlidersHorizontal, Save as SaveIcon } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
 // ============================================================
@@ -8,6 +8,66 @@ import { Button } from '@/components/ui/Button';
 
 export const SCENARIO_STEPS = [-30, -25, -20, -15, -10, -5, 0, 5, 10, 15, 20, 25, 30] as const;
 export type ScenarioStep = typeof SCENARIO_STEPS[number];
+
+// Hubs disponibles para compartir escenarios
+export const HUBS = ['Immedia', 'Imcontent', 'Immoralia', 'Imsales'] as const;
+
+// ============================================================
+// NewFeatureBubble — callout reutilizable para anunciar funciones nuevas
+// ============================================================
+export const NewFeatureBubble = ({
+    title,
+    description,
+    onDismiss,
+    position = 'bottom',
+}: {
+    title: string;
+    description?: string;
+    onDismiss: () => void;
+    position?: 'bottom' | 'right';
+}) => {
+    const isBottom = position === 'bottom';
+    return (
+        <div
+            className={`absolute z-30 pointer-events-auto ${isBottom ? 'top-full mt-2.5 left-1/2 -translate-x-1/2' : 'left-full ml-2.5 top-1/2 -translate-y-1/2'}`}
+            style={{ animation: 'pl-bubble-float 2.6s ease-in-out infinite' }}
+        >
+            {/* Cola */}
+            <span
+                aria-hidden
+                className={`absolute w-2.5 h-2.5 rotate-45 ${isBottom ? 'left-1/2 -translate-x-1/2 -top-1' : 'top-1/2 -translate-y-1/2 -left-1'}`}
+                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+            />
+            {/* Burbuja */}
+            <div
+                className="relative rounded-xl px-3.5 py-2.5 shadow-2xl ring-1 ring-white/20 flex items-start gap-2.5 whitespace-nowrap"
+                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
+            >
+                <span className="flex-shrink-0 mt-0.5 h-5 w-5 rounded-full bg-white/20 flex items-center justify-center">
+                    <Sparkles size={11} className="text-white" />
+                </span>
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] font-extrabold tracking-widest text-white bg-white/20 px-1.5 py-0.5 rounded">NUEVO</span>
+                        <span className="text-[12px] font-bold text-white">{title}</span>
+                    </div>
+                    {description && (
+                        <div className="text-[10.5px] text-white/85 mt-0.5 leading-snug">{description}</div>
+                    )}
+                </div>
+                <button
+                    onClick={onDismiss}
+                    className="flex-shrink-0 h-5 w-5 rounded-full bg-white/15 hover:bg-white/30 flex items-center justify-center text-white transition-colors"
+                    title="Cerrar"
+                >
+                    <X size={10} />
+                </button>
+            </div>
+            {/* Animación inyectada una sola vez */}
+            <style>{`@keyframes pl-bubble-float { 0%,100% { transform: translate(${isBottom ? '-50%' : '0'}, ${isBottom ? '0' : '-50%'}); } 50% { transform: translate(${isBottom ? '-50%' : '0'}, ${isBottom ? '-3px' : 'calc(-50% - 3px)'}); } }`}</style>
+        </div>
+    );
+};
 
 const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -248,8 +308,12 @@ export const ForecastScenariosModal = ({
     const [draft, setDraft] = useState<ForecastScenario>(() => initial ? structuredClone(initial) : structuredClone(EMPTY_SCENARIO));
     const [leaving, setLeaving] = useState(false);
     const [loadedFromId, setLoadedFromId] = useState<string | null>(null);
-    // Edicion inline de un item guardado: { id, name, depts }
     const [editing, setEditing] = useState<{ id: string; name: string; depts: string[] } | null>(null);
+    const [showGuide, setShowGuide] = useState(() => localStorage.getItem('scenarios_guide_seen') !== '1');
+    const dismissGuide = () => {
+        localStorage.setItem('scenarios_guide_seen', '1');
+        setShowGuide(false);
+    };
 
     const handleLoadSaved = (s: SavedScenario) => {
         setDraft(structuredClone(s.scenario));
@@ -331,6 +395,52 @@ export const ForecastScenariosModal = ({
 
                 {/* Cuerpo scrolleable */}
                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+                    {/* QUICK GUIDE — primera vez */}
+                    {canEdit && showGuide && (
+                        <section className="relative rounded-xl overflow-hidden ring-1 ring-indigo-100 shadow-sm">
+                            <div
+                                className="absolute inset-0 opacity-[0.08] pointer-events-none"
+                                style={{ background: 'radial-gradient(circle at 20% 20%, #6366f1, transparent 50%), radial-gradient(circle at 80% 80%, #ec4899, transparent 50%)' }}
+                            />
+                            <div className="relative bg-white/95 backdrop-blur p-3">
+                                <div className="flex items-start justify-between mb-2">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] font-extrabold tracking-widest text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded">CÓMO FUNCIONA</span>
+                                        <span className="text-xs font-bold text-gray-800">En 4 pasos</span>
+                                    </div>
+                                    <button
+                                        onClick={dismissGuide}
+                                        className="h-5 w-5 rounded-full hover:bg-gray-100 inline-flex items-center justify-center text-gray-400 hover:text-gray-700 transition-colors"
+                                        title="Ocultar guía"
+                                    >
+                                        <X size={11} />
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                        { n: 1, icon: <Wand2 size={12} />, title: 'Elige plantilla o crea', desc: 'Presets rápidos o ajustes a medida.' },
+                                        { n: 2, icon: <CalendarRange size={12} />, title: 'Define el rango', desc: 'Solo afecta los meses que elijas.' },
+                                        { n: 3, icon: <SlidersHorizontal size={12} />, title: 'Ajusta ingresos / gastos', desc: '±5% a ±30% global o por dept/categoría.' },
+                                        { n: 4, icon: <SaveIcon size={12} />, title: 'Aplica y guarda', desc: 'Mira el resultado y guarda desde el chip.' },
+                                    ].map(step => (
+                                        <div key={step.n} className="flex items-start gap-2 rounded-lg border border-gray-100 bg-white px-2 py-1.5">
+                                            <span className="flex-shrink-0 mt-0.5 h-5 w-5 rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-white text-[10px] font-bold inline-flex items-center justify-center shadow-sm">
+                                                {step.n}
+                                            </span>
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-800">
+                                                    <span className="text-indigo-600">{step.icon}</span>
+                                                    {step.title}
+                                                </div>
+                                                <div className="text-[10px] text-gray-500 leading-tight">{step.desc}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
+                    )}
+
                     {/* MIS ESCENARIOS GUARDADOS */}
                     {savedList.length > 0 && (
                         <section>
@@ -355,7 +465,7 @@ export const ForecastScenariosModal = ({
                                                 {shareableDepts.length > 0 && (
                                                     <div>
                                                         <div className="flex items-center gap-1 text-[10px] font-semibold text-gray-600 mb-1">
-                                                            <Users size={10} /> Compartir con:
+                                                            <Users size={10} /> Compartir con Hubs:
                                                         </div>
                                                         <div className="flex flex-wrap gap-1">
                                                             {shareableDepts.map(d => {

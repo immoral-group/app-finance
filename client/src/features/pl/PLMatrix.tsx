@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
-import { ForecastScenariosModal, resolveMultiplier, isScenarioEmpty, scenarioSummary, type ForecastScenario, type SavedScenario } from './ForecastScenarios';
+import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, scenarioSummary, HUBS, type ForecastScenario, type SavedScenario } from './ForecastScenarios';
 
 const TABS = ['Real', 'Presupuesto', 'Comparación', 'Forecast'] as const;
 type TabType = typeof TABS[number];
@@ -360,6 +360,91 @@ export const ForecastInfoModal = ({ onClose }: { onClose: () => void }) => {
     );
 };
 
+// ── Welcome P&L Matrix — destaca las pestañas Presupuesto y Forecast ─────────
+const PLMatrixWelcome = ({ onClose }: { onClose: () => void }) => {
+    const [leaving, setLeaving] = useState(false);
+    const dismiss = () => { setLeaving(true); setTimeout(onClose, 220); };
+    return (
+        <>
+            <div
+                className={`fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm transition-opacity duration-200 ${leaving ? 'opacity-0' : 'opacity-100'}`}
+                onClick={dismiss}
+            />
+            <div
+                className={`fixed z-[202] left-1/2 top-1/2 w-full max-w-2xl px-4 transition-all duration-300 ${leaving ? 'opacity-0 -translate-x-1/2 -translate-y-[46%]' : 'opacity-100 -translate-x-1/2 -translate-y-1/2'}`}
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10">
+                    {/* Header gradiente */}
+                    <div
+                        className="relative px-6 pt-7 pb-6 text-center"
+                        style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
+                    >
+                        <button onClick={dismiss} className="absolute top-3 right-3 h-7 w-7 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors">
+                            <X size={14} />
+                        </button>
+                        <div className="inline-flex items-center gap-1.5 text-[10px] font-extrabold tracking-widest uppercase text-white/80 bg-white/15 rounded-full px-2.5 py-0.5">
+                            <Sparkles size={11} /> Nuevas pestañas
+                        </div>
+                        <h2 className="mt-3 text-xl font-extrabold text-white">Presupuesto y Forecast</h2>
+                        <p className="text-xs text-white/85 mt-1.5 leading-relaxed max-w-md mx-auto">
+                            Dos miradas distintas sobre el mismo año. Aprende cuándo usar cada una.
+                        </p>
+                    </div>
+                    {/* Body: dos tarjetas comparativas */}
+                    <div className="bg-white px-5 py-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="rounded-xl border-2 border-emerald-100 bg-gradient-to-br from-emerald-50/60 to-white p-3.5 relative">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="h-8 w-8 rounded-lg bg-emerald-100 flex items-center justify-center text-lg">🎯</span>
+                                <div>
+                                    <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Presupuesto</div>
+                                    <div className="text-sm font-extrabold text-gray-900">El objetivo</div>
+                                </div>
+                            </div>
+                            <p className="text-[11.5px] text-gray-600 leading-relaxed">
+                                Lo que <span className="font-semibold text-gray-900">queremos lograr</span> este año. Una meta de facturación y gastos definida a principio de año.
+                            </p>
+                            <div className="mt-2 text-[10.5px] text-emerald-700 font-semibold">
+                                ✓ Editable · Comparable contra Real
+                            </div>
+                        </div>
+                        <div className="rounded-xl border-2 border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-white p-3.5 relative">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="h-8 w-8 rounded-lg bg-indigo-100 flex items-center justify-center text-lg">🔮</span>
+                                <div>
+                                    <div className="text-[10px] font-bold uppercase tracking-wide text-indigo-700">Forecast</div>
+                                    <div className="text-sm font-extrabold text-gray-900">La proyección</div>
+                                </div>
+                            </div>
+                            <p className="text-[11.5px] text-gray-600 leading-relaxed">
+                                Cómo <span className="font-semibold text-gray-900">cerraríamos el año</span> si seguimos al ritmo actual de facturación y gastos. Realista, no aspiracional.
+                            </p>
+                            <div className="mt-2 text-[10.5px] text-indigo-700 font-semibold">
+                                ✓ Editable · Soporta escenarios "¿qué pasaría si…?"
+                            </div>
+                        </div>
+                    </div>
+                    {/* Diferencia clave */}
+                    <div className="bg-gradient-to-r from-indigo-50/50 to-fuchsia-50/50 border-t border-gray-100 px-5 py-3 text-center">
+                        <p className="text-[11.5px] text-gray-700 leading-relaxed">
+                            <span className="font-bold text-gray-900">La clave:</span> Presupuesto = lo que quieres lograr. Forecast = a dónde te lleva tu ritmo actual.
+                        </p>
+                    </div>
+                    <div className="bg-white px-5 py-3 flex items-center justify-end gap-2 border-t border-gray-100">
+                        <button
+                            onClick={dismiss}
+                            className="px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all active:scale-95 shadow-md"
+                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                        >
+                            Entendido, ¡a explorar!
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </>
+    );
+};
+
 const CellInput = ({
     initialValue,
     onSave,
@@ -412,6 +497,7 @@ export default function PLMatrix() {
     const [cellValues, setCellValues] = useState<Record<string, CellData>>({});
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen') === '1');
+    const [welcomeOpen, setWelcomeOpen] = useState(() => localStorage.getItem('pl_matrix_welcome_seen') !== '1');
     const [scenarioOpen, setScenarioOpen] = useState(false);
     // Escenario independiente por pestaña (Forecast / Presupuesto). Cada uno guarda su propia simulación.
     const [forecastScenario, setForecastScenario] = useState<ForecastScenario | null>(null);
@@ -1443,9 +1529,12 @@ export default function PLMatrix() {
                                     <Info size={15} />
                                 </button>
                                 {!forecastInfoSeen && (
-                                    <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2.5 py-0.5 text-[10px] font-semibold text-white shadow-md animate-bounce">
-                                        Léeme 👈
-                                    </span>
+                                    <NewFeatureBubble
+                                        title="Qué es Forecast"
+                                        description="Lee cómo se proyecta el cierre de año"
+                                        onDismiss={() => { localStorage.setItem('forecast_info_seen', '1'); setForecastInfoSeen(true); }}
+                                        position="right"
+                                    />
                                 )}
                             </span>
                         )}
@@ -1475,10 +1564,7 @@ export default function PLMatrix() {
                                     </button>
                                 </span>
                                 {saveBoxOpen && (() => {
-                                    const allDepts = Array.from(new Set([
-                                        ...mergedRevenueStructure.map((g: any) => g.dept),
-                                        ...Object.values(mergedExpenseStructure).flatMap((arr: any[]) => arr.map((g: any) => g.dept)),
-                                    ])).sort();
+                                    const allDepts = [...HUBS];
                                     const fromSaved = activeFromId ? savedScenarios.find(s => s.id === activeFromId) : null;
                                     const doSave = (asNew: boolean) => {
                                         const finalName = saveName.trim() || activeScenario.name.trim() || 'Sin nombre';
@@ -1518,7 +1604,7 @@ export default function PLMatrix() {
                                                 {allDepts.length > 0 && (
                                                     <div>
                                                         <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-600 mb-1">
-                                                            <Users size={11} /> Compartir con depto (opcional)
+                                                            <Users size={11} /> Compartir con Hubs (opcional)
                                                         </div>
                                                         <div className="flex flex-wrap gap-1">
                                                             {allDepts.map(d => {
@@ -1571,10 +1657,7 @@ export default function PLMatrix() {
                     {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && (
                         <div className="relative inline-flex items-center">
                             {!scenarioBtnSeen && (
-                                <>
-                                    <span className="absolute -inset-1.5 rounded-lg bg-fuchsia-400/50 animate-ping pointer-events-none" />
-                                    <span className="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-cyan-500 opacity-75 blur-sm animate-pulse pointer-events-none" />
-                                </>
+                                <span className="absolute -inset-1 rounded-lg bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-cyan-500 opacity-60 blur-md animate-pulse pointer-events-none" />
                             )}
                             <Button
                                 size="sm"
@@ -1582,7 +1665,7 @@ export default function PLMatrix() {
                                 className="relative gap-1 h-7 text-xs text-white border-0 shadow-md"
                                 style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
                             >
-                                <Sparkles size={12} className={scenarioBtnSeen ? '' : 'animate-pulse'} /> Escenarios
+                                <Sparkles size={12} /> Escenarios
                                 {savedScenariosCount > 0 && (
                                     <span
                                         className="ml-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-white text-indigo-700 text-[10px] font-bold shadow-sm"
@@ -1593,13 +1676,12 @@ export default function PLMatrix() {
                                 )}
                             </Button>
                             {!scenarioBtnSeen && (
-                                <span
-                                    className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-3 py-1 text-[11px] font-bold text-white shadow-lg whitespace-nowrap animate-bounce pointer-events-none"
-                                    style={{ animationDuration: '1.2s' }}
-                                >
-                                    <Sparkles size={11} /> ¡Prueba escenarios!
-                                    <span className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-indigo-600 rotate-45" />
-                                </span>
+                                <NewFeatureBubble
+                                    title="Simula escenarios"
+                                    description="Qué pasa si suben los gastos o baja la facturación"
+                                    onDismiss={() => { localStorage.setItem('forecast_scenarios_seen', '1'); setScenarioBtnSeen(true); }}
+                                    position="bottom"
+                                />
                             )}
                         </div>
                     )}
@@ -1629,13 +1711,20 @@ export default function PLMatrix() {
                 <ForecastInfoModal onClose={() => setForecastInfoOpen(false)} />
             )}
 
+            {/* Welcome al P&L Matrix — primera visita */}
+            {welcomeOpen && (
+                <PLMatrixWelcome onClose={() => {
+                    localStorage.setItem('pl_matrix_welcome_seen', '1');
+                    setWelcomeOpen(false);
+                }} />
+            )}
+
             {/* Panel Escenarios Forecast */}
             {scenarioOpen && (() => {
                 const revenueDepts = Array.from(new Set(mergedRevenueStructure.map(g => g.dept)));
                 const expenseDepts = Array.from(new Set(
                     Object.values(mergedExpenseStructure).flatMap((arr: any[]) => arr.map(g => g.dept))
                 ));
-                const allDepts = Array.from(new Set([...revenueDepts, ...expenseDepts])).sort();
                 return (
                     <ForecastScenariosModal
                         initial={activeScenario}
@@ -1643,7 +1732,7 @@ export default function PLMatrix() {
                         expenseDepts={expenseDepts}
                         savedList={savedScenarios}
                         canEdit={true}
-                        shareableDepts={allDepts}
+                        shareableDepts={[...HUBS]}
                         onApply={(s, fromId) => setActiveScenario(isScenarioEmpty(s) ? null : s, fromId)}
                         onUpdate={(id, patch) => updateScenarioMutation.mutate({ id, patch })}
                         onDelete={(id, name) => {
