@@ -192,7 +192,7 @@ export const adminApi = {
     },
 
     // P&L Matrix
-    getPLMatrix: (year: number, type: 'budget' | 'real' = 'budget') => {
+    getPLMatrix: (year: number, type: 'budget' | 'real' | 'estimated' = 'budget') => {
         return fetchApi<{
             year: number;
             type: string;
@@ -209,7 +209,7 @@ export const adminApi = {
         section: string;
         section_key?: string;
         value: number;
-        type: 'budget' | 'real';
+        type: 'budget' | 'real' | 'estimated';
         comment?: string;
         assigned_to?: string[];
     }) => {
@@ -228,7 +228,7 @@ export const adminApi = {
 
     savePLNote: (data: {
         year: number;
-        view_type: 'real' | 'budget' | 'comparison' | 'dept-real' | 'dept-budget' | 'dept-comparison';
+        view_type: 'real' | 'budget' | 'comparison' | 'estimated' | 'dept-real' | 'dept-budget' | 'dept-comparison' | 'dept-estimated';
         section: string;
         dept: string;
         item: string;

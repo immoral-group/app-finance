@@ -38,7 +38,7 @@ function PremiumTooltip({ active, payload, label, formatter }: any) {
     );
 }
 
-const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Solicitudes'] as const;
+const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Real Estimado', 'Comparación', 'Solicitudes'] as const;
 type TabType = typeof TABS[number];
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -172,16 +172,20 @@ export default function DepartmentPL() {
     const [rejectNote, setRejectNote] = useState('');
     const [submitSuccess, setSubmitSuccess] = useState(false);
 
-    const typeParam = activeTab === 'Presupuesto' ? 'budget' : 'real';
+    const typeParam: 'budget' | 'real' | 'estimated' =
+        activeTab === 'Presupuesto' ? 'budget' :
+        activeTab === 'Real Estimado' ? 'estimated' :
+        'real';
 
     // ── Notes state ───────────────────────────────────────────────────────────
     // IMPORTANT: dept notes use 'dept-real'/'dept-budget'/'dept-comparison' — completely separate
     // from PLMatrix notes. Same table, different view_type per tab.
-    type DeptNoteType = 'dept-real' | 'dept-budget' | 'dept-comparison';
+    type DeptNoteType = 'dept-real' | 'dept-budget' | 'dept-comparison' | 'dept-estimated';
     const deptNoteType: DeptNoteType =
         activeTab === 'Presupuesto' ? 'dept-budget' :
-            activeTab === 'Comparación' ? 'dept-comparison' :
-                'dept-real';
+            activeTab === 'Real Estimado' ? 'dept-estimated' :
+                activeTab === 'Comparación' ? 'dept-comparison' :
+                    'dept-real';
 
     const [contextMenu, setContextMenu] = useState<{
         x: number; y: number;
@@ -399,7 +403,7 @@ export default function DepartmentPL() {
     // Fetch both for Comparación and Dashboard
     const { data: realData } = useQuery({
         queryKey: ['pl-matrix', year, 'real'],
-        queryFn: () => adminApi.getPLMatrix(year, 'real' as 'budget' | 'real'),
+        queryFn: () => adminApi.getPLMatrix(year, 'real'),
     });
 
     const { data: budgetData } = useQuery({
@@ -2314,7 +2318,7 @@ export default function DepartmentPL() {
 
     return (
         <div className="space-y-4 -mx-6 -mt-6">
-            {renderHeader(`P&L ${deptLabel.toUpperCase()} — ${activeTab === 'Real' ? 'REAL' : 'PRESUPUESTO'} ${year}`)}
+            {renderHeader(`P&L ${deptLabel.toUpperCase()} — ${activeTab === 'Real' ? 'REAL' : activeTab === 'Real Estimado' ? 'REAL ESTIMADO' : 'PRESUPUESTO'} ${year}`)}
 
             {/* Spreadsheet (read-only) */}
             <div className="overflow-x-auto px-2">

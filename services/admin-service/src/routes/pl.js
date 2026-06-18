@@ -327,7 +327,10 @@ router.get('/summary/:year', async (req, res) => {
  */
 router.get('/matrix/:year', async (req, res) => {
     const { year } = req.params;
-    const type = req.query.type || 'budget'; // 'budget' or 'real'
+    const type = req.query.type || 'budget'; // 'budget' | 'real' | 'estimated'
+    // Budget and Estimated share the same shape; only the source table changes.
+    const isBudgetLike = type === 'budget' || type === 'estimated';
+    const budgetLikeTable = type === 'estimated' ? 'estimated_lines' : 'budget_lines';
 
     try {
         const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -364,10 +367,10 @@ router.get('/matrix/:year', async (req, res) => {
 
         let sections = [];
 
-        if (type === 'budget') {
-            // BUDGET VIEW: Read from budget_lines table
+        if (isBudgetLike) {
+            // BUDGET-LIKE VIEW (budget | estimated): same shape, different source table
             const { data: budgetLines } = await supabase
-                .from('budget_lines')
+                .from(budgetLikeTable)
                 .select('*')
                 .eq('fiscal_year', year);
 
@@ -874,13 +877,16 @@ router.post('/matrix/save', async (req, res) => {
         let _plRecordId = null;
         let _plLogTable = null;
 
-        if (type === 'budget') {
-            // BUDGET SAVE
+        const isBudgetLikeSave = type === 'budget' || type === 'estimated';
+        const budgetLikeTableSave = type === 'estimated' ? 'estimated_lines' : 'budget_lines';
+
+        if (isBudgetLikeSave) {
+            // BUDGET-LIKE SAVE (budget | estimated)
             // For expense: categoryId required. For revenue: serviceId preferred but not required
             // (service name from REVENUE_STRUCTURE may not exist in services table).
             if (section !== 'revenue' && !categoryId) throw new Error(`Category not found for ${item} in ${dept}`);
 
-            let query = supabase.from('budget_lines')
+            let query = supabase.from(budgetLikeTableSave)
                 .select('id, cell_metadata, jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec')
                 .eq('fiscal_year', year)
                 .eq('department_id', departmentId)
@@ -909,23 +915,23 @@ router.post('/matrix/save', async (req, res) => {
             }
 
             if (existingLine) {
-                console.log(`[BUDGET SAVE] UPDATE existing line id=${existingLine.id}, ${monthKey}=${value}`);
-                const { error: updateErr } = await supabase.from('budget_lines')
+                console.log(`[${type.toUpperCase()} SAVE] UPDATE existing line id=${existingLine.id}, ${monthKey}=${value}`);
+                const { error: updateErr } = await supabase.from(budgetLikeTableSave)
                     .update({
                         [monthKey]: Number(value),
                         cell_metadata: newMeta,
                         notes: item
                     })
                     .eq('id', existingLine.id);
-                if (updateErr) throw new Error(`Budget update failed: ${updateErr.message}`);
+                if (updateErr) throw new Error(`${type} update failed: ${updateErr.message}`);
             } else {
                 const insertMeta = {};
                 if (comment || (assigned_to && assigned_to.length > 0)) {
                     insertMeta[monthKey] = { comment, assigned_to, updated_at: new Date().toISOString() };
                 }
 
-                console.log(`[BUDGET SAVE] INSERT new line, dept=${dept}, service_id=${serviceId}, category_id=${categoryId}, ${monthKey}=${value}`);
-                const { error: insertErr } = await supabase.from('budget_lines').insert({
+                console.log(`[${type.toUpperCase()} SAVE] INSERT new line, dept=${dept}, service_id=${serviceId}, category_id=${categoryId}, ${monthKey}=${value}`);
+                const { error: insertErr } = await supabase.from(budgetLikeTableSave).insert({
                     fiscal_year: year,
                     department_id: departmentId,
                     line_type: section === 'revenue' ? 'revenue' : 'expense',
@@ -935,11 +941,11 @@ router.post('/matrix/save', async (req, res) => {
                     notes: item,
                     cell_metadata: insertMeta
                 });
-                if (insertErr) throw new Error(`Budget insert failed: ${insertErr.message}`);
+                if (insertErr) throw new Error(`${type} insert failed: ${insertErr.message}`);
             }
 
-            // Asignar datos de log para presupuesto
-            _plLogTable = 'budget_lines';
+            // Asignar datos de log
+            _plLogTable = budgetLikeTableSave;
             _plLogOp = existingLine ? 'update' : 'create';
             _plOldVal = existingLine ? String(existingLine[monthKey] || 0) : null;
             _plRecordId = existingLine?.id || null;

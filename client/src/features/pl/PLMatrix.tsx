@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
 
-const TABS = ['Real', 'Presupuesto', 'Comparación'] as const;
+const TABS = ['Real', 'Presupuesto', 'Real Estimado', 'Comparación'] as const;
 type TabType = typeof TABS[number];
 type StructureGroup = { dept: string; items?: string[]; services?: string[] };
 
@@ -95,7 +95,7 @@ interface CellData {
 // ─── Helper: parse API data into a flat key→value map ────────────────────────
 // Uses section_key from expense rows to differentiate same-name items (e.g. David in personal vs comisiones)
 // For legacy data without section_key, maps to all matching sections in EXPENSE_STRUCTURE
-function parseMatrixData(matrixData: any, typeParam: 'real' | 'budget'): Record<string, CellData> {
+function parseMatrixData(matrixData: any, typeParam: 'real' | 'budget' | 'estimated'): Record<string, CellData> {
     const values: Record<string, CellData> = {};
     if (!matrixData?.sections) return values;
 
@@ -351,7 +351,7 @@ export default function PLMatrix() {
         dept: string,
         item: string,
         monthIdx: number,
-        viewType: 'budget' | 'real' | 'comparison'
+        viewType: 'budget' | 'real' | 'comparison' | 'estimated'
     } | null>(null);
 
     const [editingComment, setEditingComment] = useState<{
@@ -362,7 +362,7 @@ export default function PLMatrix() {
         monthIdx: number,
         initialValue: string,
         initialAssignedTo: string[],
-        saveType: 'budget' | 'real' | 'comparison',
+        saveType: 'budget' | 'real' | 'comparison' | 'estimated',
         noteId?: string
     } | null>(null);
 
@@ -371,7 +371,7 @@ export default function PLMatrix() {
         dept: string,
         item: string,
         monthIdx: number,
-        viewType: 'real' | 'budget' | 'comparison',
+        viewType: 'real' | 'budget' | 'comparison' | 'estimated',
         x: number,
         y: number
     } | null>(null);
@@ -390,7 +390,10 @@ export default function PLMatrix() {
     });
     const users = usersData?.users || [];
 
-    const typeParam = activeTab === 'Presupuesto' ? 'budget' : 'real';
+    const typeParam: 'budget' | 'real' | 'estimated' =
+        activeTab === 'Presupuesto' ? 'budget' :
+        activeTab === 'Real Estimado' ? 'estimated' :
+        'real';
 
     // ── Queries ──────────────────────────────────────────────────────────────
     const { data: matrixData, isLoading: _loadingMatrix } = useQuery({
@@ -568,7 +571,7 @@ export default function PLMatrix() {
         const currentKey = JSON.stringify([year, typeParam]);
         if (prevMatrixRef.current === currentKey) return;
         prevMatrixRef.current = currentKey;
-        const newValues = parseMatrixData(matrixData, typeParam as 'real' | 'budget');
+        const newValues = parseMatrixData(matrixData, typeParam);
         // Replace entirely when year or type changes to avoid stale values bleeding across years
         setCellValues(newValues);
     }, [matrixData, typeParam, year]);
@@ -585,7 +588,10 @@ export default function PLMatrix() {
     // marks it as "seen", and the subsequent fresh network response is skipped —
     // causing saved values to disappear until the user leaves and re-enters.
     const handleTabChange = (tab: TabType) => {
-        const targetType = tab === 'Presupuesto' ? 'budget' : tab === 'Real' ? 'real' : null;
+        const targetType =
+            tab === 'Presupuesto' ? 'budget' :
+            tab === 'Real Estimado' ? 'estimated' :
+            tab === 'Real' ? 'real' : null;
         if (targetType) {
             queryClient.removeQueries({ queryKey: ['pl-matrix', year, targetType] });
         }
@@ -690,17 +696,17 @@ export default function PLMatrix() {
         });
     };
 
-    const handleContextMenu = (e: React.MouseEvent, section: string, dept: string, item: string, monthIdx: number, viewType?: 'budget' | 'real' | 'comparison') => {
+    const handleContextMenu = (e: React.MouseEvent, section: string, dept: string, item: string, monthIdx: number, viewType?: 'budget' | 'real' | 'comparison' | 'estimated') => {
         e.preventDefault();
         setContextMenu({
             x: e.clientX,
             y: e.clientY,
             section, dept, item, monthIdx,
-            viewType: viewType || (activeTab === 'Comparación' ? 'comparison' : typeParam as 'budget' | 'real')
+            viewType: viewType || (activeTab === 'Comparación' ? 'comparison' : typeParam)
         });
     };
 
-    const openCommentModal = (section: string, dept: string, item: string, monthIdx: number, viewType: 'budget' | 'real' | 'comparison') => {
+    const openCommentModal = (section: string, dept: string, item: string, monthIdx: number, viewType: 'budget' | 'real' | 'comparison' | 'estimated') => {
         const normalizedSection = section === 'revenue' ? 'revenue' : 'expense';
         const existingNote = getCellNote(viewType, normalizedSection, dept, item, monthIdx);
         setEditingComment({
@@ -713,8 +719,8 @@ export default function PLMatrix() {
         });
     };
 
-    const handleMouseEnter = (e: React.MouseEvent, section: string, dept: string, item: string, monthIdx: number, viewType?: 'real' | 'budget' | 'comparison') => {
-        const effectiveType = viewType || (activeTab === 'Comparación' ? 'comparison' : typeParam as 'real' | 'budget');
+    const handleMouseEnter = (e: React.MouseEvent, section: string, dept: string, item: string, monthIdx: number, viewType?: 'real' | 'budget' | 'comparison' | 'estimated') => {
+        const effectiveType = viewType || (activeTab === 'Comparación' ? 'comparison' : typeParam);
         const normalizedSection = section === 'revenue' ? 'revenue' : 'expense';
         const note = getCellNote(effectiveType, normalizedSection, dept, item, monthIdx);
         if (!note?.comment && (!note?.assigned_to || note.assigned_to.length === 0)) return;
@@ -964,7 +970,7 @@ export default function PLMatrix() {
         const cell = getCellValue(section, dept, item, monthIdx);
         // Notes are stored with normalized section ('revenue' or 'expense'), not the sub-section key
         const normalizedNoteSection = section === 'revenue' ? 'revenue' : 'expense';
-        const note = getCellNote(typeParam as 'real' | 'budget', normalizedNoteSection, dept, item, monthIdx);
+        const note = getCellNote(typeParam, normalizedNoteSection, dept, item, monthIdx);
         const hasNote = !!note?.comment || (note?.assigned_to && note.assigned_to.length > 0);
         const saveSection = section === 'revenue' ? 'revenue' : 'expense';
         const sectionKeyForSave = section === 'revenue' ? undefined : section;
@@ -990,7 +996,7 @@ export default function PLMatrix() {
                             section: saveSection,
                             section_key: sectionKeyForSave,
                             value: numVal,
-                            type: typeParam as 'budget' | 'real',
+                            type: typeParam,
                         });
                     }}
                 />
@@ -1004,7 +1010,7 @@ export default function PLMatrix() {
     const renderRevenueRows = () => {
         const rows: React.ReactNode[] = [];
         // Budget tab: always editable. Real tab: only editable for past years (manual entry)
-        const isRevenueEditable = activeTab === 'Presupuesto' || (activeTab === 'Real' && isPastYear);
+        const isRevenueEditable = activeTab === 'Presupuesto' || activeTab === 'Real Estimado' || (activeTab === 'Real' && isPastYear);
         mergedRevenueStructure.forEach((group, groupIdx) => {
             group.services.forEach((service, serviceIdx) => {
                 rows.push(
@@ -1249,7 +1255,7 @@ export default function PLMatrix() {
             <div className="bg-white border-b px-6 py-3 flex items-center justify-between sticky top-0 z-20">
                 <div className="flex items-center gap-4">
                     <h1 className="text-lg font-bold text-gray-900">
-                        {activeTab === 'Real' ? 'P&L REAL' : activeTab === 'Presupuesto' ? 'PRESUPUESTO' : 'COMPARACIÓN REAL vs PRESUPUESTO'} {year}
+                        {activeTab === 'Real' ? 'P&L REAL' : activeTab === 'Presupuesto' ? 'PRESUPUESTO' : activeTab === 'Real Estimado' ? 'REAL ESTIMADO' : 'COMPARACIÓN REAL vs PRESUPUESTO'} {year}
                     </h1>
                     <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                         {TABS.map(tab => (
