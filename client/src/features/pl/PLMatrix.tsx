@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
-import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil, FileSpreadsheet, FileText, Info, Sparkles, Save, Users } from 'lucide-react';
+import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil, FileSpreadsheet, FileText, Info, Sparkles, Save, Users, ChevronLeft, ChevronRight } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
@@ -360,87 +360,258 @@ export const ForecastInfoModal = ({ onClose }: { onClose: () => void }) => {
     );
 };
 
-// ── Welcome P&L Matrix — destaca las pestañas Presupuesto y Forecast ─────────
-const PLMatrixWelcome = ({ onClose }: { onClose: () => void }) => {
+// ── Tour interactivo P&L Matrix — spotlight sobre las pestañas Presupuesto y Forecast ────
+const PLMatrixTour = ({ onClose }: { onClose: () => void }) => {
+    const [step, setStep] = useState(0); // 0 intro, 1 presupuesto, 2 forecast, 3 outro
+    const [target, setTarget] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
     const [leaving, setLeaving] = useState(false);
-    const dismiss = () => { setLeaving(true); setTimeout(onClose, 220); };
+
+    const totalSteps = 4;
+
+    const computeTarget = (selector: string) => {
+        const el = document.querySelector(selector) as HTMLElement | null;
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        const pad = 6;
+        return { x: r.left - pad, y: r.top - pad, w: r.width + pad * 2, h: r.height + pad * 2 };
+    };
+
+    useEffect(() => {
+        const update = () => {
+            if (step === 1) setTarget(computeTarget('[data-tour-tab="Presupuesto"]'));
+            else if (step === 2) setTarget(computeTarget('[data-tour-tab="Forecast"]'));
+            else setTarget(null);
+        };
+        update();
+        window.addEventListener('resize', update);
+        window.addEventListener('scroll', update, true);
+        return () => {
+            window.removeEventListener('resize', update);
+            window.removeEventListener('scroll', update, true);
+        };
+    }, [step]);
+
+    const dismiss = () => {
+        setLeaving(true);
+        setTimeout(onClose, 220);
+    };
+
+    const next = () => {
+        if (step < totalSteps - 1) setStep(step + 1);
+        else dismiss();
+    };
+    const prev = () => { if (step > 0) setStep(step - 1); };
+
+    // Backdrop: si hay target, usamos box-shadow para hacer el "agujero" del spotlight.
+    // Si no, oscurecemos toda la pantalla.
+
     return (
         <>
-            <div
-                className={`fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm transition-opacity duration-200 ${leaving ? 'opacity-0' : 'opacity-100'}`}
-                onClick={dismiss}
-            />
-            <div
-                className={`fixed z-[202] left-1/2 top-1/2 w-full max-w-2xl px-4 transition-all duration-300 ${leaving ? 'opacity-0 -translate-x-1/2 -translate-y-[46%]' : 'opacity-100 -translate-x-1/2 -translate-y-1/2'}`}
-                onClick={e => e.stopPropagation()}
-            >
-                <div className="rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10">
-                    {/* Header gradiente */}
+            {/* Mesh animado de fondo */}
+            <style>{`
+                @keyframes pl-mesh { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(20px,-15px) scale(1.05)} }
+                @keyframes pl-mesh2 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(-25px,20px) scale(1.08)} }
+                @keyframes pl-tour-in { from{opacity:0; transform: translate(-50%, calc(-50% + 16px))} to{opacity:1; transform: translate(-50%, -50%)} }
+                @keyframes pl-tour-tt-in { from{opacity:0; transform: translateY(8px)} to{opacity:1; transform: translateY(0)} }
+                @keyframes pl-arrow-bob { 0%,100%{transform: translateY(0)} 50%{transform: translateY(6px)} }
+                @keyframes pl-stagger { from{opacity:0; transform: translateY(10px)} to{opacity:1; transform: translateY(0)} }
+            `}</style>
+
+            {/* Spotlight overlay */}
+            {target ? (
+                <div
+                    className={`fixed z-[200] rounded-xl pointer-events-none transition-all duration-300 ease-out ${leaving ? 'opacity-0' : 'opacity-100'}`}
+                    style={{
+                        left: target.x,
+                        top: target.y,
+                        width: target.w,
+                        height: target.h,
+                        boxShadow: '0 0 0 9999px rgba(15, 23, 42, 0.78)',
+                    }}
+                />
+            ) : (
+                <div
+                    className={`fixed inset-0 z-[200] transition-opacity duration-200 ${leaving ? 'opacity-0' : 'opacity-100'}`}
+                    style={{ background: 'rgba(15, 23, 42, 0.78)' }}
+                    onClick={dismiss}
+                />
+            )}
+
+            {/* Mesh blobs decorativos detrás del modal centrado */}
+            {step === 0 || step === 3 ? (
+                <>
                     <div
-                        className="relative px-6 pt-7 pb-6 text-center"
-                        style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
-                    >
-                        <button onClick={dismiss} className="absolute top-3 right-3 h-7 w-7 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors">
-                            <X size={14} />
-                        </button>
-                        <div className="inline-flex items-center gap-1.5 text-[10px] font-extrabold tracking-widest uppercase text-white/80 bg-white/15 rounded-full px-2.5 py-0.5">
-                            <Sparkles size={11} /> Nuevas pestañas
-                        </div>
-                        <h2 className="mt-3 text-xl font-extrabold text-white">Presupuesto y Forecast</h2>
-                        <p className="text-xs text-white/85 mt-1.5 leading-relaxed max-w-md mx-auto">
-                            Dos miradas distintas sobre el mismo año. Aprende cuándo usar cada una.
-                        </p>
-                    </div>
-                    {/* Body: dos tarjetas comparativas */}
-                    <div className="bg-white px-5 py-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="rounded-xl border-2 border-emerald-100 bg-gradient-to-br from-emerald-50/60 to-white p-3.5 relative">
-                            <div className="flex items-center gap-2 mb-1">
-                                <span className="h-8 w-8 rounded-lg bg-emerald-100 flex items-center justify-center text-lg">🎯</span>
-                                <div>
-                                    <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Presupuesto</div>
-                                    <div className="text-sm font-extrabold text-gray-900">El objetivo</div>
-                                </div>
-                            </div>
-                            <p className="text-[11.5px] text-gray-600 leading-relaxed">
-                                Lo que <span className="font-semibold text-gray-900">queremos lograr</span> este año. Una meta de facturación y gastos definida a principio de año.
-                            </p>
-                            <div className="mt-2 text-[10.5px] text-emerald-700 font-semibold">
-                                ✓ Editable · Comparable contra Real
-                            </div>
-                        </div>
-                        <div className="rounded-xl border-2 border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-white p-3.5 relative">
-                            <div className="flex items-center gap-2 mb-1">
-                                <span className="h-8 w-8 rounded-lg bg-indigo-100 flex items-center justify-center text-lg">🔮</span>
-                                <div>
-                                    <div className="text-[10px] font-bold uppercase tracking-wide text-indigo-700">Forecast</div>
-                                    <div className="text-sm font-extrabold text-gray-900">La proyección</div>
-                                </div>
-                            </div>
-                            <p className="text-[11.5px] text-gray-600 leading-relaxed">
-                                Cómo <span className="font-semibold text-gray-900">cerraríamos el año</span> si seguimos al ritmo actual de facturación y gastos. Realista, no aspiracional.
-                            </p>
-                            <div className="mt-2 text-[10.5px] text-indigo-700 font-semibold">
-                                ✓ Editable · Soporta escenarios "¿qué pasaría si…?"
-                            </div>
-                        </div>
-                    </div>
-                    {/* Diferencia clave */}
-                    <div className="bg-gradient-to-r from-indigo-50/50 to-fuchsia-50/50 border-t border-gray-100 px-5 py-3 text-center">
-                        <p className="text-[11.5px] text-gray-700 leading-relaxed">
-                            <span className="font-bold text-gray-900">La clave:</span> Presupuesto = lo que quieres lograr. Forecast = a dónde te lleva tu ritmo actual.
-                        </p>
-                    </div>
-                    <div className="bg-white px-5 py-3 flex items-center justify-end gap-2 border-t border-gray-100">
-                        <button
-                            onClick={dismiss}
-                            className="px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all active:scale-95 shadow-md"
-                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                        className="fixed z-[200] pointer-events-none"
+                        style={{
+                            top: '20%', left: '15%', width: 320, height: 320,
+                            background: 'radial-gradient(circle, rgba(99,102,241,0.6) 0%, transparent 60%)',
+                            filter: 'blur(40px)',
+                            animation: 'pl-mesh 8s ease-in-out infinite',
+                        }}
+                    />
+                    <div
+                        className="fixed z-[200] pointer-events-none"
+                        style={{
+                            bottom: '15%', right: '12%', width: 380, height: 380,
+                            background: 'radial-gradient(circle, rgba(236,72,153,0.55) 0%, transparent 60%)',
+                            filter: 'blur(45px)',
+                            animation: 'pl-mesh2 10s ease-in-out infinite',
+                        }}
+                    />
+                </>
+            ) : null}
+
+            {/* Step 0: Intro centrado */}
+            {step === 0 && (
+                <div
+                    className="fixed z-[202] left-1/2 top-1/2 w-full max-w-2xl px-4"
+                    style={{ animation: 'pl-tour-in 0.4s cubic-bezier(0.22, 1, 0.36, 1)', transform: 'translate(-50%, -50%)' }}
+                    onClick={e => e.stopPropagation()}
+                >
+                    <div className="rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10 bg-white">
+                        <div
+                            className="relative px-6 pt-7 pb-6 text-center"
+                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
                         >
-                            Entendido, ¡a explorar!
-                        </button>
+                            <button onClick={dismiss} className="absolute top-3 right-3 h-7 w-7 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors">
+                                <X size={14} />
+                            </button>
+                            <div className="inline-flex items-center gap-1.5 text-[10px] font-extrabold tracking-widest uppercase text-white/80 bg-white/15 rounded-full px-2.5 py-0.5" style={{ animation: 'pl-stagger 0.4s 0.05s both' }}>
+                                <Sparkles size={11} /> Tour rápido · 30 segundos
+                            </div>
+                            <h2 className="mt-3 text-2xl font-extrabold text-white" style={{ animation: 'pl-stagger 0.4s 0.15s both' }}>
+                                2 pestañas que cambian cómo planificas
+                            </h2>
+                            <p className="text-xs text-white/85 mt-2 leading-relaxed max-w-md mx-auto" style={{ animation: 'pl-stagger 0.4s 0.25s both' }}>
+                                Te muestro qué hace cada una. Las verás resaltadas arriba.
+                            </p>
+                        </div>
+                        <div className="px-5 py-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="rounded-xl border-2 border-emerald-100 bg-gradient-to-br from-emerald-50/60 to-white p-3.5" style={{ animation: 'pl-stagger 0.5s 0.35s both' }}>
+                                <div className="flex items-center gap-2 mb-1.5">
+                                    <span className="h-9 w-9 rounded-lg bg-emerald-100 flex items-center justify-center text-xl">🎯</span>
+                                    <div>
+                                        <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Presupuesto</div>
+                                        <div className="text-sm font-extrabold text-gray-900">El objetivo</div>
+                                    </div>
+                                </div>
+                                <p className="text-[11.5px] text-gray-600 leading-relaxed">
+                                    Lo que <span className="font-semibold text-gray-900">queremos lograr</span>. Una meta definida.
+                                </p>
+                            </div>
+                            <div className="rounded-xl border-2 border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-white p-3.5" style={{ animation: 'pl-stagger 0.5s 0.5s both' }}>
+                                <div className="flex items-center gap-2 mb-1.5">
+                                    <span className="h-9 w-9 rounded-lg bg-indigo-100 flex items-center justify-center text-xl">🔮</span>
+                                    <div>
+                                        <div className="text-[10px] font-bold uppercase tracking-wide text-indigo-700">Forecast</div>
+                                        <div className="text-sm font-extrabold text-gray-900">La proyección</div>
+                                    </div>
+                                </div>
+                                <p className="text-[11.5px] text-gray-600 leading-relaxed">
+                                    Cómo <span className="font-semibold text-gray-900">cerraremos</span> si seguimos al ritmo actual.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="px-5 py-3 flex items-center justify-between border-t border-gray-100">
+                            <button onClick={dismiss} className="text-xs text-gray-500 hover:text-gray-800 font-medium">Saltar tour</button>
+                            <button
+                                onClick={next}
+                                className="px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all active:scale-95 shadow-md inline-flex items-center gap-1.5"
+                                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                            >
+                                Mostrarme <ChevronRight size={14} />
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
+
+            {/* Step 1 / 2: Tooltip cerca de la pestaña resaltada */}
+            {(step === 1 || step === 2) && target && (
+                <div
+                    className="fixed z-[202] w-[300px]"
+                    style={{
+                        top: target.y + target.h + 14,
+                        left: Math.max(8, Math.min(window.innerWidth - 308, target.x + target.w / 2 - 150)),
+                        animation: 'pl-tour-tt-in 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
+                    }}
+                >
+                    {/* Flecha hacia arriba bobbing */}
+                    <div
+                        className="absolute -top-3 left-1/2 -translate-x-1/2"
+                        style={{ animation: 'pl-arrow-bob 1.6s ease-in-out infinite' }}
+                    >
+                        <div className="w-3 h-3 rotate-45" style={{ background: step === 1 ? '#059669' : '#6366f1' }} />
+                    </div>
+                    <div
+                        className="rounded-xl shadow-2xl ring-1 ring-white/20 overflow-hidden"
+                        style={{ background: step === 1 ? 'linear-gradient(135deg, #059669 0%, #14b8a6 100%)' : 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
+                    >
+                        <div className="px-4 pt-3.5 pb-3 text-white">
+                            <div className="flex items-center gap-1.5 text-[9px] font-extrabold tracking-widest uppercase text-white/80 bg-white/15 rounded-full px-2 py-0.5 inline-flex mb-2">
+                                Paso {step} de 2 · {step === 1 ? 'Presupuesto' : 'Forecast'}
+                            </div>
+                            <div className="text-sm font-bold leading-snug mb-1">
+                                {step === 1 ? '🎯 Aquí planificas tu objetivo' : '🔮 Aquí proyectas el cierre real'}
+                            </div>
+                            <p className="text-[11.5px] text-white/90 leading-relaxed">
+                                {step === 1
+                                    ? 'Editas mes a mes lo que quieres facturar y gastar. Sirve para comparar contra el Real al final de año.'
+                                    : 'Refleja a dónde te lleva tu ritmo actual. Editable y permite simular escenarios "¿qué pasaría si…?".'}
+                            </p>
+                        </div>
+                        <div className="px-4 py-2 bg-black/15 flex items-center justify-between">
+                            <button onClick={prev} className="text-[11px] text-white/70 hover:text-white font-medium inline-flex items-center gap-1">
+                                <ChevronLeft size={12} /> Atrás
+                            </button>
+                            <div className="flex items-center gap-1">
+                                {[0, 1, 2, 3].map(i => (
+                                    <span
+                                        key={i}
+                                        className={`h-1.5 rounded-full transition-all ${i === step ? 'w-4 bg-white' : 'w-1.5 bg-white/40'}`}
+                                    />
+                                ))}
+                            </div>
+                            <button onClick={next} className="text-[11px] text-white font-bold inline-flex items-center gap-1 bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded-md">
+                                {step === 2 ? 'Casi' : 'Siguiente'} <ChevronRight size={12} />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Step 3: Outro */}
+            {step === 3 && (
+                <div
+                    className="fixed z-[202] left-1/2 top-1/2 w-full max-w-md px-4"
+                    style={{ animation: 'pl-tour-in 0.4s cubic-bezier(0.22, 1, 0.36, 1)', transform: 'translate(-50%, -50%)' }}
+                >
+                    <div className="rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10 bg-white">
+                        <div
+                            className="relative px-6 pt-6 pb-5 text-center"
+                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
+                        >
+                            <div className="text-4xl mb-1.5" style={{ animation: 'pl-stagger 0.4s 0.05s both' }}>🚀</div>
+                            <h2 className="text-lg font-extrabold text-white" style={{ animation: 'pl-stagger 0.4s 0.15s both' }}>¡Listo!</h2>
+                            <p className="text-xs text-white/85 mt-1 max-w-xs mx-auto" style={{ animation: 'pl-stagger 0.4s 0.25s both' }}>
+                                Cuando estés en Forecast o Presupuesto descubre también <span className="font-bold text-white">Escenarios</span> — simula qué pasaría si…
+                            </p>
+                        </div>
+                        <div className="px-5 py-3 flex items-center justify-between border-t border-gray-100">
+                            <button onClick={prev} className="text-xs text-gray-500 hover:text-gray-800 font-medium inline-flex items-center gap-1">
+                                <ChevronLeft size={12} /> Atrás
+                            </button>
+                            <button
+                                onClick={dismiss}
+                                className="px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all active:scale-95 shadow-md"
+                                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                            >
+                                Empezar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 };
@@ -497,7 +668,7 @@ export default function PLMatrix() {
     const [cellValues, setCellValues] = useState<Record<string, CellData>>({});
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen') === '1');
-    const [welcomeOpen, setWelcomeOpen] = useState(() => localStorage.getItem('pl_matrix_welcome_seen') !== '1');
+    const [welcomeOpen, setWelcomeOpen] = useState(() => localStorage.getItem('pl_matrix_tour_v2_seen') !== '1');
     const [scenarioOpen, setScenarioOpen] = useState(false);
     // Escenario independiente por pestaña (Forecast / Presupuesto). Cada uno guarda su propia simulación.
     const [forecastScenario, setForecastScenario] = useState<ForecastScenario | null>(null);
@@ -1640,7 +1811,7 @@ export default function PLMatrix() {
                     </h1>
                     <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                         {TABS.map(tab => (
-                            <Button key={tab} variant={activeTab === tab ? 'default' : 'ghost'} size="sm" onClick={() => handleTabChange(tab)} className="text-xs h-7 px-3">{tab}</Button>
+                            <Button key={tab} data-tour-tab={tab} variant={activeTab === tab ? 'default' : 'ghost'} size="sm" onClick={() => handleTabChange(tab)} className="text-xs h-7 px-3">{tab}</Button>
                         ))}
                     </div>
                     {activeTab === 'Comparación' && (
@@ -1711,10 +1882,10 @@ export default function PLMatrix() {
                 <ForecastInfoModal onClose={() => setForecastInfoOpen(false)} />
             )}
 
-            {/* Welcome al P&L Matrix — primera visita */}
+            {/* Tour P&L Matrix — primera visita */}
             {welcomeOpen && (
-                <PLMatrixWelcome onClose={() => {
-                    localStorage.setItem('pl_matrix_welcome_seen', '1');
+                <PLMatrixTour onClose={() => {
+                    localStorage.setItem('pl_matrix_tour_v2_seen', '1');
                     setWelcomeOpen(false);
                 }} />
             )}
