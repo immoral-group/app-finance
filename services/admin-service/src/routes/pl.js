@@ -417,18 +417,20 @@ router.get('/matrix/:year', async (req, res) => {
                     const catName = cat?.name || line.description || 'Otros Gastos';
                     const dept = departments?.find(d => d.id === line.department_id);
                     const deptName = dept?.name || 'Otros';
+                    const sectionKey = line.section_key || '';
 
-                    // Key by Dept + Cat to separate "Software - Immedia" from "Software - Immoralia"
-                    const key = `${deptName}::${catName}`;
+                    // Key by Dept + Cat + section_key — diferencia same-name en distintas secciones (David personal vs comisiones)
+                    const key = `${deptName}::${catName}::${sectionKey}`;
 
                     if (!expensesByCategory[key]) expensesByCategory[key] = {
                         dept: deptName,
                         name: catName,
+                        section_key: sectionKey,
                         values: Array(12).fill(0),
                         metadata: {}
                     };
 
-                    // Merge values from multiple budget_lines for the same dept+category.
+                    // Merge values from multiple budget_lines for the same dept+category+section.
                     // Multiple lines can exist if the categoryId was inconsistent across saves.
                     // Take the last non-zero value per month so no data is lost.
                     values.forEach((v, i) => {
@@ -472,6 +474,7 @@ router.get('/matrix/:year', async (req, res) => {
                     type: 'item',
                     dept: data.dept,
                     name: data.name,
+                    section_key: data.section_key || undefined,
                     values: data.values,
                     metadata: data.metadata,
                     editable: true
@@ -892,8 +895,14 @@ router.post('/matrix/save', async (req, res) => {
                 .eq('department_id', departmentId)
                 .eq('line_type', section === 'revenue' ? 'revenue' : 'expense');
 
-            if (section === 'revenue') query = query.eq('service_id', serviceId);
-            else query = query.eq('expense_category_id', categoryId);
+            if (section === 'revenue') {
+                query = query.eq('service_id', serviceId);
+            } else {
+                query = query.eq('expense_category_id', categoryId);
+                // Diferencia same-name items en distintas secciones (David personal vs comisiones)
+                if (section_key) query = query.eq('section_key', section_key);
+                else query = query.is('section_key', null);
+            }
 
             const { data: existingLines } = await query;
             const existingLine = existingLines?.[0];
@@ -937,6 +946,7 @@ router.post('/matrix/save', async (req, res) => {
                     line_type: section === 'revenue' ? 'revenue' : 'expense',
                     service_id: serviceId || null,
                     expense_category_id: categoryId,
+                    section_key: section === 'revenue' ? null : (section_key || null),
                     [monthKey]: Number(value),
                     notes: item,
                     cell_metadata: insertMeta
