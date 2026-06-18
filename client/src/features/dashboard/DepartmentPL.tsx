@@ -1747,7 +1747,7 @@ export default function DepartmentPL() {
                                     title="Qué es Forecast"
                                     description="Lee cómo se proyecta el cierre de año"
                                     onDismiss={() => { localStorage.setItem('forecast_info_seen_v2', '1'); setForecastInfoSeen(true); }}
-                                    position="right"
+                                    align="start"
                                 />
                             )}
                         </span>

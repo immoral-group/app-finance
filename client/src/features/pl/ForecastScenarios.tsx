@@ -19,35 +19,44 @@ export const NewFeatureBubble = ({
     title,
     description,
     onDismiss,
-    position = 'bottom',
+    align = 'center',
 }: {
     title: string;
     description?: string;
     onDismiss: () => void;
-    position?: 'bottom' | 'right';
+    align?: 'start' | 'center' | 'end';
 }) => {
-    const isBottom = position === 'bottom';
+    // Posición de la BURBUJA respecto al elemento padre
+    const bubblePos: Record<string, string> = {
+        start: 'left-0',
+        center: 'left-1/2 -translate-x-1/2',
+        end: 'right-0',
+    };
+    // Posición de la COLA dentro de la burbuja — apunta al centro del padre
+    const tailPos: Record<string, string> = {
+        start: 'left-3',
+        center: 'left-1/2 -translate-x-1/2',
+        end: 'right-3',
+    };
     return (
         <div
-            className={`absolute z-30 pointer-events-auto ${isBottom ? 'top-full mt-2.5 left-1/2 -translate-x-1/2' : 'left-full ml-2.5 top-1/2 -translate-y-1/2'}`}
+            className={`absolute top-full mt-2.5 z-30 pointer-events-auto ${bubblePos[align]}`}
             style={{ animation: 'pl-bubble-float 2.6s ease-in-out infinite' }}
         >
-            {/* Cola */}
             <span
                 aria-hidden
-                className={`absolute w-2.5 h-2.5 rotate-45 ${isBottom ? 'left-1/2 -translate-x-1/2 -top-1' : 'top-1/2 -translate-y-1/2 -left-1'}`}
-                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                className={`absolute w-2.5 h-2.5 rotate-45 -top-1 ${tailPos[align]}`}
+                style={{ background: '#6366f1' }}
             />
-            {/* Burbuja */}
             <div
-                className="relative rounded-xl px-3.5 py-2.5 shadow-2xl ring-1 ring-white/20 flex items-start gap-2.5 whitespace-nowrap"
+                className="relative rounded-xl px-3 py-2.5 shadow-2xl ring-1 ring-white/20 flex items-start gap-2 w-[230px]"
                 style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
             >
                 <span className="flex-shrink-0 mt-0.5 h-5 w-5 rounded-full bg-white/20 flex items-center justify-center">
                     <Sparkles size={11} className="text-white" />
                 </span>
                 <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[9px] font-extrabold tracking-widest text-white bg-white/20 px-1.5 py-0.5 rounded">NUEVO</span>
                         <span className="text-[12px] font-bold text-white">{title}</span>
                     </div>
@@ -63,8 +72,7 @@ export const NewFeatureBubble = ({
                     <X size={10} />
                 </button>
             </div>
-            {/* Animación inyectada una sola vez */}
-            <style>{`@keyframes pl-bubble-float { 0%,100% { transform: translate(${isBottom ? '-50%' : '0'}, ${isBottom ? '0' : '-50%'}); } 50% { transform: translate(${isBottom ? '-50%' : '0'}, ${isBottom ? '-3px' : 'calc(-50% - 3px)'}); } }`}</style>
+            <style>{`@keyframes pl-bubble-float { 0%,100% { translate: 0 0; } 50% { translate: 0 -3px; } }`}</style>
         </div>
     );
 };

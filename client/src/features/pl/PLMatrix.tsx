@@ -1704,7 +1704,7 @@ export default function PLMatrix() {
                                         title="Qué es Forecast"
                                         description="Lee cómo se proyecta el cierre de año"
                                         onDismiss={() => { localStorage.setItem('forecast_info_seen_v2', '1'); setForecastInfoSeen(true); }}
-                                        position="right"
+                                        align="start"
                                     />
                                 )}
                             </span>
@@ -1851,7 +1851,7 @@ export default function PLMatrix() {
                                     title="Simula escenarios"
                                     description="Qué pasa si suben los gastos o baja la facturación"
                                     onDismiss={() => { localStorage.setItem('forecast_scenarios_seen_v2', '1'); setScenarioBtnSeen(true); }}
-                                    position="bottom"
+                                    align="end"
                                 />
                             )}
                         </div>
