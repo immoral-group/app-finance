@@ -161,6 +161,14 @@ export default function DepartmentPL() {
     const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Dashboard');
     const [bannerMonth, setBannerMonth] = useState<number | 'ytd'>('ytd');
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
+    const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen') === '1');
+    const openForecastInfo = () => {
+        setForecastInfoOpen(true);
+        if (!forecastInfoSeen) {
+            localStorage.setItem('forecast_info_seen', '1');
+            setForecastInfoSeen(true);
+        }
+    };
     const [cellValues, setCellValues] = useState<Record<string, number>>({});
     const queryClient = useQueryClient();
     const hoverTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
@@ -1704,13 +1712,23 @@ export default function DepartmentPL() {
                 <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                     {title}
                     {activeTab === 'Forecast' && (
-                        <button
-                            onClick={() => setForecastInfoOpen(true)}
-                            title="Qué es Forecast"
-                            className="inline-flex items-center justify-center h-6 w-6 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors"
-                        >
-                            <InfoIcon size={15} />
-                        </button>
+                        <span className="relative inline-flex items-center">
+                            {!forecastInfoSeen && (
+                                <span className="absolute -inset-1 rounded-full bg-indigo-400/40 animate-ping pointer-events-none" />
+                            )}
+                            <button
+                                onClick={openForecastInfo}
+                                title="Qué es Forecast"
+                                className="relative inline-flex items-center justify-center h-6 w-6 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors bg-white"
+                            >
+                                <InfoIcon size={15} />
+                            </button>
+                            {!forecastInfoSeen && (
+                                <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2.5 py-0.5 text-[10px] font-semibold text-white shadow-md animate-bounce">
+                                    Léeme 👈
+                                </span>
+                            )}
+                        </span>
                     )}
                 </h1>
                 <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
