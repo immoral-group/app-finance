@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
-import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil, FileSpreadsheet, FileText, Info } from 'lucide-react';
+import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil, FileSpreadsheet, FileText, Info, Sparkles } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
+import { ForecastScenariosModal, resolveMultiplier, isScenarioEmpty, scenarioSummary, type ForecastScenario } from './ForecastScenarios';
 
 const TABS = ['Real', 'Presupuesto', 'Comparación', 'Forecast'] as const;
 type TabType = typeof TABS[number];
@@ -411,6 +412,8 @@ export default function PLMatrix() {
     const [cellValues, setCellValues] = useState<Record<string, CellData>>({});
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen') === '1');
+    const [scenarioOpen, setScenarioOpen] = useState(false);
+    const [activeScenario, setActiveScenario] = useState<ForecastScenario | null>(null);
     const openForecastInfo = () => {
         setForecastInfoOpen(true);
         if (!forecastInfoSeen) {
@@ -710,7 +713,11 @@ export default function PLMatrix() {
     };
 
     const getCellValue = (section: string, dept: string, item: string, monthIdx: number): CellData => {
-        return cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 };
+        const base = cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 };
+        if (activeTab !== 'Forecast' || !activeScenario) return base;
+        const mult = resolveMultiplier(activeScenario, section, dept);
+        if (mult === 1) return base;
+        return { ...base, value: Math.round(base.value * mult * 100) / 100 };
     };
 
     const getCompareValue = (
@@ -1045,13 +1052,29 @@ export default function PLMatrix() {
     // ── Render Helpers ───────────────────────────────────────────────────────
     const renderEditableCell = (section: string, dept: string, item: string, monthIdx: number) => {
         const cell = getCellValue(section, dept, item, monthIdx);
-        // Notes are stored with normalized section ('revenue' or 'expense'), not the sub-section key
         const normalizedNoteSection = section === 'revenue' ? 'revenue' : 'expense';
         const note = getCellNote(typeParam, normalizedNoteSection, dept, item, monthIdx);
         const hasNote = !!note?.comment || (note?.assigned_to && note.assigned_to.length > 0);
         const saveSection = section === 'revenue' ? 'revenue' : 'expense';
         const sectionKeyForSave = section === 'revenue' ? undefined : section;
         const currentVal = cell.value;
+        const scenarioActive = activeTab === 'Forecast' && !!activeScenario && !isScenarioEmpty(activeScenario);
+
+        if (scenarioActive) {
+            const mult = resolveMultiplier(activeScenario, section, dept);
+            const tinted = mult !== 1;
+            return (
+                <td
+                    key={monthIdx}
+                    className={`border border-gray-200 px-1 py-1 text-right text-xs relative ${tinted ? 'bg-indigo-50/60 text-indigo-900' : ''}`}
+                >
+                    {currentVal ? fmtDisplay(currentVal) : <span className="text-gray-300">0</span>}
+                    {hasNote && (
+                        <div className="absolute top-0 right-0 w-0 h-0 border-t-[6px] border-l-[6px] border-t-red-500 border-l-transparent pointer-events-none" />
+                    )}
+                </td>
+            );
+        }
 
         return (
             <td
@@ -1087,7 +1110,8 @@ export default function PLMatrix() {
     const renderRevenueRows = () => {
         const rows: React.ReactNode[] = [];
         // Budget tab: always editable. Real tab: only editable for past years (manual entry)
-        const isRevenueEditable = activeTab === 'Presupuesto' || activeTab === 'Forecast' || (activeTab === 'Real' && isPastYear);
+        const scenarioActive = activeTab === 'Forecast' && !!activeScenario && !isScenarioEmpty(activeScenario);
+        const isRevenueEditable = !scenarioActive && (activeTab === 'Presupuesto' || activeTab === 'Forecast' || (activeTab === 'Real' && isPastYear));
         mergedRevenueStructure.forEach((group, groupIdx) => {
             group.services.forEach((service, serviceIdx) => {
                 rows.push(
@@ -1352,6 +1376,24 @@ export default function PLMatrix() {
                                 )}
                             </span>
                         )}
+                        {activeTab === 'Forecast' && activeScenario && !isScenarioEmpty(activeScenario) && (
+                            <span
+                                className="ml-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white shadow"
+                                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                                title={scenarioSummary(activeScenario)}
+                            >
+                                <Sparkles size={11} />
+                                <span>{activeScenario.name || 'Escenario'}</span>
+                                <span className="opacity-80 font-normal max-w-[260px] truncate">· {scenarioSummary(activeScenario)}</span>
+                                <button
+                                    onClick={() => setActiveScenario(null)}
+                                    className="ml-1 h-4 w-4 rounded-full bg-white/20 hover:bg-white/35 inline-flex items-center justify-center"
+                                    title="Volver al Forecast base"
+                                >
+                                    <X size={10} />
+                                </button>
+                            </span>
+                        )}
                     </h1>
                     <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                         {TABS.map(tab => (
@@ -1369,6 +1411,16 @@ export default function PLMatrix() {
                 <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year - 1)}>← {year - 1}</Button>
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year + 1)}>{year + 1} →</Button>
+                    {activeTab === 'Forecast' && (
+                        <Button
+                            size="sm"
+                            onClick={() => setScenarioOpen(true)}
+                            className="gap-1 h-7 text-xs text-white border-0"
+                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                        >
+                            <Sparkles size={12} /> Escenarios
+                        </Button>
+                    )}
                     <div className="relative ml-2">
                         <Button size="sm" className="gap-1 h-7 text-xs" onClick={() => setExportMenuOpen(o => !o)}>
                             <Download size={12} /> Exportar
@@ -1393,6 +1445,19 @@ export default function PLMatrix() {
             {/* Modal Forecast — info */}
             {forecastInfoOpen && (
                 <ForecastInfoModal onClose={() => setForecastInfoOpen(false)} />
+            )}
+
+            {/* Panel Escenarios Forecast */}
+            {scenarioOpen && (
+                <ForecastScenariosModal
+                    initial={activeScenario}
+                    revenueDepts={Array.from(new Set(mergedRevenueStructure.map(g => g.dept)))}
+                    expenseDepts={Array.from(new Set(
+                        Object.values(mergedExpenseStructure).flatMap((arr: any[]) => arr.map(g => g.dept))
+                    ))}
+                    onApply={(s) => setActiveScenario(isScenarioEmpty(s) ? null : s)}
+                    onClose={() => setScenarioOpen(false)}
+                />
             )}
 
             {/* Context Menu (right-click) */}
