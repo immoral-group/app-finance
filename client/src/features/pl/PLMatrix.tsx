@@ -414,6 +414,14 @@ export default function PLMatrix() {
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen') === '1');
     const [scenarioOpen, setScenarioOpen] = useState(false);
     const [activeScenario, setActiveScenario] = useState<ForecastScenario | null>(null);
+    const [scenarioBtnSeen, setScenarioBtnSeen] = useState(() => localStorage.getItem('forecast_scenarios_seen') === '1');
+    const openScenarioPanel = () => {
+        setScenarioOpen(true);
+        if (!scenarioBtnSeen) {
+            localStorage.setItem('forecast_scenarios_seen', '1');
+            setScenarioBtnSeen(true);
+        }
+    };
     const openForecastInfo = () => {
         setForecastInfoOpen(true);
         if (!forecastInfoSeen) {
@@ -715,7 +723,7 @@ export default function PLMatrix() {
     const getCellValue = (section: string, dept: string, item: string, monthIdx: number): CellData => {
         const base = cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 };
         if (activeTab !== 'Forecast' || !activeScenario) return base;
-        const mult = resolveMultiplier(activeScenario, section, dept);
+        const mult = resolveMultiplier(activeScenario, section, dept, monthIdx);
         if (mult === 1) return base;
         return { ...base, value: Math.round(base.value * mult * 100) / 100 };
     };
@@ -1061,7 +1069,7 @@ export default function PLMatrix() {
         const scenarioActive = activeTab === 'Forecast' && !!activeScenario && !isScenarioEmpty(activeScenario);
 
         if (scenarioActive) {
-            const mult = resolveMultiplier(activeScenario, section, dept);
+            const mult = resolveMultiplier(activeScenario, section, dept, monthIdx);
             const tinted = mult !== 1;
             return (
                 <td
@@ -1412,14 +1420,31 @@ export default function PLMatrix() {
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year - 1)}>← {year - 1}</Button>
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setYear(year + 1)}>{year + 1} →</Button>
                     {activeTab === 'Forecast' && (
-                        <Button
-                            size="sm"
-                            onClick={() => setScenarioOpen(true)}
-                            className="gap-1 h-7 text-xs text-white border-0"
-                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
-                        >
-                            <Sparkles size={12} /> Escenarios
-                        </Button>
+                        <div className="relative inline-flex items-center">
+                            {!scenarioBtnSeen && (
+                                <>
+                                    <span className="absolute -inset-1.5 rounded-lg bg-fuchsia-400/50 animate-ping pointer-events-none" />
+                                    <span className="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-cyan-500 opacity-75 blur-sm animate-pulse pointer-events-none" />
+                                </>
+                            )}
+                            <Button
+                                size="sm"
+                                onClick={openScenarioPanel}
+                                className="relative gap-1 h-7 text-xs text-white border-0 shadow-md"
+                                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
+                            >
+                                <Sparkles size={12} className={scenarioBtnSeen ? '' : 'animate-pulse'} /> Escenarios
+                            </Button>
+                            {!scenarioBtnSeen && (
+                                <span
+                                    className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-3 py-1 text-[11px] font-bold text-white shadow-lg whitespace-nowrap animate-bounce pointer-events-none"
+                                    style={{ animationDuration: '1.2s' }}
+                                >
+                                    <Sparkles size={11} /> ¡Prueba escenarios!
+                                    <span className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-indigo-600 rotate-45" />
+                                </span>
+                            )}
+                        </div>
                     )}
                     <div className="relative ml-2">
                         <Button size="sm" className="gap-1 h-7 text-xs" onClick={() => setExportMenuOpen(o => !o)}>

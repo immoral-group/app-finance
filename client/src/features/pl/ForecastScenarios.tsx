@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/Button';
 export const SCENARIO_STEPS = [-30, -25, -20, -15, -10, -5, 0, 5, 10, 15, 20, 25, 30] as const;
 export type ScenarioStep = typeof SCENARIO_STEPS[number];
 
+const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
 export const EXPENSE_SECTION_LABELS: Record<string, string> = {
     personal: 'Personal',
     comisiones: 'Comisiones',
@@ -23,6 +25,9 @@ export const EXPENSE_SECTION_KEYS = ['personal', 'comisiones', 'marketing', 'for
 
 export interface ForecastScenario {
     name: string;
+    // Rango temporal (meses 1-12, inclusivo) donde aplica el escenario.
+    // Por defecto: desde el mes siguiente al actual hasta diciembre.
+    range: { from: number; to: number };
     revenue: {
         globalPct: number;
         byDept: Record<string, number>;
@@ -34,22 +39,41 @@ export interface ForecastScenario {
     };
 }
 
+// Devuelve el rango por defecto: desde el mes siguiente al actual hasta diciembre.
+// Si ya estamos en diciembre, devuelve diciembre solo (escenario hipotético del último mes).
+export function defaultRange(): { from: number; to: number } {
+    const m = new Date().getMonth() + 1; // 1-12
+    return { from: Math.min(m + 1, 12), to: 12 };
+}
+
 export const EMPTY_SCENARIO: ForecastScenario = {
     name: '',
+    range: defaultRange(),
     revenue: { globalPct: 0, byDept: {} },
     expenses: { globalPct: 0, bySection: {}, byDept: {} },
 };
 
+// Pretty string del rango (e.g. "Jul–Dic", "Octubre", "Año completo")
+export function rangeLabel(range: { from: number; to: number }): string {
+    if (range.from === 1 && range.to === 12) return 'Año completo';
+    if (range.from === range.to) return MONTHS_SHORT[range.from - 1];
+    return `${MONTHS_SHORT[range.from - 1]}–${MONTHS_SHORT[range.to - 1]}`;
+}
+
 // ============================================================
 // Resolución de multiplicador por celda
 // Prioridad: byDept (más específico) > bySection > global
+// Si el mes está fuera del rango del escenario → 1 (sin cambio)
 // ============================================================
 export function resolveMultiplier(
     scenario: ForecastScenario | null,
     section: string,
     dept: string,
+    monthIdx: number,
 ): number {
     if (!scenario) return 1;
+    const month = monthIdx + 1; // monthIdx 0-11 → 1-12
+    if (month < scenario.range.from || month > scenario.range.to) return 1;
     if (section === 'revenue') {
         const pct = scenario.revenue.byDept[dept];
         if (pct !== undefined && pct !== 0) return 1 + pct / 100;
@@ -89,7 +113,8 @@ export function scenarioSummary(s: ForecastScenario): string {
     Object.entries(s.expenses.byDept).forEach(([d, p]) => {
         if (p) parts.push(`${p > 0 ? '+' : ''}${p}% gastos ${d}`);
     });
-    return parts.slice(0, 3).join(' · ') + (parts.length > 3 ? ` · +${parts.length - 3} más` : '');
+    const head = parts.slice(0, 2).join(' · ') + (parts.length > 2 ? ` · +${parts.length - 2}` : '');
+    return `${head} · ${rangeLabel(s.range)}`;
 }
 
 // ============================================================
@@ -102,7 +127,7 @@ export const PRESETS: { id: string; emoji: string; label: string; description: s
         emoji: '📈',
         label: 'Crecimiento moderado',
         description: 'Facturación +10%',
-        build: () => ({ ...EMPTY_SCENARIO, name: 'Crecimiento moderado', revenue: { globalPct: 10, byDept: {} } }),
+        build: () => ({ ...EMPTY_SCENARIO, range: defaultRange(), name: 'Crecimiento moderado', revenue: { globalPct: 10, byDept: {} } }),
     },
     {
         id: 'growth-25',
@@ -263,6 +288,74 @@ export const ForecastScenariosModal = ({ initial, revenueDepts, expenseDepts, on
 
                 {/* Cuerpo scrolleable */}
                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+                    {/* RANGO TEMPORAL */}
+                    <section>
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">¿En qué meses aplica?</h3>
+                        <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3 space-y-2">
+                            <div className="flex flex-wrap gap-1.5">
+                                {(() => {
+                                    const today = new Date();
+                                    const nextMonth = Math.min(today.getMonth() + 2, 12);
+                                    const currentQuarter = Math.floor(today.getMonth() / 3) + 1; // 1-4
+                                    const rangeChips = [
+                                        { label: 'Lo que queda', from: nextMonth, to: 12 },
+                                        { label: 'Solo Q3', from: 7, to: 9 },
+                                        { label: 'Solo Q4', from: 10, to: 12 },
+                                        { label: 'H2 (Jul-Dic)', from: 7, to: 12 },
+                                        { label: 'Año completo', from: 1, to: 12 },
+                                    ];
+                                    if (currentQuarter < 4) {
+                                        const qStart = currentQuarter * 3 + 1;
+                                        rangeChips.splice(1, 0, { label: `Próximo trimestre`, from: qStart, to: Math.min(qStart + 2, 12) });
+                                    }
+                                    return rangeChips.map(chip => {
+                                        const active = draft.range.from === chip.from && draft.range.to === chip.to;
+                                        return (
+                                            <button
+                                                key={chip.label}
+                                                onClick={() => setDraft(d => ({ ...d, range: { from: chip.from, to: chip.to } }))}
+                                                className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-gray-200 text-gray-700 hover:border-indigo-300 hover:bg-indigo-50'}`}
+                                            >
+                                                {chip.label}
+                                            </button>
+                                        );
+                                    });
+                                })()}
+                            </div>
+                            <div className="flex items-center gap-2 pt-1">
+                                <span className="text-xs text-gray-600">Desde</span>
+                                <select
+                                    value={draft.range.from}
+                                    onChange={e => {
+                                        const from = Number(e.target.value);
+                                        setDraft(d => ({ ...d, range: { from, to: Math.max(d.range.to, from) } }));
+                                    }}
+                                    className="text-xs h-7 px-2 rounded-md border border-gray-200 bg-white font-medium"
+                                >
+                                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                        <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                    ))}
+                                </select>
+                                <span className="text-xs text-gray-600">hasta</span>
+                                <select
+                                    value={draft.range.to}
+                                    onChange={e => {
+                                        const to = Number(e.target.value);
+                                        setDraft(d => ({ ...d, range: { from: Math.min(d.range.from, to), to } }));
+                                    }}
+                                    className="text-xs h-7 px-2 rounded-md border border-gray-200 bg-white font-medium"
+                                >
+                                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                        <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <p className="text-[10px] text-gray-500 italic">
+                                Los meses fuera de este rango se quedan con su valor base (no se ven afectados por el escenario).
+                            </p>
+                        </div>
+                    </section>
+
                     {/* PRESETS */}
                     <section>
                         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Plantillas rápidas</h3>
