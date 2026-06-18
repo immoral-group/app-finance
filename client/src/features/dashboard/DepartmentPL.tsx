@@ -163,7 +163,7 @@ export default function DepartmentPL() {
     const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Dashboard');
     const [bannerMonth, setBannerMonth] = useState<number | 'ytd'>('ytd');
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
-    const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen') === '1');
+    const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen_v2') === '1');
     const [scenarioOpen, setScenarioOpen] = useState(false);
     const [activeScenario, setActiveScenario] = useState<ForecastScenario | null>(null);
 
@@ -179,7 +179,7 @@ export default function DepartmentPL() {
     const openForecastInfo = () => {
         setForecastInfoOpen(true);
         if (!forecastInfoSeen) {
-            localStorage.setItem('forecast_info_seen', '1');
+            localStorage.setItem('forecast_info_seen_v2', '1');
             setForecastInfoSeen(true);
         }
     };
@@ -1746,7 +1746,7 @@ export default function DepartmentPL() {
                                 <NewFeatureBubble
                                     title="Qué es Forecast"
                                     description="Lee cómo se proyecta el cierre de año"
-                                    onDismiss={() => { localStorage.setItem('forecast_info_seen', '1'); setForecastInfoSeen(true); }}
+                                    onDismiss={() => { localStorage.setItem('forecast_info_seen_v2', '1'); setForecastInfoSeen(true); }}
                                     position="right"
                                 />
                             )}

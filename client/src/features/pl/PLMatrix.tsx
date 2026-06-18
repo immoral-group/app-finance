@@ -667,7 +667,7 @@ export default function PLMatrix() {
     const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Real');
     const [cellValues, setCellValues] = useState<Record<string, CellData>>({});
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
-    const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen') === '1');
+    const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen_v2') === '1');
     const [welcomeOpen, setWelcomeOpen] = useState(() => localStorage.getItem('pl_matrix_tour_v2_seen') !== '1');
     const [scenarioOpen, setScenarioOpen] = useState(false);
     // Escenario independiente por pestaña (Forecast / Presupuesto). Cada uno guarda su propia simulación.
@@ -697,7 +697,7 @@ export default function PLMatrix() {
         setSaveSharedDepts(fromSaved ? [...fromSaved.shared_with_depts] : []);
         setSaveBoxOpen(true);
     };
-    const [scenarioBtnSeen, setScenarioBtnSeen] = useState(() => localStorage.getItem('forecast_scenarios_seen') === '1');
+    const [scenarioBtnSeen, setScenarioBtnSeen] = useState(() => localStorage.getItem('forecast_scenarios_seen_v2') === '1');
 
     // Biblioteca de escenarios (DB)
     const { data: scenariosData } = useQuery({
@@ -739,14 +739,14 @@ export default function PLMatrix() {
     const openScenarioPanel = () => {
         setScenarioOpen(true);
         if (!scenarioBtnSeen) {
-            localStorage.setItem('forecast_scenarios_seen', '1');
+            localStorage.setItem('forecast_scenarios_seen_v2', '1');
             setScenarioBtnSeen(true);
         }
     };
     const openForecastInfo = () => {
         setForecastInfoOpen(true);
         if (!forecastInfoSeen) {
-            localStorage.setItem('forecast_info_seen', '1');
+            localStorage.setItem('forecast_info_seen_v2', '1');
             setForecastInfoSeen(true);
         }
     };
@@ -1703,7 +1703,7 @@ export default function PLMatrix() {
                                     <NewFeatureBubble
                                         title="Qué es Forecast"
                                         description="Lee cómo se proyecta el cierre de año"
-                                        onDismiss={() => { localStorage.setItem('forecast_info_seen', '1'); setForecastInfoSeen(true); }}
+                                        onDismiss={() => { localStorage.setItem('forecast_info_seen_v2', '1'); setForecastInfoSeen(true); }}
                                         position="right"
                                     />
                                 )}
@@ -1850,7 +1850,7 @@ export default function PLMatrix() {
                                 <NewFeatureBubble
                                     title="Simula escenarios"
                                     description="Qué pasa si suben los gastos o baja la facturación"
-                                    onDismiss={() => { localStorage.setItem('forecast_scenarios_seen', '1'); setScenarioBtnSeen(true); }}
+                                    onDismiss={() => { localStorage.setItem('forecast_scenarios_seen_v2', '1'); setScenarioBtnSeen(true); }}
                                     position="bottom"
                                 />
                             )}
