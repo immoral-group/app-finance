@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/Button';
-import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil, FileSpreadsheet, FileText } from 'lucide-react';
+import { Download, MessageSquare, X, Check, Trash2, CheckCircle2, Plus, Pencil, FileSpreadsheet, FileText, Info } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
@@ -291,6 +291,74 @@ export const CommentModal = ({ isOpen, onClose, onSave, onStatusChange, initialV
     );
 };
 
+// ── Modal "Qué es Forecast" — compartido con DepartmentPL ─────────────────────
+export const ForecastInfoModal = ({ onClose }: { onClose: () => void }) => {
+    const [leaving, setLeaving] = useState(false);
+    const dismiss = () => {
+        setLeaving(true);
+        setTimeout(onClose, 200);
+    };
+    return (
+        <>
+            <div
+                className={`fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm transition-opacity duration-200 ${leaving ? 'opacity-0' : 'opacity-100'}`}
+                onClick={dismiss}
+            />
+            <div
+                className={`fixed z-[202] left-1/2 top-1/2 w-full max-w-sm px-4 transition-all duration-200 ${leaving ? 'opacity-0 -translate-x-1/2 -translate-y-[46%]' : 'opacity-100 -translate-x-1/2 -translate-y-1/2'}`}
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10">
+                    <div
+                        className="relative px-6 pt-8 pb-7 flex flex-col items-center text-center"
+                        style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%)' }}
+                    >
+                        <button
+                            onClick={dismiss}
+                            className="absolute top-4 right-4 h-7 w-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                        >
+                            <X size={14} className="text-white" />
+                        </button>
+                        <span className="text-[10px] font-bold tracking-widest uppercase text-white/60 mb-3">Forecast</span>
+                        <div className="h-14 w-14 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center text-3xl mb-3 shadow-lg ring-1 ring-white/20">
+                            🔮
+                        </div>
+                        <p className="text-base font-bold text-white leading-snug">¿Cómo cerraría el año si seguimos así?</p>
+                        <p className="text-xs text-white/75 mt-1.5 leading-relaxed">Proyección del cierre asumiendo el mismo ritmo actual de facturación y gastos.</p>
+                    </div>
+                    <div className="bg-white px-6 py-5 space-y-3.5">
+                        <div className="flex items-start gap-3">
+                            <span className="mt-0.5 h-6 w-6 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 text-sm">📈</span>
+                            <p className="text-xs text-gray-600 leading-relaxed">
+                                <span className="font-semibold text-gray-900">Es un escenario hipotético</span>, no un presupuesto ni un objetivo. Muestra cómo cerraríamos el año si mantenemos el comportamiento actual.
+                            </p>
+                        </div>
+                        <div className="flex items-start gap-3">
+                            <span className="mt-0.5 h-6 w-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0 text-sm">⚖️</span>
+                            <p className="text-xs text-gray-600 leading-relaxed">
+                                <span className="font-semibold text-gray-900">Si los gastos suben, la rentabilidad baja</span> en proporción. Sirve para anticipar el impacto antes de que pase.
+                            </p>
+                        </div>
+                        <div className="flex items-start gap-3">
+                            <span className="mt-0.5 h-6 w-6 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 text-sm">✏️</span>
+                            <p className="text-xs text-gray-600 leading-relaxed">
+                                <span className="font-semibold text-gray-900">Es editable e independiente del Presupuesto</span>. Ajusta los meses que aún no han pasado para simular distintos escenarios.
+                            </p>
+                        </div>
+                        <button
+                            onClick={dismiss}
+                            className="w-full mt-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-95"
+                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+                        >
+                            Entendido
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </>
+    );
+};
+
 const CellInput = ({
     initialValue,
     onSave,
@@ -341,6 +409,7 @@ export default function PLMatrix() {
     const [year, setYear] = useUrlState('year', new Date().getFullYear(), (v) => Number(v));
     const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Real');
     const [cellValues, setCellValues] = useState<Record<string, CellData>>({});
+    const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const queryClient = useQueryClient();
 
     // Context menu state (right-click → shows "Insertar Nota")
@@ -1254,8 +1323,17 @@ export default function PLMatrix() {
         <div className="space-y-4 -mx-6 -mt-6">
             <div className="bg-white border-b px-6 py-3 flex items-center justify-between sticky top-0 z-20">
                 <div className="flex items-center gap-4">
-                    <h1 className="text-lg font-bold text-gray-900">
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         {activeTab === 'Real' ? 'P&L REAL' : activeTab === 'Presupuesto' ? 'PRESUPUESTO' : activeTab === 'Forecast' ? 'FORECAST' : 'COMPARACIÓN REAL vs PRESUPUESTO'} {year}
+                        {activeTab === 'Forecast' && (
+                            <button
+                                onClick={() => setForecastInfoOpen(true)}
+                                title="Qué es Forecast"
+                                className="inline-flex items-center justify-center h-6 w-6 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            >
+                                <Info size={15} />
+                            </button>
+                        )}
                     </h1>
                     <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                         {TABS.map(tab => (
@@ -1293,6 +1371,11 @@ export default function PLMatrix() {
                     </div>
                 </div>
             </div>
+
+            {/* Modal Forecast — info */}
+            {forecastInfoOpen && (
+                <ForecastInfoModal onClose={() => setForecastInfoOpen(false)} />
+            )}
 
             {/* Context Menu (right-click) */}
             {contextMenu && (

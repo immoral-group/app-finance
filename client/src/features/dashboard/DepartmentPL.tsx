@@ -4,13 +4,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, BudgetRequest } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
-import { Download, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, MessageSquare, Calendar, Send, Check, X, Trash2, ClipboardList } from 'lucide-react';
+import { Download, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, MessageSquare, Calendar, Send, Check, X, Trash2, ClipboardList, Info as InfoIcon } from 'lucide-react';
 import {
     BarChart, Bar, LineChart, Line, AreaChart, Area,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
     ReferenceLine
 } from 'recharts';
-import { CommentModal } from '@/features/pl/PLMatrix';
+import { CommentModal, ForecastInfoModal } from '@/features/pl/PLMatrix';
 import { useUrlState } from '@/hooks/useUrlState';
 import NutfruitBudget from './NutfruitBudget';
 import IcexBudget from './IcexBudget';
@@ -160,6 +160,7 @@ export default function DepartmentPL() {
     const [year, setYear] = useUrlState('year', new Date().getFullYear(), (v) => Number(v));
     const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Dashboard');
     const [bannerMonth, setBannerMonth] = useState<number | 'ytd'>('ytd');
+    const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [cellValues, setCellValues] = useState<Record<string, number>>({});
     const queryClient = useQueryClient();
     const hoverTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
@@ -1700,8 +1701,17 @@ export default function DepartmentPL() {
     const renderHeader = (title: string) => (
         <div className="bg-white border-b px-6 py-3 flex items-center justify-between sticky top-0 z-20">
             <div className="flex items-center gap-4">
-                <h1 className="text-lg font-bold text-gray-900">
+                <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                     {title}
+                    {activeTab === 'Forecast' && (
+                        <button
+                            onClick={() => setForecastInfoOpen(true)}
+                            title="Qué es Forecast"
+                            className="inline-flex items-center justify-center h-6 w-6 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors"
+                        >
+                            <InfoIcon size={15} />
+                        </button>
+                    )}
                 </h1>
                 <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
                     {TABS.map(tab => (
@@ -2319,6 +2329,8 @@ export default function DepartmentPL() {
     return (
         <div className="space-y-4 -mx-6 -mt-6">
             {renderHeader(`P&L ${deptLabel.toUpperCase()} — ${activeTab === 'Real' ? 'REAL' : activeTab === 'Forecast' ? 'FORECAST' : 'PRESUPUESTO'} ${year}`)}
+
+            {forecastInfoOpen && <ForecastInfoModal onClose={() => setForecastInfoOpen(false)} />}
 
             {/* Spreadsheet (read-only) */}
             <div className="overflow-x-auto px-2">
