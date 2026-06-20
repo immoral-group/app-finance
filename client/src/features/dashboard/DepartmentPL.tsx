@@ -179,6 +179,24 @@ export default function DepartmentPL() {
     });
     const sharedScenarios: SavedScenario[] = scenariosData?.scenarios || [];
     const sharedScenariosCount = sharedScenarios.length;
+
+    // Escenarios compartidos que el usuario aún no ha visto (localStorage por usuario+escenario)
+    const seenKey = `dept_seen_scenarios_${deptLabel}_${profile?.id || 'anon'}`;
+    const [seenScenarioIds, setSeenScenarioIds] = useState<string[]>(() => {
+        try { return JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch { return []; }
+    });
+    const unseenScenarios = sharedScenarios.filter(s => !seenScenarioIds.includes(s.id));
+    const markScenarioSeen = (id: string) => {
+        const next = Array.from(new Set([...seenScenarioIds, id]));
+        localStorage.setItem(seenKey, JSON.stringify(next));
+        setSeenScenarioIds(next);
+    };
+    const dismissAllNotifications = () => {
+        const allIds = sharedScenarios.map(s => s.id);
+        const next = Array.from(new Set([...seenScenarioIds, ...allIds]));
+        localStorage.setItem(seenKey, JSON.stringify(next));
+        setSeenScenarioIds(next);
+    };
     const openForecastInfo = () => {
         setForecastInfoOpen(true);
         if (!forecastInfoSeen) {
@@ -708,6 +726,15 @@ export default function DepartmentPL() {
         return totals.map(t => fmtCurrency(t));
     };
 
+    // Aplica escenario activo al leer de los mapas de comparación (Real / Budget)
+    const getScenarioValue = (source: Record<string, number>, section: string, dept: string, item: string, monthIdx: number): number => {
+        const base = source[`${section}-${dept}-${item}-${monthIdx}`] || 0;
+        const tabAllows = activeTab === 'Forecast' || activeTab === 'Presupuesto';
+        if (!tabAllows || !activeScenario) return base;
+        const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
+        return base * mult;
+    };
+
     // --- Group Cost Calculation helper ---
     const calculateGroupCost = (valuesMap: Record<string, number>): number[] => {
         // 1) Total General Revenue
@@ -715,13 +742,20 @@ export default function DepartmentPL() {
         mergedRevenueStructure.forEach(group => {
             group.services.forEach(service => {
                 for (let i = 0; i < 12; i++) {
-                    totalGeneralRevenue[i] += getCompValue(valuesMap, 'revenue', group.dept, service, i);
+                    totalGeneralRevenue[i] += getScenarioValue(valuesMap, 'revenue', group.dept, service, i);
                 }
             });
         });
 
         // 2) Dept Revenue
-        const deptRevTotals = calcCompSectionTotal(valuesMap, 'revenue', deptRevenue);
+        const deptRevTotals = Array(12).fill(0);
+        deptRevenue.forEach(group => {
+            (group.services || []).forEach(service => {
+                for (let i = 0; i < 12; i++) {
+                    deptRevTotals[i] += getScenarioValue(valuesMap, 'revenue', group.dept, service, i);
+                }
+            });
+        });
 
         // 3) Group Pct
         const groupPct = deptRevTotals.map((v, i) =>
@@ -735,7 +769,7 @@ export default function DepartmentPL() {
             items.filter(g => g.dept === 'Immoral').forEach(g => {
                 g.items.forEach(item => {
                     for (let i = 0; i < 12; i++) {
-                        immoralExpensesMonthly[i] += getCompValue(valuesMap, catKey, 'Immoral', item, i);
+                        immoralExpensesMonthly[i] += getScenarioValue(valuesMap, catKey, 'Immoral', item, i);
                     }
                 });
             });
@@ -771,21 +805,36 @@ export default function DepartmentPL() {
     // --- Read-only cell renderer (with note indicator) ---
     const renderReadOnlyCell = (section: string, dept: string, item: string, monthIdx: number) => {
         const value = getCellValue(section, dept, item, monthIdx);
+        const baseVal = cellValues[getCellKey(section, dept, item, monthIdx)] || 0;
         const normalizedSection = section === 'revenue' ? 'revenue' : 'expense';
         const note = getCellNote(deptNoteType, normalizedSection, dept, item, monthIdx);
         const hasNote = !!note?.comment || (note?.assigned_to && note.assigned_to.length > 0);
+        const scenarioActive = (activeTab === 'Forecast' || activeTab === 'Presupuesto') && !!activeScenario && !isScenarioEmpty(activeScenario);
+        const mult = scenarioActive ? resolveMultiplier(activeScenario, section, dept, item, monthIdx) : 1;
+        const tinted = scenarioActive && mult !== 1 && baseVal !== 0;
+        const deltaPct = Math.round((mult - 1) * 100);
+        const isUp = deltaPct > 0;
         return (
             <td
                 key={monthIdx}
-                className="border border-gray-200 px-1 py-1 text-right text-xs tabular-nums relative cursor-context-menu"
+                className={`border border-gray-200 px-1 py-1 text-right text-xs tabular-nums relative cursor-context-menu ${tinted ? (isUp ? 'bg-emerald-100/80 text-emerald-900' : 'bg-rose-100/80 text-rose-900') : ''}`}
                 onContextMenu={(e) => handleContextMenu(e, section, dept, item, monthIdx)}
                 onMouseEnter={(e) => handleMouseEnter(e, section, dept, item, monthIdx)}
                 onMouseLeave={handleMouseLeave}
+                title={tinted ? `Base: ${Math.round(baseVal).toLocaleString('de-DE')} · Escenario: ${Math.round(value).toLocaleString('de-DE')} (${isUp ? '+' : ''}${deltaPct}%)` : undefined}
             >
                 {hasNote && (
                     <div className="absolute top-0 right-0 w-0 h-0 border-t-[6px] border-l-[6px] border-t-orange-500 border-l-transparent pointer-events-none" />
                 )}
-                {value ? fmtDisplay(value) : <span className="text-gray-300">0</span>}
+                {tinted ? (
+                    <>
+                        <div className="font-semibold">{value ? fmtDisplay(value) : '0'}</div>
+                        <div className="text-[9px] line-through opacity-60">{Math.round(baseVal).toLocaleString('de-DE')}</div>
+                        <div className={`text-[9px] font-bold ${isUp ? 'text-emerald-700' : 'text-rose-700'}`}>{isUp ? '+' : ''}{deltaPct}%</div>
+                    </>
+                ) : (
+                    value ? fmtDisplay(value) : <span className="text-gray-300">0</span>
+                )}
             </td>
         );
     };
@@ -2420,8 +2469,53 @@ export default function DepartmentPL() {
                     onApply={(s) => setActiveScenario(isScenarioEmpty(s) ? null : s)}
                     onUpdate={() => { /* dept heads no pueden actualizar */ }}
                     onDelete={() => { /* dept heads no pueden borrar */ }}
-                    onClose={() => setScenarioOpen(false)}
+                    onClose={() => {
+                        setScenarioOpen(false);
+                        // Al abrir el panel, marcamos como vistos los escenarios listados
+                        dismissAllNotifications();
+                    }}
                 />
+            )}
+
+            {/* Notificación de escenarios compartidos no vistos */}
+            {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && unseenScenarios.length > 0 && (
+                <div className="mx-6 mt-3 space-y-1.5">
+                    {unseenScenarios.map(s => {
+                        const scope = (s as any).scope === 'budget' ? 'Presupuesto' : 'Forecast';
+                        const author = s.created_by_email?.split('@')[0] || 'Un superadmin';
+                        return (
+                            <div
+                                key={s.id}
+                                className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 shadow-md ring-1 ring-white/20 text-white"
+                                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
+                            >
+                                <span className="flex-shrink-0 h-8 w-8 rounded-full bg-white/20 flex items-center justify-center text-base">🔔</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[11px] font-extrabold tracking-wider text-white/80 uppercase">Escenario compartido contigo</div>
+                                    <div className="text-sm font-bold truncate">
+                                        "{s.name}" — en {scope}
+                                    </div>
+                                    <div className="text-[11px] text-white/85">
+                                        {author} ha compartido este escenario con {deptLabel}. Ábrelo en el panel ✨ Escenarios para verlo aplicado.
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => { setScenarioOpen(true); markScenarioSeen(s.id); }}
+                                    className="text-[11px] font-bold bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded-md transition-colors"
+                                >
+                                    Ver
+                                </button>
+                                <button
+                                    onClick={() => markScenarioSeen(s.id)}
+                                    className="h-6 w-6 rounded-full bg-white/15 hover:bg-white/30 flex items-center justify-center transition-colors"
+                                    title="Descartar"
+                                >
+                                    <X size={12} />
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
             )}
 
             {/* Spreadsheet (read-only) */}
