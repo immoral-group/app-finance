@@ -699,18 +699,22 @@ export default function PLMatrix() {
     };
     const [scenarioBtnSeen, setScenarioBtnSeen] = useState(() => localStorage.getItem('forecast_scenarios_seen_v2') === '1');
 
-    // Biblioteca de escenarios (DB)
+    // scope para los escenarios — separa biblioteca Forecast y Presupuesto
+    const scenarioScope: 'forecast' | 'budget' = activeTab === 'Presupuesto' ? 'budget' : 'forecast';
+
+    // Biblioteca de escenarios (DB) — filtrada por scope
     const { data: scenariosData } = useQuery({
-        queryKey: ['forecast-scenarios'],
-        queryFn: () => adminApi.getForecastScenarios(),
+        queryKey: ['forecast-scenarios', scenarioScope],
+        queryFn: () => adminApi.getForecastScenarios({ scope: scenarioScope }),
         staleTime: 30000,
+        enabled: activeTab === 'Forecast' || activeTab === 'Presupuesto',
     });
     const savedScenarios: SavedScenario[] = scenariosData?.scenarios || [];
     const savedScenariosCount = savedScenarios.length;
 
     const saveScenarioMutation = useMutation({
         mutationFn: (payload: { name: string; scenario: ForecastScenario; shared_with_depts: string[] }) =>
-            adminApi.saveForecastScenario(payload),
+            adminApi.saveForecastScenario({ ...payload, scope: scenarioScope }),
         onSuccess: (_, vars) => {
             queryClient.invalidateQueries({ queryKey: ['forecast-scenarios'] });
             toast.success(`Escenario "${vars.name}" guardado`);
@@ -1045,7 +1049,7 @@ export default function PLMatrix() {
         const base = cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 };
         const tabAllowsScenario = activeTab === 'Forecast' || activeTab === 'Presupuesto';
         if (!tabAllowsScenario || !activeScenario) return base;
-        const mult = resolveMultiplier(activeScenario, section, dept, monthIdx);
+        const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
         if (mult === 1) return base;
         return { ...base, value: Math.round(base.value * mult * 100) / 100 };
     };
@@ -1391,14 +1395,24 @@ export default function PLMatrix() {
         const scenarioActive = (activeTab === 'Forecast' || activeTab === 'Presupuesto') && !!activeScenario && !isScenarioEmpty(activeScenario);
 
         if (scenarioActive) {
-            const mult = resolveMultiplier(activeScenario, section, dept, monthIdx);
-            const tinted = mult !== 1;
+            const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
+            const baseVal = (cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 }).value;
+            const tinted = mult !== 1 && baseVal !== 0;
+            const deltaPct = Math.round((mult - 1) * 100);
+            const isUp = deltaPct > 0;
             return (
                 <td
                     key={monthIdx}
-                    className={`border border-gray-200 px-1 py-1 text-right text-xs relative ${tinted ? 'bg-indigo-50/60 text-indigo-900' : ''}`}
+                    className={`border border-gray-200 px-1 py-1 text-right text-xs relative ${tinted ? (isUp ? 'bg-emerald-100/80 text-emerald-900' : 'bg-rose-100/80 text-rose-900') : ''}`}
+                    title={tinted ? `Base: ${baseVal ? Math.round(baseVal).toLocaleString('de-DE') : '0'} · Escenario: ${currentVal ? Math.round(currentVal).toLocaleString('de-DE') : '0'} (${isUp ? '+' : ''}${deltaPct}%)` : undefined}
                 >
-                    {currentVal ? fmtDisplay(currentVal) : <span className="text-gray-300">0</span>}
+                    <div className="font-semibold tabular-nums">{currentVal ? fmtDisplay(currentVal) : <span className="text-gray-300">0</span>}</div>
+                    {tinted && (
+                        <>
+                            <div className="text-[9px] line-through opacity-60 tabular-nums">{baseVal ? Math.round(baseVal).toLocaleString('de-DE') : '0'}</div>
+                            <div className={`text-[9px] font-bold ${isUp ? 'text-emerald-700' : 'text-rose-700'}`}>{isUp ? '+' : ''}{deltaPct}%</div>
+                        </>
+                    )}
                     {hasNote && (
                         <div className="absolute top-0 right-0 w-0 h-0 border-t-[6px] border-l-[6px] border-t-red-500 border-l-transparent pointer-events-none" />
                     )}
@@ -1890,17 +1904,30 @@ export default function PLMatrix() {
                 }} />
             )}
 
-            {/* Panel Escenarios Forecast */}
+            {/* Panel Escenarios */}
             {scenarioOpen && (() => {
                 const revenueDepts = Array.from(new Set(mergedRevenueStructure.map(g => g.dept)));
                 const expenseDepts = Array.from(new Set(
                     Object.values(mergedExpenseStructure).flatMap((arr: any[]) => arr.map(g => g.dept))
                 ));
+                // Flatten estructuras a items para drill-down
+                const revenueItems = mergedRevenueStructure.flatMap(g => g.services.map(s => ({ dept: g.dept, name: s })));
+                const sectionKeyMap: Record<string, string> = {
+                    personalItems: 'personal', comisionesItems: 'comisiones', marketingItems: 'marketing',
+                    formacionItems: 'formacion', softwareItems: 'software', gastosOpItems: 'gastosOp', adspentItems: 'adspent',
+                };
+                const expenseItems = Object.entries(mergedExpenseStructure).flatMap(([k, groups]: [string, any]) =>
+                    (groups as any[]).flatMap(g => g.items.map((i: string) => ({ section: sectionKeyMap[k] || k, dept: g.dept, name: i })))
+                );
+                const targetLabel: 'Forecast' | 'Presupuesto' = activeTab === 'Presupuesto' ? 'Presupuesto' : 'Forecast';
                 return (
                     <ForecastScenariosModal
                         initial={activeScenario}
                         revenueDepts={revenueDepts}
                         expenseDepts={expenseDepts}
+                        revenueItems={revenueItems}
+                        expenseItems={expenseItems}
+                        targetLabel={targetLabel}
                         savedList={savedScenarios}
                         canEdit={true}
                         shareableDepts={[...HUBS]}

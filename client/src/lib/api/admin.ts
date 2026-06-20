@@ -250,11 +250,14 @@ export const adminApi = {
     },
 
     // Forecast scenarios
-    getForecastScenarios: (dept?: string) => {
-        const qs = dept ? `?dept=${encodeURIComponent(dept)}` : '';
+    getForecastScenarios: (opts?: { dept?: string; scope?: 'forecast' | 'budget' }) => {
+        const params = new URLSearchParams();
+        if (opts?.dept) params.set('dept', opts.dept);
+        if (opts?.scope) params.set('scope', opts.scope);
+        const qs = params.toString() ? `?${params.toString()}` : '';
         return fetchApi<{ scenarios: any[] }>(`/pl/scenarios${qs}`);
     },
-    saveForecastScenario: (data: { name: string; scenario: any; shared_with_depts?: string[] }) => {
+    saveForecastScenario: (data: { name: string; scenario: any; shared_with_depts?: string[]; scope?: 'forecast' | 'budget' }) => {
         return fetchApi<{ scenario: any }>(`/pl/scenarios`, {
             method: 'POST',
             body: JSON.stringify(data),

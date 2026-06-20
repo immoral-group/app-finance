@@ -99,13 +99,26 @@ export interface ForecastScenario {
     revenue: {
         globalPct: number;
         byDept: Record<string, number>;
+        // Clave: "dept::service" — afecta solo a un servicio concreto del hub
+        byItem?: Record<string, number>;
     };
     expenses: {
         globalPct: number;
         bySection: Record<string, number>;
         byDept: Record<string, number>;
+        // Clave: "section::dept" — afecta solo a una categoría dentro de un hub
+        bySectionDept?: Record<string, number>;
+        // Clave: "section::dept::item" — afecta a un item específico
+        byItem?: Record<string, number>;
     };
 }
+
+// Helpers de claves
+export const keys = {
+    revenueItem: (dept: string, item: string) => `${dept}::${item}`,
+    expenseSectionDept: (section: string, dept: string) => `${section}::${dept}`,
+    expenseItem: (section: string, dept: string, item: string) => `${section}::${dept}::${item}`,
+};
 
 // Devuelve el rango por defecto: desde el mes siguiente al actual hasta diciembre.
 // Si ya estamos en diciembre, devuelve diciembre solo (escenario hipotético del último mes).
@@ -139,24 +152,29 @@ export function rangeLabel(range: { from: number; to: number }): string {
 }
 
 // ============================================================
-// Resolución de multiplicador por celda
-// Prioridad: byDept (más específico) > bySection > global
-// Si el mes está fuera del rango del escenario → 1 (sin cambio)
+// Resolución de multiplicador por celda — prioridad de más específico a más general
 // ============================================================
 export function resolveMultiplier(
     scenario: ForecastScenario | null,
     section: string,
     dept: string,
+    item: string,
     monthIdx: number,
 ): number {
     if (!scenario) return 1;
-    const month = monthIdx + 1; // monthIdx 0-11 → 1-12
+    const month = monthIdx + 1;
     if (month < scenario.range.from || month > scenario.range.to) return 1;
     if (section === 'revenue') {
-        const pct = scenario.revenue.byDept[dept];
-        if (pct !== undefined && pct !== 0) return 1 + pct / 100;
+        const itemPct = scenario.revenue.byItem?.[keys.revenueItem(dept, item)];
+        if (itemPct !== undefined && itemPct !== 0) return 1 + itemPct / 100;
+        const deptPct = scenario.revenue.byDept[dept];
+        if (deptPct !== undefined && deptPct !== 0) return 1 + deptPct / 100;
         return 1 + (scenario.revenue.globalPct || 0) / 100;
     }
+    const itemPct = scenario.expenses.byItem?.[keys.expenseItem(section, dept, item)];
+    if (itemPct !== undefined && itemPct !== 0) return 1 + itemPct / 100;
+    const sdPct = scenario.expenses.bySectionDept?.[keys.expenseSectionDept(section, dept)];
+    if (sdPct !== undefined && sdPct !== 0) return 1 + sdPct / 100;
     const deptPct = scenario.expenses.byDept[dept];
     if (deptPct !== undefined && deptPct !== 0) return 1 + deptPct / 100;
     const sectionPct = scenario.expenses.bySection[section];
@@ -170,9 +188,12 @@ export function isScenarioEmpty(s: ForecastScenario | null): boolean {
     const allPcts = [
         s.revenue.globalPct,
         ...Object.values(s.revenue.byDept),
+        ...Object.values(s.revenue.byItem || {}),
         s.expenses.globalPct,
         ...Object.values(s.expenses.bySection),
         ...Object.values(s.expenses.byDept),
+        ...Object.values(s.expenses.bySectionDept || {}),
+        ...Object.values(s.expenses.byItem || {}),
     ];
     return allPcts.every(v => !v);
 }
@@ -181,15 +202,18 @@ export function isScenarioEmpty(s: ForecastScenario | null): boolean {
 export function scenarioSummary(s: ForecastScenario): string {
     const parts: string[] = [];
     if (s.revenue.globalPct) parts.push(`${s.revenue.globalPct > 0 ? '+' : ''}${s.revenue.globalPct}% ingresos`);
-    Object.entries(s.revenue.byDept).forEach(([d, p]) => {
-        if (p) parts.push(`${p > 0 ? '+' : ''}${p}% ${d}`);
+    Object.entries(s.revenue.byDept).forEach(([d, p]) => { if (p) parts.push(`${p > 0 ? '+' : ''}${p}% ${d}`); });
+    Object.entries(s.revenue.byItem || {}).forEach(([k, p]) => {
+        if (p) { const [, name] = k.split('::'); parts.push(`${p > 0 ? '+' : ''}${p}% ${name}`); }
     });
     if (s.expenses.globalPct) parts.push(`${s.expenses.globalPct > 0 ? '+' : ''}${s.expenses.globalPct}% gastos`);
-    Object.entries(s.expenses.bySection).forEach(([k, p]) => {
-        if (p) parts.push(`${p > 0 ? '+' : ''}${p}% ${EXPENSE_SECTION_LABELS[k] || k}`);
+    Object.entries(s.expenses.bySection).forEach(([k, p]) => { if (p) parts.push(`${p > 0 ? '+' : ''}${p}% ${EXPENSE_SECTION_LABELS[k] || k}`); });
+    Object.entries(s.expenses.byDept).forEach(([d, p]) => { if (p) parts.push(`${p > 0 ? '+' : ''}${p}% gastos ${d}`); });
+    Object.entries(s.expenses.bySectionDept || {}).forEach(([k, p]) => {
+        if (p) { const [sec, d] = k.split('::'); parts.push(`${p > 0 ? '+' : ''}${p}% ${EXPENSE_SECTION_LABELS[sec] || sec} ${d}`); }
     });
-    Object.entries(s.expenses.byDept).forEach(([d, p]) => {
-        if (p) parts.push(`${p > 0 ? '+' : ''}${p}% gastos ${d}`);
+    Object.entries(s.expenses.byItem || {}).forEach(([k, p]) => {
+        if (p) { const [, , name] = k.split('::'); parts.push(`${p > 0 ? '+' : ''}${p}% ${name}`); }
     });
     const head = parts.slice(0, 2).join(' · ') + (parts.length > 2 ? ` · +${parts.length - 2}` : '');
     return `${head} · ${rangeLabel(s.range)}`;
@@ -296,13 +320,21 @@ const PctSelector = ({ value, onChange, accent = 'indigo' }: { value: number; on
 // Modal de Escenarios — slide desde la derecha
 // ============================================================
 
+// Estructuras de items para granularidad
+export type ExpenseStructItem = { section: string; dept: string; name: string };
+export type RevenueStructItem = { dept: string; name: string };
+
 interface ModalProps {
     initial: ForecastScenario | null;
     revenueDepts: string[];
     expenseDepts: string[];
+    // Items concretos para drill-down. Si no se pasa, no se muestra el detalle.
+    revenueItems?: RevenueStructItem[];
+    expenseItems?: ExpenseStructItem[];
+    targetLabel: 'Forecast' | 'Presupuesto';
     savedList: SavedScenario[];
-    canEdit: boolean;  // false para jefes de depto (solo ven/aplican)
-    shareableDepts: string[];  // depts con los que se puede compartir (solo admins lo usan)
+    canEdit: boolean;
+    shareableDepts: string[];
     onApply: (s: ForecastScenario, fromSavedId?: string) => void;
     onUpdate: (id: string, patch: { name?: string; scenario?: ForecastScenario; shared_with_depts?: string[] }) => void;
     onDelete: (id: string, name: string) => void;
@@ -310,7 +342,8 @@ interface ModalProps {
 }
 
 export const ForecastScenariosModal = ({
-    initial, revenueDepts, expenseDepts, savedList, canEdit, shareableDepts,
+    initial, revenueDepts, expenseDepts, revenueItems, expenseItems, targetLabel,
+    savedList, canEdit, shareableDepts,
     onApply, onUpdate, onDelete, onClose
 }: ModalProps) => {
     const [draft, setDraft] = useState<ForecastScenario>(() => initial ? structuredClone(initial) : structuredClone(EMPTY_SCENARIO));
@@ -352,9 +385,44 @@ export const ForecastScenariosModal = ({
 
     const updateRevenueGlobal = (v: number) => setDraft(d => ({ ...d, revenue: { ...d.revenue, globalPct: v } }));
     const updateRevenueDept = (dept: string, v: number) => setDraft(d => ({ ...d, revenue: { ...d.revenue, byDept: { ...d.revenue.byDept, [dept]: v } } }));
+    const updateRevenueItem = (dept: string, item: string, v: number) => setDraft(d => ({ ...d, revenue: { ...d.revenue, byItem: { ...(d.revenue.byItem || {}), [keys.revenueItem(dept, item)]: v } } }));
     const updateExpenseGlobal = (v: number) => setDraft(d => ({ ...d, expenses: { ...d.expenses, globalPct: v } }));
     const updateExpenseSection = (s: string, v: number) => setDraft(d => ({ ...d, expenses: { ...d.expenses, bySection: { ...d.expenses.bySection, [s]: v } } }));
     const updateExpenseDept = (dept: string, v: number) => setDraft(d => ({ ...d, expenses: { ...d.expenses, byDept: { ...d.expenses.byDept, [dept]: v } } }));
+    const updateExpenseSectionDept = (section: string, dept: string, v: number) => setDraft(d => ({ ...d, expenses: { ...d.expenses, bySectionDept: { ...(d.expenses.bySectionDept || {}), [keys.expenseSectionDept(section, dept)]: v } } }));
+    const updateExpenseItem = (section: string, dept: string, item: string, v: number) => setDraft(d => ({ ...d, expenses: { ...d.expenses, byItem: { ...(d.expenses.byItem || {}), [keys.expenseItem(section, dept, item)]: v } } }));
+
+    // Agrupaciones derivadas para drill-down
+    const revenueByDeptItems = useMemo(() => {
+        const m: Record<string, string[]> = {};
+        (revenueItems || []).forEach(it => {
+            if (!m[it.dept]) m[it.dept] = [];
+            if (!m[it.dept].includes(it.name)) m[it.dept].push(it.name);
+        });
+        return m;
+    }, [revenueItems]);
+
+    const expenseBySectionDeptItems = useMemo(() => {
+        // section -> dept -> items[]
+        const m: Record<string, Record<string, string[]>> = {};
+        (expenseItems || []).forEach(it => {
+            if (!m[it.section]) m[it.section] = {};
+            if (!m[it.section][it.dept]) m[it.section][it.dept] = [];
+            if (!m[it.section][it.dept].includes(it.name)) m[it.section][it.dept].push(it.name);
+        });
+        return m;
+    }, [expenseItems]);
+
+    const expenseByDeptSectionItems = useMemo(() => {
+        // dept -> section -> items[]
+        const m: Record<string, Record<string, string[]>> = {};
+        (expenseItems || []).forEach(it => {
+            if (!m[it.dept]) m[it.dept] = {};
+            if (!m[it.dept][it.section]) m[it.dept][it.section] = [];
+            if (!m[it.dept][it.section].includes(it.name)) m[it.dept][it.section].push(it.name);
+        });
+        return m;
+    }, [expenseItems]);
 
     const reset = () => setDraft(structuredClone(EMPTY_SCENARIO));
 
@@ -397,7 +465,7 @@ export const ForecastScenariosModal = ({
                     </div>
                     <h2 className="text-lg font-bold">¿Qué pasaría si...?</h2>
                     <p className="text-xs text-white/80 mt-1 leading-relaxed">
-                        Simula variaciones de facturación y gastos sobre el Forecast actual. Los cambios son solo visuales, no afectan los datos.
+                        Simula variaciones de facturación y gastos sobre el {targetLabel} actual. Los cambios son solo visuales, no afectan los datos.
                     </p>
                 </div>
 
@@ -652,16 +720,34 @@ export const ForecastScenariosModal = ({
                                 <PctSelector value={draft.revenue.globalPct} onChange={updateRevenueGlobal} />
                             </div>
                             <details className="text-xs">
-                                <summary className="cursor-pointer text-gray-600 hover:text-gray-900 select-none">Ajustar por departamento</summary>
+                                <summary className="cursor-pointer text-gray-600 hover:text-gray-900 select-none">Ajustar por hubs o vertical</summary>
                                 <div className="mt-2 space-y-1.5 pl-2">
-                                    {revenueDepts.map(d => (
-                                        <div key={d} className="flex items-center justify-between">
-                                            <span className="text-gray-700">{d}</span>
-                                            <PctSelector value={draft.revenue.byDept[d] || 0} onChange={(v) => updateRevenueDept(d, v)} />
-                                        </div>
-                                    ))}
+                                    {revenueDepts.map(d => {
+                                        const items = revenueByDeptItems[d] || [];
+                                        return (
+                                            <div key={d} className="rounded-md bg-white/60 px-2 py-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-gray-700 font-medium">{d}</span>
+                                                    <PctSelector value={draft.revenue.byDept[d] || 0} onChange={(v) => updateRevenueDept(d, v)} />
+                                                </div>
+                                                {items.length > 0 && (
+                                                    <details className="mt-1">
+                                                        <summary className="cursor-pointer text-[11px] text-emerald-700 hover:text-emerald-900 select-none">Por servicio ({items.length})</summary>
+                                                        <div className="mt-1.5 space-y-1 pl-3 border-l-2 border-emerald-100">
+                                                            {items.map(it => (
+                                                                <div key={it} className="flex items-center justify-between">
+                                                                    <span className="text-[11px] text-gray-700">{it}</span>
+                                                                    <PctSelector value={draft.revenue.byItem?.[keys.revenueItem(d, it)] || 0} onChange={(v) => updateRevenueItem(d, it, v)} />
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </details>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
-                                <p className="mt-2 text-[10px] text-gray-500 italic">El % por departamento sustituye al global para ese dept.</p>
+                                <p className="mt-2 text-[10px] text-gray-500 italic">Lo más específico (servicio &gt; hub &gt; global) tiene prioridad.</p>
                             </details>
                         </div>
                     </section>
@@ -678,26 +764,98 @@ export const ForecastScenariosModal = ({
                             <details className="text-xs">
                                 <summary className="cursor-pointer text-gray-600 hover:text-gray-900 select-none">Ajustar por categoría</summary>
                                 <div className="mt-2 space-y-1.5 pl-2">
-                                    {EXPENSE_SECTION_KEYS.map(k => (
-                                        <div key={k} className="flex items-center justify-between">
-                                            <span className="text-gray-700">{EXPENSE_SECTION_LABELS[k]}</span>
-                                            <PctSelector value={draft.expenses.bySection[k] || 0} onChange={(v) => updateExpenseSection(k, v)} accent="rose" />
-                                        </div>
-                                    ))}
+                                    {EXPENSE_SECTION_KEYS.map(k => {
+                                        const depts = Object.keys(expenseBySectionDeptItems[k] || {});
+                                        return (
+                                            <div key={k} className="rounded-md bg-white/60 px-2 py-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-gray-700 font-medium">{EXPENSE_SECTION_LABELS[k]}</span>
+                                                    <PctSelector value={draft.expenses.bySection[k] || 0} onChange={(v) => updateExpenseSection(k, v)} accent="rose" />
+                                                </div>
+                                                {depts.length > 0 && (
+                                                    <details className="mt-1">
+                                                        <summary className="cursor-pointer text-[11px] text-rose-700 hover:text-rose-900 select-none">Por hub o vertical ({depts.length})</summary>
+                                                        <div className="mt-1.5 space-y-1.5 pl-3 border-l-2 border-rose-100">
+                                                            {depts.map(d => {
+                                                                const items = expenseBySectionDeptItems[k][d] || [];
+                                                                return (
+                                                                    <div key={d} className="rounded bg-white/70 px-1.5 py-1">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <span className="text-[11px] text-gray-700">{d}</span>
+                                                                            <PctSelector value={draft.expenses.bySectionDept?.[keys.expenseSectionDept(k, d)] || 0} onChange={(v) => updateExpenseSectionDept(k, d, v)} accent="rose" />
+                                                                        </div>
+                                                                        {items.length > 0 && (
+                                                                            <details className="mt-1">
+                                                                                <summary className="cursor-pointer text-[10.5px] text-gray-500 hover:text-gray-800 select-none">Por item ({items.length})</summary>
+                                                                                <div className="mt-1 space-y-0.5 pl-2.5 border-l border-gray-200">
+                                                                                    {items.map(it => (
+                                                                                        <div key={it} className="flex items-center justify-between">
+                                                                                            <span className="text-[10.5px] text-gray-700">{it}</span>
+                                                                                            <PctSelector value={draft.expenses.byItem?.[keys.expenseItem(k, d, it)] || 0} onChange={(v) => updateExpenseItem(k, d, it, v)} accent="rose" />
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </details>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </details>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </details>
 
                             <details className="text-xs">
-                                <summary className="cursor-pointer text-gray-600 hover:text-gray-900 select-none">Ajustar por departamento</summary>
+                                <summary className="cursor-pointer text-gray-600 hover:text-gray-900 select-none">Ajustar por hubs o vertical</summary>
                                 <div className="mt-2 space-y-1.5 pl-2">
-                                    {expenseDepts.map(d => (
-                                        <div key={d} className="flex items-center justify-between">
-                                            <span className="text-gray-700">{d}</span>
-                                            <PctSelector value={draft.expenses.byDept[d] || 0} onChange={(v) => updateExpenseDept(d, v)} accent="rose" />
-                                        </div>
-                                    ))}
+                                    {expenseDepts.map(d => {
+                                        const sections = Object.keys(expenseByDeptSectionItems[d] || {});
+                                        return (
+                                            <div key={d} className="rounded-md bg-white/60 px-2 py-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-gray-700 font-medium">{d}</span>
+                                                    <PctSelector value={draft.expenses.byDept[d] || 0} onChange={(v) => updateExpenseDept(d, v)} accent="rose" />
+                                                </div>
+                                                {sections.length > 0 && (
+                                                    <details className="mt-1">
+                                                        <summary className="cursor-pointer text-[11px] text-rose-700 hover:text-rose-900 select-none">Por categoría ({sections.length})</summary>
+                                                        <div className="mt-1.5 space-y-1.5 pl-3 border-l-2 border-rose-100">
+                                                            {sections.map(sec => {
+                                                                const items = expenseByDeptSectionItems[d][sec] || [];
+                                                                return (
+                                                                    <div key={sec} className="rounded bg-white/70 px-1.5 py-1">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <span className="text-[11px] text-gray-700">{EXPENSE_SECTION_LABELS[sec] || sec}</span>
+                                                                            <PctSelector value={draft.expenses.bySectionDept?.[keys.expenseSectionDept(sec, d)] || 0} onChange={(v) => updateExpenseSectionDept(sec, d, v)} accent="rose" />
+                                                                        </div>
+                                                                        {items.length > 0 && (
+                                                                            <details className="mt-1">
+                                                                                <summary className="cursor-pointer text-[10.5px] text-gray-500 hover:text-gray-800 select-none">Por item ({items.length})</summary>
+                                                                                <div className="mt-1 space-y-0.5 pl-2.5 border-l border-gray-200">
+                                                                                    {items.map(it => (
+                                                                                        <div key={it} className="flex items-center justify-between">
+                                                                                            <span className="text-[10.5px] text-gray-700">{it}</span>
+                                                                                            <PctSelector value={draft.expenses.byItem?.[keys.expenseItem(sec, d, it)] || 0} onChange={(v) => updateExpenseItem(sec, d, it, v)} accent="rose" />
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </details>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </details>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
-                                <p className="mt-2 text-[10px] text-gray-500 italic">El % por dept sustituye al de categoría y al global.</p>
+                                <p className="mt-2 text-[10px] text-gray-500 italic">Prioridad: item &gt; categoría dentro de hub &gt; hub &gt; categoría global &gt; global.</p>
                             </details>
                         </div>
                     </section>

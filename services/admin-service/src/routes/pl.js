@@ -1574,16 +1574,17 @@ router.get('/cost-per-hour/:year/:dept', async (req, res) => {
 // ================================================
 
 /**
- * GET /pl/scenarios?dept=X
- * Lista todos los escenarios. Si se pasa ?dept=X, filtra los compartidos con ese depto.
+ * GET /pl/scenarios?scope=forecast|budget&dept=X
+ * Lista escenarios filtrados por scope (forecast | budget) y opcionalmente por depto.
  */
 router.get('/scenarios', async (req, res) => {
-    const { dept } = req.query;
+    const { dept, scope } = req.query;
     try {
         let query = supabase
             .from('forecast_scenarios')
             .select('*')
             .order('created_at', { ascending: false });
+        if (scope) query = query.eq('scope', scope);
         if (dept) query = query.contains('shared_with_depts', [dept]);
         const { data, error } = await query;
         if (error) throw error;
@@ -1596,10 +1597,10 @@ router.get('/scenarios', async (req, res) => {
 
 /**
  * POST /pl/scenarios
- * Crea un escenario nuevo. body: { name, scenario, shared_with_depts }
+ * Crea un escenario nuevo. body: { name, scope, scenario, shared_with_depts }
  */
 router.post('/scenarios', async (req, res) => {
-    const { name, scenario, shared_with_depts } = req.body;
+    const { name, scenario, shared_with_depts, scope } = req.body;
     if (!name || !scenario) return res.status(400).json({ error: 'name and scenario are required' });
     try {
         const { userId, userEmail } = extractUser(req);
@@ -1608,6 +1609,7 @@ router.post('/scenarios', async (req, res) => {
             .insert({
                 name,
                 scenario,
+                scope: scope === 'budget' ? 'budget' : 'forecast',
                 shared_with_depts: Array.isArray(shared_with_depts) ? shared_with_depts : [],
                 created_by: userId,
                 created_by_email: userEmail,

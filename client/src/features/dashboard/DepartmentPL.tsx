@@ -167,11 +167,14 @@ export default function DepartmentPL() {
     const [scenarioOpen, setScenarioOpen] = useState(false);
     const [activeScenario, setActiveScenario] = useState<ForecastScenario | null>(null);
 
-    // Escenarios compartidos con este depto (solo lectura)
+    // Scope basado en pestaña activa (escenarios Forecast vs Presupuesto)
+    const deptScenarioScope: 'forecast' | 'budget' = activeTab === 'Presupuesto' ? 'budget' : 'forecast';
+
+    // Escenarios compartidos con este depto, filtrados por scope (solo lectura)
     const { data: scenariosData } = useQuery({
-        queryKey: ['forecast-scenarios', deptLabel],
-        queryFn: () => adminApi.getForecastScenarios(deptLabel),
-        enabled: !!deptLabel,
+        queryKey: ['forecast-scenarios', deptLabel, deptScenarioScope],
+        queryFn: () => adminApi.getForecastScenarios({ dept: deptLabel, scope: deptScenarioScope }),
+        enabled: !!deptLabel && (activeTab === 'Forecast' || activeTab === 'Presupuesto'),
         staleTime: 30000,
     });
     const sharedScenarios: SavedScenario[] = scenariosData?.scenarios || [];
@@ -654,7 +657,7 @@ export default function DepartmentPL() {
         const base = cellValues[getCellKey(section, dept, item, monthIdx)] || 0;
         const tabAllows = activeTab === 'Forecast' || activeTab === 'Presupuesto';
         if (!tabAllows || !activeScenario) return base;
-        const mult = resolveMultiplier(activeScenario, section, dept, monthIdx);
+        const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
         if (mult === 1) return base;
         return Math.round(base * mult * 100) / 100;
     };
@@ -2410,6 +2413,7 @@ export default function DepartmentPL() {
                     initial={activeScenario}
                     revenueDepts={deptNames}
                     expenseDepts={deptNames}
+                    targetLabel={activeTab === 'Presupuesto' ? 'Presupuesto' : 'Forecast'}
                     savedList={sharedScenarios}
                     canEdit={false}
                     shareableDepts={[]}
