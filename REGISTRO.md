@@ -778,6 +778,102 @@ CREATE TABLE IF NOT EXISTS profitability_hidden_items (
 - Verificar en producción que los fixes del historial de cambios (Creado/Editado/Eliminado) funcionan correctamente
 - Considerar añadir opción de ocultar/mostrar clientes también en P&L Matrix si el usuario lo requiere
 - (Diferido) Permitir asociar cuentas a listas de ClickUp aunque la lista no tenga horas trackeadas este año (caso Bobo Choses)
+- Ejecutar `scripts/15_estimated_lines.sql` (tabla `estimated_lines` para Forecast)
+- Ejecutar `scripts/16_pl_section_key.sql` (columna `section_key` en `budget_lines` y `estimated_lines` para separar items que comparten nombre entre secciones — ej. David sueldo vs comisión)
+- Ejecutar `scripts/17_forecast_scenarios.sql` (tabla `forecast_scenarios` para la biblioteca de escenarios)
+- Ejecutar `scripts/18_scenarios_scope.sql` (columna `scope` para separar biblioteca de escenarios Forecast vs Presupuesto)
+
+---
+
+### 2026-06-19 — Feature: Nueva pestaña Forecast (Real Estimado) en P&L Matrix y Departamentos
+
+Pestaña nueva en P&L Matrix y en cada vista de Departamento, totalmente editable e independiente del Presupuesto. Renombrada de "Real Estimado" a **Forecast** poco después de crearla.
+
+**Backend / DB:**
+- Nueva tabla `estimated_lines` (espejo exacto de `budget_lines`: mismas columnas mensuales, `cell_metadata`, `annual_total` generado).
+- Constraint `view_type` de `pl_cell_notes` expandido con `'estimated'` y `'dept-estimated'`.
+- Endpoint `/pl/matrix/:year?type=estimated` lee/escribe en `estimated_lines` (misma lógica que `budget`).
+- `POST /pl/matrix/save` con `type=estimated` escribe en `estimated_lines`.
+- Migración: `scripts/15_estimated_lines.sql`
+
+**Frontend:**
+- `client/src/lib/api/admin.ts`: tipos extendidos con `'estimated'` y `'dept-estimated'`.
+- `PLMatrix.tsx`: nueva pestaña **Forecast** entre Comparación y al final del orden de tabs; totalmente editable (mismo `renderEditableCell` que Presupuesto); notas con `view_type='estimated'`.
+- `DepartmentPL.tsx`: nueva pestaña **Forecast** read-only; notas con `view_type='dept-estimated'`.
+- Modal "¿Qué es Forecast?" accesible desde un icono ⓘ junto al título, con copy explicando la diferencia con Presupuesto.
+
+---
+
+### 2026-06-19 — Fix: Separar items mismo-nombre por sección (David sueldo vs comisión)
+
+**Problema:**
+En la pestaña Presupuesto, items que aparecían en más de una sección con el mismo nombre (caso conocido: David en Sueldos y Comisiones de Immoralia) compartían **una sola fila en `budget_lines`** porque la tabla no tenía forma de distinguir si era de sueldo o comisión. Borrar uno borraba el otro. El frontend en parseMatrixData "broadcasteaba" el mismo valor a ambos bloques.
+
+**Causa raíz:**
+`budget_lines` y `estimated_lines` no tienen columna que identifique la sección — solo `(fiscal_year, department_id, line_type, expense_category_id)`. David-Immoralia tenía 1 sola fila, no 2.
+
+**Solución:**
+- Nueva columna `section_key` (NULLABLE, VARCHAR(50)) en `budget_lines` y `estimated_lines`.
+- Backfill SQL con mapeo hardcodeado de (dept, item) → section_key, combinado con `pl_custom_rows`.
+- David-Immoralia se duplica como dos filas independientes: una con `section_key='personal'` y otra `'comisiones'`.
+- Backend GET agrupa por `${deptName}::${catName}::${sectionKey}` (antes solo por `dept::cat`).
+- Backend SAVE filtra por `section_key` en queries y lo incluye al insertar.
+- Migración: `scripts/16_pl_section_key.sql`
+
+Previo a esto se hizo una **deduplicación masiva** de `budget_lines` y `estimated_lines` (había hasta 31 filas duplicadas por combinación de saves antiguos) usando `MAX()` por mes para consolidar.
+
+---
+
+### 2026-06-20 — Feature: Escenarios "¿qué pasaría si…?" en Forecast y Presupuesto
+
+Sistema completo de simulación hipotética sobre el P&L sin tocar los datos base.
+
+**Modelo del escenario** (`client/src/features/pl/ForecastScenarios.tsx`):
+```ts
+{
+  name, range: { from, to },
+  revenue:  { globalPct, byDept, byItem? },
+  expenses: { globalPct, bySection, byDept, bySectionDept?, byItem? }
+}
+```
+- `range`: rango de meses afectados — por defecto desde el mes siguiente al actual hasta diciembre.
+- Pasos discretos de **5% en 5%** de **−30% a +30%**.
+- Prioridad de multiplicador (más específico gana): `byItem > bySectionDept > byDept > bySection > globalPct`.
+
+**UI** (`ForecastScenariosModal`):
+- Panel lateral derecho con presets (Crecimiento, Crisis, Optimización, etc.), rango temporal con chips ("Lo que queda", "Q3", "Q4", "Año completo"), configuración global y por hub/categoría con **drill-down anidado hasta item individual**.
+- Botón "Escenarios" en el header de P&L Matrix con badge contador.
+- Chip activo en el título con resumen y ✕ para volver a la base.
+- Celdas afectadas se pintan en verde (subida) o rosa (bajada), con valor base tachado debajo y delta %.
+
+**Persistencia** (tabla nueva `forecast_scenarios` en DB):
+- Columnas: `name`, `scenario` (JSONB), `shared_with_depts` (TEXT[]), `created_by`, `scope` ('forecast' | 'budget'), `created_at`.
+- Endpoints: `GET /pl/scenarios?scope=&dept=` · `POST` · `PATCH` · `DELETE`.
+- Migración: `scripts/17_forecast_scenarios.sql`
+
+**Separación Forecast vs Presupuesto** (la biblioteca era compartida en v1, corregido):
+- Campo `scope` separa las dos bibliotecas.
+- Cada pestaña ve solo SUS escenarios para guardar/editar/eliminar.
+- Migración: `scripts/18_scenarios_scope.sql`
+
+**Compartir con Hubs:**
+- Hubs hardcodeados: Immedia, Imcontent, Immoralia, Imsales.
+- Cuando un superadmin marca un escenario como compartido con un hub, el jefe de ese depto ve un banner gradiente al entrar al hub (en cualquier pestaña, no solo Forecast/Presupuesto).
+- Dot rojo pulsante en la pestaña correspondiente (Forecast o Presupuesto) indicando dónde está el escenario.
+- El jefe de hub solo PUEDE aplicar el escenario (read-only) — no editar, no borrar, no guardar.
+- Las celdas del Departamento muestran la misma visualización de escenario que en P&L Matrix (tinte + base tachada + delta %).
+
+**Group Cost reaccionando al escenario** (DepartmentPL):
+- Añadida query `getPLMatrix(year, 'estimated')` → `compEstimatedValues`.
+- En pestaña Forecast el Group cost se calcula desde datos Forecast (no Real); en Presupuesto desde Budget; en Real desde Real.
+- El multiplicador del escenario activo se aplica al cálculo de Total Revenue, Dept Revenue e Immoral Expenses → si sube gastos de Immoral, el Group del hub sube proporcionalmente.
+
+**Onboarding / Avisos:**
+- Tour interactivo con spotlight la primera vez que se entra a P&L Matrix (3 pasos: intro + spotlight en Presupuesto + spotlight en Forecast + outro).
+- Burbuja "NUEVO" junto al icono ⓘ de Forecast (primera vez).
+- Burbuja "NUEVO" junto al botón Escenarios (primera vez).
+- Quick guide de 4 pasos dentro del panel Escenarios (primera vez).
+- Todo persistido en localStorage con claves versionadas (`_v2`).
 
 ---
 
