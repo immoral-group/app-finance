@@ -170,14 +170,16 @@ export default function DepartmentPL() {
     // Scope basado en pestaña activa (escenarios Forecast vs Presupuesto)
     const deptScenarioScope: 'forecast' | 'budget' = activeTab === 'Presupuesto' ? 'budget' : 'forecast';
 
-    // Escenarios compartidos con este depto, filtrados por scope (solo lectura)
-    const { data: scenariosData } = useQuery({
-        queryKey: ['forecast-scenarios', deptLabel, deptScenarioScope],
-        queryFn: () => adminApi.getForecastScenarios({ dept: deptLabel, scope: deptScenarioScope }),
-        enabled: !!deptLabel && (activeTab === 'Forecast' || activeTab === 'Presupuesto'),
+    // TODOS los escenarios compartidos con este depto (ambos scopes) — para mostrar notificaciones y badges
+    const { data: scenariosAllData } = useQuery({
+        queryKey: ['forecast-scenarios', deptLabel, 'all'],
+        queryFn: () => adminApi.getForecastScenarios({ dept: deptLabel }),
+        enabled: !!deptLabel,
         staleTime: 30000,
     });
-    const sharedScenarios: SavedScenario[] = scenariosData?.scenarios || [];
+    const sharedScenariosAll: SavedScenario[] = scenariosAllData?.scenarios || [];
+    // Lista filtrada por scope que ve el modal (solo lectura)
+    const sharedScenarios: SavedScenario[] = sharedScenariosAll.filter((s: any) => (s.scope || 'forecast') === deptScenarioScope);
     const sharedScenariosCount = sharedScenarios.length;
 
     // Escenarios compartidos que el usuario aún no ha visto (localStorage por usuario+escenario)
@@ -185,14 +187,18 @@ export default function DepartmentPL() {
     const [seenScenarioIds, setSeenScenarioIds] = useState<string[]>(() => {
         try { return JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch { return []; }
     });
-    const unseenScenarios = sharedScenarios.filter(s => !seenScenarioIds.includes(s.id));
+    const unseenScenarios = sharedScenariosAll.filter(s => !seenScenarioIds.includes(s.id));
+    const unseenByScope = {
+        forecast: unseenScenarios.filter((s: any) => (s.scope || 'forecast') === 'forecast').length,
+        budget: unseenScenarios.filter((s: any) => (s.scope || 'forecast') === 'budget').length,
+    };
     const markScenarioSeen = (id: string) => {
         const next = Array.from(new Set([...seenScenarioIds, id]));
         localStorage.setItem(seenKey, JSON.stringify(next));
         setSeenScenarioIds(next);
     };
     const dismissAllNotifications = () => {
-        const allIds = sharedScenarios.map(s => s.id);
+        const allIds = sharedScenariosAll.map(s => s.id);
         const next = Array.from(new Set([...seenScenarioIds, ...allIds]));
         localStorage.setItem(seenKey, JSON.stringify(next));
         setSeenScenarioIds(next);
@@ -455,6 +461,11 @@ export default function DepartmentPL() {
         queryFn: () => adminApi.getPLMatrix(year, 'budget'),
     });
 
+    const { data: estimatedData } = useQuery({
+        queryKey: ['pl-matrix', year, 'estimated'],
+        queryFn: () => adminApi.getPLMatrix(year, 'estimated'),
+    });
+
     // Custom rows query — filtered by year
     const { data: customRowsData } = useQuery({
         queryKey: ['pl-custom-rows', year],
@@ -666,6 +677,48 @@ export default function DepartmentPL() {
         }
         setCompBudgetValues(vals);
     }, [budgetData, expenseSectionMap]);
+
+    const [compEstimatedValues, setCompEstimatedValues] = useState<Record<string, number>>({});
+    useEffect(() => {
+        if (!estimatedData?.sections) return;
+        const vals: Record<string, number> = {};
+        const revenueSection = estimatedData.sections.find((s: any) => s.code === 'REVENUE');
+        revenueSection?.rows?.forEach((row: any) => {
+            if (row.values && row.dept && row.name) {
+                row.values.forEach((val: number, monthIdx: number) => {
+                    vals[`revenue-${row.dept}-${row.name}-${monthIdx}`] = val || 0;
+                });
+            }
+        });
+        const expenseSection = estimatedData.sections.find((s: any) => s.code === 'EXPENSES');
+        if (expenseSection?.rows) {
+            const legacyRows = expenseSection.rows.filter((r: any) => !r.section_key);
+            const sectionKeyRows = expenseSection.rows.filter((r: any) => !!r.section_key);
+            legacyRows.forEach((row: any) => {
+                if (row.values && row.name && Array.isArray(row.values)) {
+                    const dept = row.dept || 'General';
+                    row.values.forEach((val: number, monthIdx: number) => {
+                        const mapKey = `${dept}::${row.name}`;
+                        const ms = expenseSectionMap[mapKey];
+                        if (ms && ms.length > 0) {
+                            ms.forEach((sk: string) => { vals[`${sk}-${dept}-${row.name}-${monthIdx}`] = val || 0; });
+                        } else {
+                            vals[`expense-${dept}-${row.name}-${monthIdx}`] = val || 0;
+                        }
+                    });
+                }
+            });
+            sectionKeyRows.forEach((row: any) => {
+                if (row.values && row.name && Array.isArray(row.values)) {
+                    const dept = row.dept || 'General';
+                    row.values.forEach((val: number, monthIdx: number) => {
+                        vals[`${row.section_key}-${dept}-${row.name}-${monthIdx}`] = val || 0;
+                    });
+                }
+            });
+        }
+        setCompEstimatedValues(vals);
+    }, [estimatedData, expenseSectionMap]);
 
     const getCellKey = (section: string, dept: string, item: string, monthIdx: number) => {
         return `${section}-${dept}-${item}-${monthIdx}-${typeParam}`;
@@ -1760,7 +1813,11 @@ export default function DepartmentPL() {
     const ingresosAnual = ingresosTotals.reduce((a, b) => a + b, 0);
 
     // Group Cost for the active tab (either Real or Presupuesto)
-    const activeTabGroupCost = calculateGroupCost(activeTab === 'Presupuesto' ? compBudgetValues : compRealValues);
+    const activeTabSource =
+        activeTab === 'Presupuesto' ? compBudgetValues :
+        activeTab === 'Forecast' ? compEstimatedValues :
+        compRealValues;
+    const activeTabGroupCost = calculateGroupCost(activeTabSource);
     const activeTabGroupCostAnual = activeTabGroupCost.reduce((a, b) => a + b, 0);
 
     const gastosTotals = Array(12).fill(0);
@@ -1824,17 +1881,25 @@ export default function DepartmentPL() {
                     )}
                 </h1>
                 <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                    {TABS.map(tab => (
-                        <Button
-                            key={tab}
-                            variant={activeTab === tab ? 'default' : 'ghost'}
-                            size="sm"
-                            onClick={() => setActiveTab(tab)}
-                            className="text-xs h-7 px-3"
-                        >
-                            {tab}
-                        </Button>
-                    ))}
+                    {TABS.map(tab => {
+                        const tabHasUnseen =
+                            (tab === 'Forecast' && unseenByScope.forecast > 0) ||
+                            (tab === 'Presupuesto' && unseenByScope.budget > 0);
+                        return (
+                            <Button
+                                key={tab}
+                                variant={activeTab === tab ? 'default' : 'ghost'}
+                                size="sm"
+                                onClick={() => setActiveTab(tab)}
+                                className="relative text-xs h-7 px-3"
+                            >
+                                {tab}
+                                {tabHasUnseen && (
+                                    <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white animate-pulse" title="Tienes un escenario nuevo en esta pestaña" />
+                                )}
+                            </Button>
+                        );
+                    })}
                 </div>
             </div>
             <div className="flex items-center gap-2">
@@ -2477,12 +2542,14 @@ export default function DepartmentPL() {
                 />
             )}
 
-            {/* Notificación de escenarios compartidos no vistos */}
-            {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && unseenScenarios.length > 0 && (
+            {/* Notificación de escenarios compartidos no vistos — aparece en cualquier pestaña */}
+            {unseenScenarios.length > 0 && (
                 <div className="mx-6 mt-3 space-y-1.5">
                     {unseenScenarios.map(s => {
-                        const scope = (s as any).scope === 'budget' ? 'Presupuesto' : 'Forecast';
+                        const scope: 'forecast' | 'budget' = ((s as any).scope === 'budget' ? 'budget' : 'forecast');
+                        const scopeLabel = scope === 'budget' ? 'Presupuesto' : 'Forecast';
                         const author = s.created_by_email?.split('@')[0] || 'Un superadmin';
+                        const targetTab: TabType = scope === 'budget' ? 'Presupuesto' : 'Forecast';
                         return (
                             <div
                                 key={s.id}
@@ -2493,17 +2560,17 @@ export default function DepartmentPL() {
                                 <div className="flex-1 min-w-0">
                                     <div className="text-[11px] font-extrabold tracking-wider text-white/80 uppercase">Escenario compartido contigo</div>
                                     <div className="text-sm font-bold truncate">
-                                        "{s.name}" — en {scope}
+                                        "{s.name}" · disponible en <span className="underline">{scopeLabel}</span>
                                     </div>
                                     <div className="text-[11px] text-white/85">
-                                        {author} ha compartido este escenario con {deptLabel}. Ábrelo en el panel ✨ Escenarios para verlo aplicado.
+                                        {author} compartió este escenario con {deptLabel}. Ve a la pestaña {scopeLabel} y ábrelo desde ✨ Escenarios.
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => { setScenarioOpen(true); markScenarioSeen(s.id); }}
+                                    onClick={() => { setActiveTab(targetTab); setScenarioOpen(true); markScenarioSeen(s.id); }}
                                     className="text-[11px] font-bold bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded-md transition-colors"
                                 >
-                                    Ver
+                                    Ir a {scopeLabel}
                                 </button>
                                 <button
                                     onClick={() => markScenarioSeen(s.id)}
