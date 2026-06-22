@@ -4,7 +4,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, BudgetRequest } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
-import { Download, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, MessageSquare, Calendar, Send, Check, X, Trash2, ClipboardList, Info as InfoIcon } from 'lucide-react';
+import { Download, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, MessageSquare, Calendar, Send, Check, X, Trash2, ClipboardList, Info as InfoIcon, FileText, FileSpreadsheet } from 'lucide-react';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/DropdownMenu";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { toast } from 'sonner';
 import {
     BarChart, Bar, LineChart, Line, AreaChart, Area,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -1865,6 +1874,182 @@ export default function DepartmentPL() {
     const ebitdaAnual = ingresosAnual - gastosAnual;
 
     // --- Header (shared across all tabs) ---
+    // ── Export helpers (Real/Presupuesto/Forecast/Comparación) ────────────────
+    const tabLabel = (): string => {
+        if (activeTab === 'Real') return 'Real';
+        if (activeTab === 'Presupuesto') return 'Presupuesto';
+        if (activeTab === 'Forecast') return 'Forecast';
+        if (activeTab === 'Comparación') return 'Comparacion';
+        return String(activeTab);
+    };
+
+    const exportFileBase = () => `PL_${deptLabel}_${tabLabel()}_${year}`;
+
+    // Construye filas para Real/Presupuesto/Forecast a partir del estado actual
+    type ExportRow = { section: string; dept: string; item: string; values: number[]; total: number; bold?: boolean };
+    const buildExportRowsSingle = (): ExportRow[] => {
+        const rows: ExportRow[] = [];
+        // Cabecera Ingresos
+        rows.push({ section: 'INGRESOS DE EXPLOTACIÓN', dept: '', item: '', values: ingresosTotals, total: ingresosAnual, bold: true });
+        deptRevenue.forEach(g => g.services.forEach(s => {
+            const values = MONTHS.map((_, i) => getCellValue('revenue', g.dept, s, i));
+            rows.push({ section: 'Ingresos', dept: g.dept, item: s, values, total: values.reduce((a, b) => a + b, 0) });
+        }));
+        // Gastos
+        rows.push({ section: 'GASTOS DE EXPLOTACIÓN', dept: '', item: '', values: gastosTotals, total: gastosAnual, bold: true });
+        expCats.forEach(cat => {
+            cat.items.forEach(grp => grp.items.forEach(it => {
+                const values = MONTHS.map((_, i) => getCellValue(cat.key, grp.dept, it, i));
+                rows.push({ section: cat.label, dept: grp.dept, item: it, values, total: values.reduce((a, b) => a + b, 0) });
+            }));
+        });
+        if (!isGroupCostExempt) {
+            rows.push({ section: 'Group (Immoral %)', dept: 'Immoral', item: 'Group cost', values: activeTabGroupCost, total: activeTabGroupCostAnual });
+        }
+        // EBITDA
+        rows.push({ section: 'EBITDA', dept: '', item: '', values: ebitdaTotals, total: ebitdaAnual, bold: true });
+        return rows;
+    };
+
+    // Comparación: filas con sub-filas Real / Presup / Dif
+    type CompRow = { label: string; real: number[]; budget: number[]; diff: number[]; isExpense?: boolean };
+    const buildComparisonRows = (): CompRow[] => {
+        const realRev = calcCompSectionTotal(compRealValues, 'revenue', deptRevenue);
+        const budRev = calcCompSectionTotal(compBudgetValues, 'revenue', deptRevenue);
+        const rows: CompRow[] = [];
+        rows.push({
+            label: 'INGRESOS',
+            real: realRev, budget: budRev,
+            diff: realRev.map((v, i) => v - budRev[i]),
+        });
+        const realExp = Array(12).fill(0);
+        const budExp = Array(12).fill(0);
+        expCats.forEach(cat => {
+            calcCompSectionTotal(compRealValues, cat.key, cat.items).forEach((v, i) => realExp[i] += v);
+            calcCompSectionTotal(compBudgetValues, cat.key, cat.items).forEach((v, i) => budExp[i] += v);
+        });
+        const realGC = calculateGroupCost(compRealValues);
+        const budGC = calculateGroupCost(compBudgetValues);
+        realGC.forEach((v, i) => realExp[i] += v);
+        budGC.forEach((v, i) => budExp[i] += v);
+        rows.push({
+            label: 'GASTOS',
+            real: realExp, budget: budExp,
+            diff: realExp.map((v, i) => v - budExp[i]),
+            isExpense: true,
+        });
+        const realEb = realRev.map((v, i) => v - realExp[i]);
+        const budEb = budRev.map((v, i) => v - budExp[i]);
+        rows.push({
+            label: 'EBITDA',
+            real: realEb, budget: budEb,
+            diff: realEb.map((v, i) => v - budEb[i]),
+        });
+        return rows;
+    };
+
+    const handleExportCSV = () => {
+        const BOM = '﻿';
+        const headers = ['Sección', 'Depto', 'Concepto', ...MONTHS, 'Anual'];
+        let body: (string | number)[][] = [];
+        if (activeTab === 'Comparación') {
+            const cRows = buildComparisonRows();
+            cRows.forEach(r => {
+                body.push([r.label, '', 'Real', ...r.real.map(v => Math.round(v)), Math.round(r.real.reduce((a, b) => a + b, 0))]);
+                body.push(['', '', 'Presupuesto', ...r.budget.map(v => Math.round(v)), Math.round(r.budget.reduce((a, b) => a + b, 0))]);
+                body.push(['', '', 'Diferencia', ...r.diff.map(v => Math.round(v)), Math.round(r.diff.reduce((a, b) => a + b, 0))]);
+            });
+        } else {
+            const rows = buildExportRowsSingle();
+            body = rows.map(r => [r.section, r.dept, r.item, ...r.values.map(v => Math.round(v)), Math.round(r.total)]);
+        }
+        const csv = BOM + [headers, ...body]
+            .map(row => row.map(c => {
+                const s = String(c);
+                return (s.includes(';') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+            }).join(';'))
+            .join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${exportFileBase()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success(`Exportado: ${a.download}`);
+    };
+
+    const handleExportPDF = () => {
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`P&L ${deptLabel} — ${tabLabel()} ${year}`, 14, 16);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(120);
+        doc.text(`Generado el ${new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}`, 14, 22);
+        doc.setTextColor(0);
+
+        const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        const head = [['Sección', 'Depto', 'Concepto', ...MONTHS_SHORT, 'Anual']];
+        const body: any[][] = [];
+        const boldRows: number[] = [];
+        const expenseDiffRows: number[] = [];
+
+        if (activeTab === 'Comparación') {
+            const cRows = buildComparisonRows();
+            cRows.forEach(r => {
+                boldRows.push(body.length);
+                body.push([r.label, '', 'Real',
+                    ...r.real.map(v => Math.round(v).toLocaleString('de-DE')),
+                    Math.round(r.real.reduce((a, b) => a + b, 0)).toLocaleString('de-DE')]);
+                body.push(['', '', 'Presupuesto',
+                    ...r.budget.map(v => Math.round(v).toLocaleString('de-DE')),
+                    Math.round(r.budget.reduce((a, b) => a + b, 0)).toLocaleString('de-DE')]);
+                if (r.isExpense) expenseDiffRows.push(body.length);
+                body.push(['', '', 'Diferencia',
+                    ...r.diff.map(v => Math.round(v).toLocaleString('de-DE')),
+                    Math.round(r.diff.reduce((a, b) => a + b, 0)).toLocaleString('de-DE')]);
+            });
+        } else {
+            const rows = buildExportRowsSingle();
+            rows.forEach((r, idx) => {
+                if (r.bold) boldRows.push(idx);
+                body.push([r.section, r.dept, r.item,
+                    ...r.values.map(v => Math.round(v).toLocaleString('de-DE')),
+                    Math.round(r.total).toLocaleString('de-DE')]);
+            });
+        }
+
+        autoTable(doc, {
+            startY: 26,
+            head, body,
+            theme: 'grid',
+            styles: { fontSize: 7, cellPadding: 1.5, halign: 'right' },
+            headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold', halign: 'right' },
+            columnStyles: {
+                0: { halign: 'left', cellWidth: 32, fontStyle: 'bold' },
+                1: { halign: 'left', cellWidth: 22 },
+                2: { halign: 'left', cellWidth: 38 },
+                15: { fillColor: [239, 246, 255], fontStyle: 'bold' },
+            },
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            didParseCell: (data) => {
+                if (data.section === 'body') {
+                    if (boldRows.includes(data.row.index)) {
+                        data.cell.styles.fontStyle = 'bold';
+                        data.cell.styles.fillColor = [224, 231, 255];
+                    }
+                }
+                if (data.section === 'head' && (data.column.index === 0 || data.column.index === 1 || data.column.index === 2)) {
+                    data.cell.styles.halign = 'left';
+                }
+            },
+        });
+        doc.save(`${exportFileBase()}.pdf`);
+        toast.success(`Descargado: ${exportFileBase()}.pdf`);
+    };
+
     const renderHeader = (title: string) => (
         <div className="bg-white border-b px-6 py-3 flex items-center justify-between sticky top-0 z-20">
             <div className="flex items-center gap-4">
@@ -2001,10 +2186,24 @@ export default function DepartmentPL() {
                     </Button>
                 )}
                 {activeTab !== 'Dashboard' && activeTab !== 'Solicitudes' && activeTab !== 'Facturación' && (
-                    <Button size="sm" className="gap-1 ml-2 h-7 text-xs">
-                        <Download size={12} />
-                        Exportar
-                    </Button>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button size="sm" className="gap-1 ml-2 h-7 text-xs">
+                                <Download size={12} />
+                                Exportar
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem onClick={handleExportCSV} className="gap-2 cursor-pointer">
+                                <FileSpreadsheet size={14} className="text-emerald-600" />
+                                <span className="text-xs font-medium">Exportar CSV</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={handleExportPDF} className="gap-2 cursor-pointer">
+                                <FileText size={14} className="text-rose-600" />
+                                <span className="text-xs font-medium">Exportar PDF</span>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 )}
             </div>
         </div>
