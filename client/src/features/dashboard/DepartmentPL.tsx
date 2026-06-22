@@ -4,7 +4,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, BudgetRequest } from '@/lib/api/admin';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
-import { Download, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, MessageSquare, Calendar, Send, Check, X, Trash2, ClipboardList, Info as InfoIcon } from 'lucide-react';
+import { Download, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, MessageSquare, Calendar, Send, Check, X, Trash2, ClipboardList, Info as InfoIcon, FileText, FileSpreadsheet } from 'lucide-react';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/DropdownMenu";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { toast } from 'sonner';
 import {
     BarChart, Bar, LineChart, Line, AreaChart, Area,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -16,6 +25,9 @@ import { Sparkles } from 'lucide-react';
 import { useUrlState } from '@/hooks/useUrlState';
 import NutfruitBudget from './NutfruitBudget';
 import IcexBudget from './IcexBudget';
+import BillingHubMirror from '@/features/billing/BillingHubMirror';
+import RevenueCellDetailModal from '@/features/billing/RevenueCellDetailModal';
+import { RealDetailInfoModal, FacturacionInfoModal } from '@/features/billing/HubsInfoModals';
 
 // Premium tooltip shared across all dashboard charts
 function PremiumTooltip({ active, payload, label, formatter }: any) {
@@ -40,7 +52,7 @@ function PremiumTooltip({ active, payload, label, formatter }: any) {
     );
 }
 
-const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Forecast', 'Solicitudes'] as const;
+const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Forecast', 'Solicitudes', 'Facturación'] as const;
 type TabType = typeof TABS[number];
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -164,6 +176,25 @@ export default function DepartmentPL() {
     const [bannerMonth, setBannerMonth] = useState<number | 'ytd'>('ytd');
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen_v2') === '1');
+    // Info modals para las dos nuevas funciones de facturación
+    const [realDetailInfoOpen, setRealDetailInfoOpen] = useState(false);
+    const [realDetailInfoSeen, setRealDetailInfoSeen] = useState(() => localStorage.getItem('real_billing_detail_seen_v1') === '1');
+    const [facturacionInfoOpen, setFacturacionInfoOpen] = useState(false);
+    const [facturacionInfoSeen, setFacturacionInfoSeen] = useState(() => localStorage.getItem('facturacion_info_seen_v1') === '1');
+    const openRealDetailInfo = () => {
+        setRealDetailInfoOpen(true);
+        if (!realDetailInfoSeen) {
+            localStorage.setItem('real_billing_detail_seen_v1', '1');
+            setRealDetailInfoSeen(true);
+        }
+    };
+    const openFacturacionInfo = () => {
+        setFacturacionInfoOpen(true);
+        if (!facturacionInfoSeen) {
+            localStorage.setItem('facturacion_info_seen_v1', '1');
+            setFacturacionInfoSeen(true);
+        }
+    };
     const [scenarioOpen, setScenarioOpen] = useState(false);
     const [activeScenario, setActiveScenario] = useState<ForecastScenario | null>(null);
 
@@ -252,6 +283,11 @@ export default function DepartmentPL() {
     const [hoveredCell, setHoveredCell] = useState<{
         section: string; dept: string; item: string; monthIdx: number;
         viewType: DeptNoteType; x: number; y: number;
+    } | null>(null);
+
+    // Modal de detalle de facturación al clicar celdas de ingreso en pestaña Real
+    const [revenueDetail, setRevenueDetail] = useState<{
+        dept: string; service: string; monthIdx: number; total: number;
     } | null>(null);
 
     // Close context menu on click elsewhere
@@ -867,14 +903,18 @@ export default function DepartmentPL() {
         const tinted = scenarioActive && mult !== 1 && baseVal !== 0;
         const deltaPct = Math.round((mult - 1) * 100);
         const isUp = deltaPct > 0;
+        const isRevenueRealClickable = activeTab === 'Real' && section === 'revenue' && value > 0;
         return (
             <td
                 key={monthIdx}
-                className={`border border-gray-200 px-1 py-1 text-right text-xs tabular-nums relative cursor-context-menu ${tinted ? (isUp ? 'bg-emerald-100/80 text-emerald-900' : 'bg-rose-100/80 text-rose-900') : ''}`}
+                className={`border border-gray-200 px-1 py-1 text-right text-xs tabular-nums relative ${isRevenueRealClickable ? 'cursor-pointer hover:bg-indigo-50 hover:ring-1 hover:ring-inset hover:ring-indigo-300 hover:text-indigo-900 transition-colors' : 'cursor-context-menu'} ${tinted ? (isUp ? 'bg-emerald-100/80 text-emerald-900' : 'bg-rose-100/80 text-rose-900') : ''}`}
                 onContextMenu={(e) => handleContextMenu(e, section, dept, item, monthIdx)}
                 onMouseEnter={(e) => handleMouseEnter(e, section, dept, item, monthIdx)}
                 onMouseLeave={handleMouseLeave}
-                title={tinted ? `Base: ${Math.round(baseVal).toLocaleString('de-DE')} · Escenario: ${Math.round(value).toLocaleString('de-DE')} (${isUp ? '+' : ''}${deltaPct}%)` : undefined}
+                onClick={isRevenueRealClickable ? () => setRevenueDetail({ dept, service: item, monthIdx, total: value }) : undefined}
+                title={isRevenueRealClickable
+                    ? 'Click para ver detalle de clientes facturados'
+                    : (tinted ? `Base: ${Math.round(baseVal).toLocaleString('de-DE')} · Escenario: ${Math.round(value).toLocaleString('de-DE')} (${isUp ? '+' : ''}${deltaPct}%)` : undefined)}
             >
                 {hasNote && (
                     <div className="absolute top-0 right-0 w-0 h-0 border-t-[6px] border-l-[6px] border-t-orange-500 border-l-transparent pointer-events-none" />
@@ -1834,6 +1874,182 @@ export default function DepartmentPL() {
     const ebitdaAnual = ingresosAnual - gastosAnual;
 
     // --- Header (shared across all tabs) ---
+    // ── Export helpers (Real/Presupuesto/Forecast/Comparación) ────────────────
+    const tabLabel = (): string => {
+        if (activeTab === 'Real') return 'Real';
+        if (activeTab === 'Presupuesto') return 'Presupuesto';
+        if (activeTab === 'Forecast') return 'Forecast';
+        if (activeTab === 'Comparación') return 'Comparacion';
+        return String(activeTab);
+    };
+
+    const exportFileBase = () => `PL_${deptLabel}_${tabLabel()}_${year}`;
+
+    // Construye filas para Real/Presupuesto/Forecast a partir del estado actual
+    type ExportRow = { section: string; dept: string; item: string; values: number[]; total: number; bold?: boolean };
+    const buildExportRowsSingle = (): ExportRow[] => {
+        const rows: ExportRow[] = [];
+        // Cabecera Ingresos
+        rows.push({ section: 'INGRESOS DE EXPLOTACIÓN', dept: '', item: '', values: ingresosTotals, total: ingresosAnual, bold: true });
+        deptRevenue.forEach(g => g.services.forEach(s => {
+            const values = MONTHS.map((_, i) => getCellValue('revenue', g.dept, s, i));
+            rows.push({ section: 'Ingresos', dept: g.dept, item: s, values, total: values.reduce((a, b) => a + b, 0) });
+        }));
+        // Gastos
+        rows.push({ section: 'GASTOS DE EXPLOTACIÓN', dept: '', item: '', values: gastosTotals, total: gastosAnual, bold: true });
+        expCats.forEach(cat => {
+            cat.items.forEach(grp => grp.items.forEach(it => {
+                const values = MONTHS.map((_, i) => getCellValue(cat.key, grp.dept, it, i));
+                rows.push({ section: cat.label, dept: grp.dept, item: it, values, total: values.reduce((a, b) => a + b, 0) });
+            }));
+        });
+        if (!isGroupCostExempt) {
+            rows.push({ section: 'Group (Immoral %)', dept: 'Immoral', item: 'Group cost', values: activeTabGroupCost, total: activeTabGroupCostAnual });
+        }
+        // EBITDA
+        rows.push({ section: 'EBITDA', dept: '', item: '', values: ebitdaTotals, total: ebitdaAnual, bold: true });
+        return rows;
+    };
+
+    // Comparación: filas con sub-filas Real / Presup / Dif
+    type CompRow = { label: string; real: number[]; budget: number[]; diff: number[]; isExpense?: boolean };
+    const buildComparisonRows = (): CompRow[] => {
+        const realRev = calcCompSectionTotal(compRealValues, 'revenue', deptRevenue);
+        const budRev = calcCompSectionTotal(compBudgetValues, 'revenue', deptRevenue);
+        const rows: CompRow[] = [];
+        rows.push({
+            label: 'INGRESOS',
+            real: realRev, budget: budRev,
+            diff: realRev.map((v, i) => v - budRev[i]),
+        });
+        const realExp = Array(12).fill(0);
+        const budExp = Array(12).fill(0);
+        expCats.forEach(cat => {
+            calcCompSectionTotal(compRealValues, cat.key, cat.items).forEach((v, i) => realExp[i] += v);
+            calcCompSectionTotal(compBudgetValues, cat.key, cat.items).forEach((v, i) => budExp[i] += v);
+        });
+        const realGC = calculateGroupCost(compRealValues);
+        const budGC = calculateGroupCost(compBudgetValues);
+        realGC.forEach((v, i) => realExp[i] += v);
+        budGC.forEach((v, i) => budExp[i] += v);
+        rows.push({
+            label: 'GASTOS',
+            real: realExp, budget: budExp,
+            diff: realExp.map((v, i) => v - budExp[i]),
+            isExpense: true,
+        });
+        const realEb = realRev.map((v, i) => v - realExp[i]);
+        const budEb = budRev.map((v, i) => v - budExp[i]);
+        rows.push({
+            label: 'EBITDA',
+            real: realEb, budget: budEb,
+            diff: realEb.map((v, i) => v - budEb[i]),
+        });
+        return rows;
+    };
+
+    const handleExportCSV = () => {
+        const BOM = '﻿';
+        const headers = ['Sección', 'Depto', 'Concepto', ...MONTHS, 'Anual'];
+        let body: (string | number)[][] = [];
+        if (activeTab === 'Comparación') {
+            const cRows = buildComparisonRows();
+            cRows.forEach(r => {
+                body.push([r.label, '', 'Real', ...r.real.map(v => Math.round(v)), Math.round(r.real.reduce((a, b) => a + b, 0))]);
+                body.push(['', '', 'Presupuesto', ...r.budget.map(v => Math.round(v)), Math.round(r.budget.reduce((a, b) => a + b, 0))]);
+                body.push(['', '', 'Diferencia', ...r.diff.map(v => Math.round(v)), Math.round(r.diff.reduce((a, b) => a + b, 0))]);
+            });
+        } else {
+            const rows = buildExportRowsSingle();
+            body = rows.map(r => [r.section, r.dept, r.item, ...r.values.map(v => Math.round(v)), Math.round(r.total)]);
+        }
+        const csv = BOM + [headers, ...body]
+            .map(row => row.map(c => {
+                const s = String(c);
+                return (s.includes(';') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+            }).join(';'))
+            .join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${exportFileBase()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success(`Exportado: ${a.download}`);
+    };
+
+    const handleExportPDF = () => {
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`P&L ${deptLabel} — ${tabLabel()} ${year}`, 14, 16);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(120);
+        doc.text(`Generado el ${new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}`, 14, 22);
+        doc.setTextColor(0);
+
+        const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        const head = [['Sección', 'Depto', 'Concepto', ...MONTHS_SHORT, 'Anual']];
+        const body: any[][] = [];
+        const boldRows: number[] = [];
+        const expenseDiffRows: number[] = [];
+
+        if (activeTab === 'Comparación') {
+            const cRows = buildComparisonRows();
+            cRows.forEach(r => {
+                boldRows.push(body.length);
+                body.push([r.label, '', 'Real',
+                    ...r.real.map(v => Math.round(v).toLocaleString('de-DE')),
+                    Math.round(r.real.reduce((a, b) => a + b, 0)).toLocaleString('de-DE')]);
+                body.push(['', '', 'Presupuesto',
+                    ...r.budget.map(v => Math.round(v).toLocaleString('de-DE')),
+                    Math.round(r.budget.reduce((a, b) => a + b, 0)).toLocaleString('de-DE')]);
+                if (r.isExpense) expenseDiffRows.push(body.length);
+                body.push(['', '', 'Diferencia',
+                    ...r.diff.map(v => Math.round(v).toLocaleString('de-DE')),
+                    Math.round(r.diff.reduce((a, b) => a + b, 0)).toLocaleString('de-DE')]);
+            });
+        } else {
+            const rows = buildExportRowsSingle();
+            rows.forEach((r, idx) => {
+                if (r.bold) boldRows.push(idx);
+                body.push([r.section, r.dept, r.item,
+                    ...r.values.map(v => Math.round(v).toLocaleString('de-DE')),
+                    Math.round(r.total).toLocaleString('de-DE')]);
+            });
+        }
+
+        autoTable(doc, {
+            startY: 26,
+            head, body,
+            theme: 'grid',
+            styles: { fontSize: 7, cellPadding: 1.5, halign: 'right' },
+            headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold', halign: 'right' },
+            columnStyles: {
+                0: { halign: 'left', cellWidth: 32, fontStyle: 'bold' },
+                1: { halign: 'left', cellWidth: 22 },
+                2: { halign: 'left', cellWidth: 38 },
+                15: { fillColor: [239, 246, 255], fontStyle: 'bold' },
+            },
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            didParseCell: (data) => {
+                if (data.section === 'body') {
+                    if (boldRows.includes(data.row.index)) {
+                        data.cell.styles.fontStyle = 'bold';
+                        data.cell.styles.fillColor = [224, 231, 255];
+                    }
+                }
+                if (data.section === 'head' && (data.column.index === 0 || data.column.index === 1 || data.column.index === 2)) {
+                    data.cell.styles.halign = 'left';
+                }
+            },
+        });
+        doc.save(`${exportFileBase()}.pdf`);
+        toast.success(`Descargado: ${exportFileBase()}.pdf`);
+    };
+
     const renderHeader = (title: string) => (
         <div className="bg-white border-b px-6 py-3 flex items-center justify-between sticky top-0 z-20">
             <div className="flex items-center gap-4">
@@ -1856,6 +2072,50 @@ export default function DepartmentPL() {
                                     title="Qué es Forecast"
                                     description="Lee cómo se proyecta el cierre de año"
                                     onDismiss={() => { localStorage.setItem('forecast_info_seen_v2', '1'); setForecastInfoSeen(true); }}
+                                    align="start"
+                                />
+                            )}
+                        </span>
+                    )}
+                    {activeTab === 'Real' && (
+                        <span className="relative inline-flex items-center">
+                            {!realDetailInfoSeen && (
+                                <span className="absolute -inset-1 rounded-full bg-indigo-400/40 animate-ping pointer-events-none" />
+                            )}
+                            <button
+                                onClick={openRealDetailInfo}
+                                title="Nuevo: clic en ingresos para ver detalle"
+                                className="relative inline-flex items-center justify-center h-6 w-6 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors bg-white"
+                            >
+                                <InfoIcon size={15} />
+                            </button>
+                            {!realDetailInfoSeen && (
+                                <NewFeatureBubble
+                                    title="Clic en los ingresos"
+                                    description="Tildea un monto de ingreso para ver qué clientes lo componen"
+                                    onDismiss={() => { localStorage.setItem('real_billing_detail_seen_v1', '1'); setRealDetailInfoSeen(true); }}
+                                    align="start"
+                                />
+                            )}
+                        </span>
+                    )}
+                    {activeTab === 'Facturación' && (
+                        <span className="relative inline-flex items-center">
+                            {!facturacionInfoSeen && (
+                                <span className="absolute -inset-1 rounded-full bg-indigo-400/40 animate-ping pointer-events-none" />
+                            )}
+                            <button
+                                onClick={openFacturacionInfo}
+                                title="Qué es Facturación"
+                                className="relative inline-flex items-center justify-center h-6 w-6 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors bg-white"
+                            >
+                                <InfoIcon size={15} />
+                            </button>
+                            {!facturacionInfoSeen && (
+                                <NewFeatureBubble
+                                    title="Detalle de facturación del hub"
+                                    description="Vista espejo de Billing Matrix · alterna entre mensual y anual"
+                                    onDismiss={() => { localStorage.setItem('facturacion_info_seen_v1', '1'); setFacturacionInfoSeen(true); }}
                                     align="start"
                                 />
                             )}
@@ -1925,11 +2185,25 @@ export default function DepartmentPL() {
                         </span>
                     </Button>
                 )}
-                {activeTab !== 'Dashboard' && activeTab !== 'Solicitudes' && (
-                    <Button size="sm" className="gap-1 ml-2 h-7 text-xs">
-                        <Download size={12} />
-                        Exportar
-                    </Button>
+                {activeTab !== 'Dashboard' && activeTab !== 'Solicitudes' && activeTab !== 'Facturación' && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button size="sm" className="gap-1 ml-2 h-7 text-xs">
+                                <Download size={12} />
+                                Exportar
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem onClick={handleExportCSV} className="gap-2 cursor-pointer">
+                                <FileSpreadsheet size={14} className="text-emerald-600" />
+                                <span className="text-xs font-medium">Exportar CSV</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={handleExportPDF} className="gap-2 cursor-pointer">
+                                <FileText size={14} className="text-rose-600" />
+                                <span className="text-xs font-medium">Exportar PDF</span>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 )}
             </div>
         </div>
@@ -2007,6 +2281,23 @@ export default function DepartmentPL() {
                     title={`Nota — ${editingComment.item} (${MONTHS[editingComment.monthIdx]})`}
                     users={users}
                     noteId={editingComment.noteId}
+                />
+            )}
+
+            {/* Info modals (Real detail + Facturación) */}
+            {realDetailInfoOpen && <RealDetailInfoModal onClose={() => setRealDetailInfoOpen(false)} />}
+            {facturacionInfoOpen && <FacturacionInfoModal onClose={() => setFacturacionInfoOpen(false)} />}
+
+            {/* Detalle de facturación al hacer click en celda de ingreso (Real) */}
+            {revenueDetail && (
+                <RevenueCellDetailModal
+                    isOpen={!!revenueDetail}
+                    onClose={() => setRevenueDetail(null)}
+                    year={year}
+                    monthIdx={revenueDetail.monthIdx}
+                    dept={revenueDetail.dept}
+                    serviceName={revenueDetail.service}
+                    expectedTotal={revenueDetail.total}
                 />
             )}
         </>
@@ -2497,6 +2788,17 @@ export default function DepartmentPL() {
             <div className="space-y-4 -mx-6 -mt-6">
                 {renderHeader(`SOLICITUDES PRESUPUESTO — ${deptLabel.toUpperCase()} ${year}`)}
                 {renderSolicitudesTab()}
+                {renderOverlays()}
+            </div>
+        );
+    }
+
+    // --- FACTURACIÓN TAB (espejo de Billing Matrix filtrado por hub) ---
+    if (activeTab === 'Facturación') {
+        return (
+            <div className="space-y-4 -mx-6 -mt-6">
+                {renderHeader(`FACTURACIÓN — ${deptLabel.toUpperCase()} ${year}`)}
+                <BillingHubMirror deptCode={deptCode || ''} deptLabel={deptLabel} />
                 {renderOverlays()}
             </div>
         );
