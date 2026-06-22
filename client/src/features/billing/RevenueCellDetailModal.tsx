@@ -143,7 +143,6 @@ export default function RevenueCellDetailModal({
                                         <tr>
                                             <th className="px-3 py-2 text-left font-bold text-muted-foreground tracking-wide w-8">#</th>
                                             <th className="px-3 py-2 text-left font-bold text-muted-foreground tracking-wide">Cliente</th>
-                                            <th className="px-3 py-2 text-left font-bold text-muted-foreground tracking-wide hidden sm:table-cell">Vertical</th>
                                             <th className="px-3 py-2 text-right font-bold text-muted-foreground tracking-wide">Importe</th>
                                             <th className="px-3 py-2 text-right font-bold text-muted-foreground tracking-wide w-14">%</th>
                                         </tr>
@@ -155,13 +154,6 @@ export default function RevenueCellDetailModal({
                                                 <tr key={it.client_id} className="border-t border-border/50 hover:bg-muted/30 transition-colors">
                                                     <td className="px-3 py-2 text-muted-foreground tabular-nums">{i + 1}</td>
                                                     <td className="px-3 py-2 font-semibold text-foreground">{it.client_name}</td>
-                                                    <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
-                                                        {it.vertical && (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-muted text-[10px] font-semibold">
-                                                                {it.vertical}
-                                                            </span>
-                                                        )}
-                                                    </td>
                                                     <td className="px-3 py-2 text-right tabular-nums font-bold text-indigo-700">
                                                         {fmt(it.value)} €
                                                     </td>
@@ -172,7 +164,7 @@ export default function RevenueCellDetailModal({
                                             );
                                         })}
                                         <tr className="bg-gradient-to-r from-indigo-50 to-purple-50 border-t-2 border-indigo-200">
-                                            <td colSpan={3} className="px-3 py-2.5 font-bold text-indigo-900 uppercase tracking-wider text-[11px]">
+                                            <td colSpan={2} className="px-3 py-2.5 font-bold text-indigo-900 uppercase tracking-wider text-[11px]">
                                                 Total
                                             </td>
                                             <td className="px-3 py-2.5 text-right tabular-nums font-extrabold text-indigo-900">

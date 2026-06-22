@@ -1936,7 +1936,7 @@ export default function DepartmentPL() {
                         </span>
                     </Button>
                 )}
-                {activeTab !== 'Dashboard' && activeTab !== 'Solicitudes' && (
+                {activeTab !== 'Dashboard' && activeTab !== 'Solicitudes' && activeTab !== 'Facturación' && (
                     <Button size="sm" className="gap-1 ml-2 h-7 text-xs">
                         <Download size={12} />
                         Exportar

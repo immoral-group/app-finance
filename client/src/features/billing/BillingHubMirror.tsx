@@ -1,54 +1,95 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
-import { PeriodSelector } from '@/components/shared/PeriodSelector';
-import { Download, Layers, Users, Receipt } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, FileText, Layers, Users, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from 'sonner';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { HUB_SERVICES, HubKey, buildColumnsByCode } from './hubBillingMap';
 
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 interface BillingHubMirrorProps {
-    deptCode: string; // 'immedia' | 'imcontent' | 'immoralia' | 'imsales'
+    deptCode: string;
     deptLabel: string;
 }
 
 const fmt = (n: number) =>
     Math.round(n).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
+type Mode = 'month' | 'annual';
+
 export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirrorProps) {
+    const [mode, setMode] = useState<Mode>('month');
     const [date, setDate] = useState(new Date());
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
     const hub = (deptCode || '').toLowerCase() as HubKey;
     const services = HUB_SERVICES[hub];
 
-    const { data, isLoading, isError } = useQuery({
+    // Mes individual
+    const monthQuery = useQuery({
         queryKey: ['billing-matrix', year, month],
         queryFn: () => adminApi.getMatrix(year, month),
+        enabled: mode === 'month',
         staleTime: 30_000,
     });
 
-    const view = useMemo(() => {
-        if (!data || !services) return null;
-        const cols: any[] = data.columns || [];
-        const rows: any[] = data.rows || [];
-        const colsByCode = buildColumnsByCode(cols);
+    // Año completo: 12 fetches paralelos
+    const annualQueries = useQueries({
+        queries: Array.from({ length: 12 }, (_, i) => ({
+            queryKey: ['billing-matrix', year, i + 1],
+            queryFn: () => adminApi.getMatrix(year, i + 1),
+            enabled: mode === 'annual',
+            staleTime: 30_000,
+        })),
+    });
 
-        const filteredRows = rows
-            .map(r => {
+    const isLoading = mode === 'month'
+        ? monthQuery.isLoading
+        : annualQueries.some(q => q.isLoading);
+    const isError = mode === 'month'
+        ? monthQuery.isError
+        : annualQueries.some(q => q.isError);
+
+    const view = useMemo(() => {
+        if (!services) return null;
+
+        // Acumula cells[serviceIdx] por cliente agregando uno o varios meses
+        const datasets = mode === 'month'
+            ? (monthQuery.data ? [monthQuery.data] : [])
+            : annualQueries.map(q => q.data).filter(Boolean);
+
+        if (datasets.length === 0) return null;
+
+        const clientAgg = new Map<string, { name: string; cells: number[] }>();
+
+        datasets.forEach((d: any) => {
+            const cols: any[] = d.columns || [];
+            const rows: any[] = d.rows || [];
+            const colsByCode = buildColumnsByCode(cols);
+            rows.forEach(r => {
                 const cells = services.map(svc => svc.valueFor(r, colsByCode));
-                const total = cells.reduce((s, x) => s + x, 0);
-                return {
-                    client_id: r.client_id,
-                    client_name: r.client_name,
-                    vertical: r.vertical,
-                    cells,
-                    total,
+                const has = cells.some(v => v > 0);
+                if (!has) return;
+                const cur = clientAgg.get(r.client_id) || {
+                    name: r.client_name,
+                    cells: services.map(() => 0),
                 };
-            })
+                cells.forEach((v, i) => { cur.cells[i] += v; });
+                clientAgg.set(r.client_id, cur);
+            });
+        });
+
+        const filteredRows = Array.from(clientAgg.entries())
+            .map(([client_id, v]) => ({
+                client_id,
+                client_name: v.name,
+                cells: v.cells,
+                total: v.cells.reduce((s, x) => s + x, 0),
+            }))
             .filter(r => r.total > 0)
             .sort((a, b) => b.total - a.total);
 
@@ -58,32 +99,98 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
         const grand = totals.reduce((a, b) => a + b, 0);
 
         return { rows: filteredRows, totals, grand };
-    }, [data, services]);
+    }, [mode, monthQuery.data, annualQueries, services]);
+
+    const periodLabel = mode === 'annual'
+        ? `Anual ${year}`
+        : `${MONTH_NAMES[month - 1]} ${year}`;
+    const fileSuffix = mode === 'annual' ? `Anual_${year}` : `${MONTH_NAMES[month - 1]}_${year}`;
+
+    const handlePrevMonth = () => {
+        if (mode === 'annual') return;
+        const d = new Date(date); d.setMonth(d.getMonth() - 1); setDate(d);
+    };
+    const handleNextMonth = () => {
+        if (mode === 'annual') return;
+        const d = new Date(date); d.setMonth(d.getMonth() + 1); setDate(d);
+    };
+    const handleToday = () => setDate(new Date());
 
     const handleExportCSV = () => {
         if (!view || view.rows.length === 0 || !services) return;
-        const headers = ['#', 'Cliente', 'Vertical', ...services.map(s => s.plName), 'TOTAL'];
-        const body = view.rows.map((r, i) => [
-            i + 1, r.client_name, r.vertical || '',
-            ...r.cells,
-            r.total,
-        ]);
-        const totals = ['', 'TOTALES', '', ...view.totals, view.grand];
+        const headers = ['#', 'Cliente', ...services.map(s => s.plName), 'TOTAL'];
+        const body = view.rows.map((r, i) => [i + 1, r.client_name, ...r.cells, r.total]);
+        const totals = ['', 'TOTALES', ...view.totals, view.grand];
         const BOM = '﻿';
         const csv = BOM + [headers, ...body, totals]
             .map(row => row.map(c => {
                 const s = String(c);
-                return (s.includes(';') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+                return (s.includes(';') || s.includes('"') || s.includes('\n'))
+                    ? `"${s.replace(/"/g, '""')}"` : s;
             }).join(';'))
             .join('\n');
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Facturacion_${deptLabel}_${MONTH_NAMES[month - 1]}_${year}.csv`;
+        a.download = `Facturacion_${deptLabel}_${fileSuffix}.csv`;
         a.click();
         URL.revokeObjectURL(url);
-        toast.success('CSV exportado');
+        toast.success(`Exportado: ${a.download}`);
+    };
+
+    const handleExportPDF = () => {
+        if (!view || view.rows.length === 0 || !services) return;
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Facturación — ${deptLabel}`, 14, 16);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(120);
+        doc.text(
+            `${periodLabel} · ${view.rows.length} cliente${view.rows.length === 1 ? '' : 's'} · Generado ${new Date().toLocaleDateString('es-ES')}`,
+            14, 22,
+        );
+        doc.setTextColor(0);
+
+        const head = [['#', 'Cliente', ...services.map(s => s.plName), 'Total']];
+        const body = view.rows.map((r, i) => [
+            String(i + 1),
+            r.client_name,
+            ...r.cells.map(v => v > 0 ? Math.round(v).toLocaleString('de-DE') : '—'),
+            Math.round(r.total).toLocaleString('de-DE'),
+        ]);
+        const foot = [[
+            '', 'TOTALES',
+            ...view.totals.map(v => Math.round(v).toLocaleString('de-DE')),
+            Math.round(view.grand).toLocaleString('de-DE'),
+        ]];
+
+        autoTable(doc, {
+            startY: 26,
+            head, body, foot,
+            theme: 'grid',
+            styles: { fontSize: 8, cellPadding: 2, halign: 'right' },
+            headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold', halign: 'right' },
+            footStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold', halign: 'right' },
+            columnStyles: {
+                0: { halign: 'center', cellWidth: 10 },
+                1: { halign: 'left', cellWidth: 45 },
+            },
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            didParseCell: (data) => {
+                if (data.column.index === 0 || data.column.index === 1) {
+                    if (data.section === 'head' || data.section === 'foot') {
+                        data.cell.styles.halign = data.column.index === 0 ? 'center' : 'left';
+                    }
+                }
+            },
+        });
+
+        doc.save(`Facturacion_${deptLabel}_${fileSuffix}.pdf`);
+        toast.success(`Descargado: Facturacion_${deptLabel}_${fileSuffix}.pdf`);
     };
 
     return (
@@ -99,20 +206,71 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
                             Detalle Facturación — <span className="text-indigo-600">{deptLabel}</span>
                         </h2>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                            Clientes y servicios facturados a este hub en {MONTH_NAMES[month - 1]} {year} · Solo lectura
+                            Clientes y servicios facturados a este hub en {periodLabel} · Solo lectura
                         </p>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <PeriodSelector value={date} onChange={setDate} />
+                <div className="flex items-center gap-2 flex-wrap">
+                    {/* Period selector con toggle Anual */}
+                    <div className="flex items-center rounded-md border bg-card shadow-sm overflow-hidden">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={handlePrevMonth}
+                            disabled={mode === 'annual'}
+                            className="h-9 w-9 rounded-none border-r"
+                        >
+                            <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <div className="flex h-9 min-w-[140px] items-center justify-center px-4 text-sm font-medium">
+                            {periodLabel}
+                        </div>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={handleNextMonth}
+                            disabled={mode === 'annual'}
+                            className="h-9 w-9 rounded-none border-l"
+                        >
+                            <ChevronRight className="h-4 w-4" />
+                        </Button>
+                    </div>
+                    {/* Toggle Mes / Anual */}
+                    <div className="flex items-center rounded-md border bg-card shadow-sm overflow-hidden">
+                        <button
+                            onClick={() => setMode('month')}
+                            className={`h-9 px-3 text-xs font-semibold transition-colors ${mode === 'month' ? 'bg-indigo-600 text-white' : 'hover:bg-muted text-foreground'}`}
+                        >
+                            Mes
+                        </button>
+                        <button
+                            onClick={() => setMode('annual')}
+                            className={`h-9 px-3 text-xs font-semibold transition-colors border-l ${mode === 'annual' ? 'bg-indigo-600 text-white' : 'hover:bg-muted text-foreground'}`}
+                        >
+                            Anual
+                        </button>
+                    </div>
+                    {mode === 'month' && (
+                        <Button variant="outline" size="sm" className="h-9" onClick={handleToday}>
+                            Mes Actual
+                        </Button>
+                    )}
+                    {/* Export buttons (estilo primario azul, idem otros módulos) */}
                     <Button
-                        variant="outline"
-                        className="gap-2 h-9 text-xs font-semibold"
+                        size="sm"
+                        className="gap-1.5 h-9"
                         onClick={handleExportCSV}
                         disabled={!view || view.rows.length === 0}
                     >
-                        <Download size={14} />
-                        Exportar CSV
+                        <Download size={14} /> CSV
+                    </Button>
+                    <Button
+                        size="sm"
+                        className="gap-1.5 h-9"
+                        onClick={handleExportPDF}
+                        disabled={!view || view.rows.length === 0}
+                    >
+                        <FileText size={14} /> PDF
                     </Button>
                 </div>
             </div>
@@ -150,7 +308,7 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
                         <Users className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
                         <p className="text-sm font-semibold text-foreground">Sin facturación en este período</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                            Ningún cliente tiene montos facturados a {deptLabel} en {MONTH_NAMES[month - 1]} {year}.
+                            Ningún cliente tiene montos facturados a {deptLabel} en {periodLabel}.
                         </p>
                     </div>
                 ) : (
@@ -160,7 +318,6 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
                                 <tr className="bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-indigo-200">
                                     <th className="px-3 py-2.5 text-left font-bold text-indigo-900 tracking-wide w-10">#</th>
                                     <th className="px-3 py-2.5 text-left font-bold text-indigo-900 tracking-wide">Cliente</th>
-                                    <th className="px-3 py-2.5 text-left font-bold text-indigo-900 tracking-wide hidden md:table-cell">Vertical</th>
                                     {services.map(s => (
                                         <th key={s.plName} className="px-3 py-2.5 text-right font-bold text-indigo-900 tracking-wide whitespace-nowrap">
                                             {s.plName}
@@ -176,13 +333,6 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
                                     <tr key={r.client_id} className="border-b border-border/40 hover:bg-indigo-50/40 transition-colors">
                                         <td className="px-3 py-2 text-muted-foreground tabular-nums">{idx + 1}</td>
                                         <td className="px-3 py-2 font-semibold text-foreground">{r.client_name}</td>
-                                        <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">
-                                            {r.vertical && (
-                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-muted text-[10px] font-semibold">
-                                                    {r.vertical}
-                                                </span>
-                                            )}
-                                        </td>
                                         {r.cells.map((v, i) => (
                                             <td key={i} className="px-3 py-2 text-right tabular-nums">
                                                 {v > 0
@@ -195,10 +345,9 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
                                         </td>
                                     </tr>
                                 ))}
-                                {/* Totals row */}
                                 <tr className="bg-gradient-to-r from-indigo-100 to-purple-100 border-t-2 border-indigo-300">
                                     <td className="px-3 py-2.5"></td>
-                                    <td className="px-3 py-2.5 font-bold text-indigo-900 uppercase tracking-wider text-[11px]" colSpan={2}>
+                                    <td className="px-3 py-2.5 font-bold text-indigo-900 uppercase tracking-wider text-[11px]">
                                         Totales
                                     </td>
                                     {view.totals.map((t, i) => (
