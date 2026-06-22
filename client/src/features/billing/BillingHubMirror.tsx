@@ -54,7 +54,7 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
             .filter(r => r.total > 0)
             .sort((a, b) => b.total - a.total);
 
-        const totals = deptCols.map((c, idx) =>
+        const totals = deptCols.map((_c, idx) =>
             filteredRows.reduce((s, r) => s + r.services[idx].value, 0)
         );
         const grand = totals.reduce((a, b) => a + b, 0);
