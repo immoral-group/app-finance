@@ -18,6 +18,7 @@ import NutfruitBudget from './NutfruitBudget';
 import IcexBudget from './IcexBudget';
 import BillingHubMirror from '@/features/billing/BillingHubMirror';
 import RevenueCellDetailModal from '@/features/billing/RevenueCellDetailModal';
+import { RealDetailInfoModal, FacturacionInfoModal } from '@/features/billing/HubsInfoModals';
 
 // Premium tooltip shared across all dashboard charts
 function PremiumTooltip({ active, payload, label, formatter }: any) {
@@ -166,6 +167,25 @@ export default function DepartmentPL() {
     const [bannerMonth, setBannerMonth] = useState<number | 'ytd'>('ytd');
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen_v2') === '1');
+    // Info modals para las dos nuevas funciones de facturación
+    const [realDetailInfoOpen, setRealDetailInfoOpen] = useState(false);
+    const [realDetailInfoSeen, setRealDetailInfoSeen] = useState(() => localStorage.getItem('real_billing_detail_seen_v1') === '1');
+    const [facturacionInfoOpen, setFacturacionInfoOpen] = useState(false);
+    const [facturacionInfoSeen, setFacturacionInfoSeen] = useState(() => localStorage.getItem('facturacion_info_seen_v1') === '1');
+    const openRealDetailInfo = () => {
+        setRealDetailInfoOpen(true);
+        if (!realDetailInfoSeen) {
+            localStorage.setItem('real_billing_detail_seen_v1', '1');
+            setRealDetailInfoSeen(true);
+        }
+    };
+    const openFacturacionInfo = () => {
+        setFacturacionInfoOpen(true);
+        if (!facturacionInfoSeen) {
+            localStorage.setItem('facturacion_info_seen_v1', '1');
+            setFacturacionInfoSeen(true);
+        }
+    };
     const [scenarioOpen, setScenarioOpen] = useState(false);
     const [activeScenario, setActiveScenario] = useState<ForecastScenario | null>(null);
 
@@ -1872,6 +1892,50 @@ export default function DepartmentPL() {
                             )}
                         </span>
                     )}
+                    {activeTab === 'Real' && (
+                        <span className="relative inline-flex items-center">
+                            {!realDetailInfoSeen && (
+                                <span className="absolute -inset-1 rounded-full bg-indigo-400/40 animate-ping pointer-events-none" />
+                            )}
+                            <button
+                                onClick={openRealDetailInfo}
+                                title="Nuevo: clic en ingresos para ver detalle"
+                                className="relative inline-flex items-center justify-center h-6 w-6 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors bg-white"
+                            >
+                                <InfoIcon size={15} />
+                            </button>
+                            {!realDetailInfoSeen && (
+                                <NewFeatureBubble
+                                    title="Clic en los ingresos"
+                                    description="Tildea un monto de ingreso para ver qué clientes lo componen"
+                                    onDismiss={() => { localStorage.setItem('real_billing_detail_seen_v1', '1'); setRealDetailInfoSeen(true); }}
+                                    align="start"
+                                />
+                            )}
+                        </span>
+                    )}
+                    {activeTab === 'Facturación' && (
+                        <span className="relative inline-flex items-center">
+                            {!facturacionInfoSeen && (
+                                <span className="absolute -inset-1 rounded-full bg-indigo-400/40 animate-ping pointer-events-none" />
+                            )}
+                            <button
+                                onClick={openFacturacionInfo}
+                                title="Qué es Facturación"
+                                className="relative inline-flex items-center justify-center h-6 w-6 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors bg-white"
+                            >
+                                <InfoIcon size={15} />
+                            </button>
+                            {!facturacionInfoSeen && (
+                                <NewFeatureBubble
+                                    title="Detalle de facturación del hub"
+                                    description="Vista espejo de Billing Matrix · alterna entre mensual y anual"
+                                    onDismiss={() => { localStorage.setItem('facturacion_info_seen_v1', '1'); setFacturacionInfoSeen(true); }}
+                                    align="start"
+                                />
+                            )}
+                        </span>
+                    )}
                     {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && activeScenario && !isScenarioEmpty(activeScenario) && (
                         <span
                             className="ml-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white shadow"
@@ -2020,6 +2084,10 @@ export default function DepartmentPL() {
                     noteId={editingComment.noteId}
                 />
             )}
+
+            {/* Info modals (Real detail + Facturación) */}
+            {realDetailInfoOpen && <RealDetailInfoModal onClose={() => setRealDetailInfoOpen(false)} />}
+            {facturacionInfoOpen && <FacturacionInfoModal onClose={() => setFacturacionInfoOpen(false)} />}
 
             {/* Detalle de facturación al hacer click en celda de ingreso (Real) */}
             {revenueDetail && (
