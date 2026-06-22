@@ -883,3 +883,97 @@ Sistema completo de simulación hipotética sobre el P&L sin tocar los datos bas
 - El commissions-service tiene su propia copia de `changeLogger.js` porque es un proceso Node.js independiente (puerto 3012) con su propio árbol de imports.
 - **Patrón "nueva columna en Billing Matrix → fila P&L existente":** crear servicio en BD (`services` + `service_year_assignments`), añadir `getSvc('CODE')` al array del depto en `MatrixGrid.tsx`, y añadir entrada al `serviceMapping` de `pl.js`. La fila destino en P&L ya debe existir en `REVENUE_STRUCTURE` y en `revenueData` (línea 471 de pl.js).
 - **Helper `calculateGroupCost(valuesMap)` en DepartmentPL.tsx:** usar siempre que se quiera obtener la cuota de Immoral % de un depto, ya sea para datos Real o Presupuesto. Pasar `compRealValues` o `compBudgetValues` según el caso.
+
+---
+
+### 2026-06-22 — Detalle de facturación en hubs (rama `feat/detallefacturacionhubs`, mergeada a `main`)
+
+**Propósito:** dar visibilidad — solo lectura — de qué clientes y qué montos componen el ingreso de cada hub, sin alterar la lógica existente de Billing Matrix ni de P&L.
+
+#### 1. Nueva pestaña "Facturación" en los hubs
+
+Espejo del Billing Matrix filtrado por hub (Immedia, Imcontent, Immoralia, Imsales). Muestra las mismas filas (clientes) y columnas (servicios) que la pestaña Real del P&L del hub, pero pivotadas: filas = cliente, columnas = servicios del hub, celdas = monto facturado.
+
+- `client/src/features/billing/BillingHubMirror.tsx` _(archivo nuevo)_
+  - Filtrado solo a clientes con `total > 0` en el hub, ordenados de mayor a menor.
+  - Toggle **Mes / Anual**: en Anual se hace fetch paralelo de los 12 meses (`useQueries`) y se agrega por cliente y servicio.
+  - 3 KPI cards: clientes facturados, servicios del hub, total facturación.
+  - Exportar **CSV** y **PDF** (`jspdf` + `jspdf-autotable`) con el período y el hub en el nombre del fichero (`Facturacion_<Hub>_<Mes_Año>.{csv|pdf}` o `_Anual_<año>`).
+  - Estados vacíos diferenciados (hub no soportado / sin facturación en el período).
+  - Sin columna "Vertical" (a petición).
+
+- `client/src/features/billing/hubBillingMap.ts` _(archivo nuevo)_
+  - Mapping canónico **P&L hubs → datos Billing Matrix**, idéntico a la lógica del backend en `services/admin-service/src/routes/pl.js` (líneas 588-645).
+  - Crítico: NO se puede matchear por nombre de servicio porque:
+    - "Paid General" / "Paid imfilms" no son columnas — son `monthly_billing.fee_paid` filtrado por `vertical = 'imfilms'` o no.
+    - Los demás se mapean por **service.code** (BRANDING, CONTENT_DESIGN, etc.), no por nombre, ya que existen "Set-up Inicial" en varios departamentos.
+  - Estructura:
+    ```ts
+    HUB_SERVICES = {
+      immedia: [Paid General, Paid imfilms, Setup inicial (PAID_MEDIA_SETUP)],
+      imcontent: [Branding, Diseño, Contenido con IA, RRSS, Estrategia Digital, Influencers, Diseño de Landing, Budget Nutfruit],
+      immoralia: [Setup inicial IA, Automation, Consultoría],
+      imsales: [Setup inicial (ims), Captación],
+    }
+    ```
+  - Cada `HubServiceDef` tiene `valueFor(row, columnsByCode) => number` que sabe cómo extraer el monto.
+
+#### 2. Detalle de clientes al clicar montos de ingreso en pestaña Real
+
+- `client/src/features/billing/RevenueCellDetailModal.tsx` _(archivo nuevo)_
+  - Se activa solo cuando `activeTab === 'Real'`, `section === 'revenue'` y `value > 0`.
+  - Header en gradiente índigo/púrpura/rosa con 3 mini-stats: P&L Real / Billing / Clientes.
+  - Tabla: # · Cliente · Importe · % del total (sin columna Vertical).
+  - Si el total Billing no coincide con el P&L Real, aviso amarillo con la diferencia.
+  - Usa el mismo `hubBillingMap.ts` para resolver clientes/montos.
+
+- En `DepartmentPL.tsx`:
+  - `renderReadOnlyCell` añade `onClick` y estilos hover (cursor-pointer + ring índigo) cuando la celda es clicable.
+  - Sin colisión con el `onContextMenu` existente (notas).
+
+#### 3. Botón Exportar del header con dropdown CSV/PDF
+
+Antes era un stub sin acción. Ahora aplica a Real, Presupuesto, Forecast y Comparación.
+
+- `DepartmentPL.tsx`:
+  - `DropdownMenu` con "Exportar CSV" (icono verde) y "Exportar PDF" (icono rojo).
+  - Helpers `buildExportRowsSingle()` y `buildComparisonRows()` reutilizan `getCellValue`, `calculateSectionTotal` y `calculateGroupCost`.
+  - PDF landscape A3, cabecera índigo, subtotales en negrita (Ingresos, Gastos, Group cost si aplica, EBITDA).
+  - Comparación expande cada concepto en 3 filas: Real / Presupuesto / Diferencia.
+  - Nombre fichero: `PL_<hub>_<Tab>_<año>.{csv|pdf}`.
+  - El dropdown se oculta en Dashboard, Solicitudes y Facturación (esas pestañas tienen sus propios botones específicos o no aplican).
+
+#### 4. Avisos NUEVO para descubrir las funciones
+
+- `client/src/features/billing/HubsInfoModals.tsx` _(archivo nuevo)_
+  - `RealDetailInfoModal`: explica el clic-detalle de ingresos.
+  - `FacturacionInfoModal`: explica el espejo del Billing Matrix, el toggle Mes/Anual y el export.
+  - Mismo patrón visual que `ForecastInfoModal` (gradiente índigo, emoji, lista de 3-4 puntos).
+
+- En `DepartmentPL.tsx`:
+  - Botón `InfoIcon` junto al título cuando `activeTab === 'Real'` o `activeTab === 'Facturación'`, con halo pulsante hasta que se ve por primera vez.
+  - `NewFeatureBubble` flotante debajo del título (reutilizado de `ForecastScenarios.tsx`).
+  - Persistencia "visto" en localStorage:
+    - `real_billing_detail_seen_v1`
+    - `facturacion_info_seen_v1`
+
+#### Garantías de no-romper
+
+- `BillingMatrix.tsx` y `MatrixGrid.tsx`: intactos. Esta feature solo lee la salida de `adminApi.getMatrix`.
+- `pl.js` y demás rutas backend: intactos. No se añadieron endpoints.
+- `DepartmentPL.tsx`: cambios aditivos — nueva pestaña, nuevo state, nuevas funciones export, info icons; no se tocó la lógica de notas, escenarios, budget requests, comparación, EBITDA ni group cost.
+
+#### Notas técnicas
+
+- El "toggle Anual" es **client-side**: 12 fetches paralelos cacheados por React Query (`staleTime: 30s`). No requiere endpoint nuevo.
+- Si en el futuro Billing Matrix añade columnas para nuevos servicios del P&L, ampliar `HUB_SERVICES` en `hubBillingMap.ts` con `svcByCode('Nombre P&L', 'CODE_SERVICIO')` y aparecerá automáticamente en el espejo y en el detalle.
+- `RevenueCellDetailModal` solo soporta los servicios listados en `hubBillingMap.ts`. Si se clica un servicio sin mapeo (ej: SEO, Web dev, Otros servicios) muestra estado "Servicio no mapeado" en vez de tabla vacía engañosa.
+
+**Commits relevantes (rama mergeada con `--no-ff`):**
+- `7cf8084` feat(hubs): añadir pestaña Facturación y detalle de celda Real
+- `6370079` fix(hubs): eliminar var no usada
+- `107e341` fix(hubs): mapear servicios al P&L canónico
+- `3796f3a` feat(hubs): toggle Anual, export CSV+PDF, quitar col Vertical
+- `1543fa4` feat(hubs): avisos NUEVO en pestañas Real y Facturación
+- `0dd8126` feat(hubs): exportar P&L a CSV/PDF desde dropdown del header
+- `bb47c8f` merge commit en main
