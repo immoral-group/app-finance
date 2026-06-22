@@ -5,12 +5,13 @@ import { PeriodSelector } from '@/components/shared/PeriodSelector';
 import { Download, Layers, Users, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { toast } from 'sonner';
+import { HUB_SERVICES, HubKey, buildColumnsByCode } from './hubBillingMap';
 
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 interface BillingHubMirrorProps {
-    deptCode: string;
+    deptCode: string; // 'immedia' | 'imcontent' | 'immoralia' | 'imsales'
     deptLabel: string;
 }
 
@@ -21,6 +22,8 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
     const [date, setDate] = useState(new Date());
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
+    const hub = (deptCode || '').toLowerCase() as HubKey;
+    const services = HUB_SERVICES[hub];
 
     const { data, isLoading, isError } = useQuery({
         queryKey: ['billing-matrix', year, month],
@@ -29,46 +32,41 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
     });
 
     const view = useMemo(() => {
-        if (!data) return null;
+        if (!data || !services) return null;
         const cols: any[] = data.columns || [];
         const rows: any[] = data.rows || [];
-
-        const target = deptLabel.toLowerCase();
-        const deptCols = cols.filter(c => {
-            const dn = (c.department?.name || '').toLowerCase();
-            const dc = (c.department?.code || '').toLowerCase();
-            return dn === target || dc === deptCode.toLowerCase();
-        });
-
-        if (deptCols.length === 0) return { cols: [], rows: [], totals: [], grand: 0 };
+        const colsByCode = buildColumnsByCode(cols);
 
         const filteredRows = rows
             .map(r => {
-                const services = deptCols.map(c => ({
-                    col: c,
-                    value: Number(r.services?.[c.id] || 0),
-                }));
-                const total = services.reduce((s, x) => s + x.value, 0);
-                return { client_id: r.client_id, client_name: r.client_name, vertical: r.vertical, services, total };
+                const cells = services.map(svc => svc.valueFor(r, colsByCode));
+                const total = cells.reduce((s, x) => s + x, 0);
+                return {
+                    client_id: r.client_id,
+                    client_name: r.client_name,
+                    vertical: r.vertical,
+                    cells,
+                    total,
+                };
             })
             .filter(r => r.total > 0)
             .sort((a, b) => b.total - a.total);
 
-        const totals = deptCols.map((_c, idx) =>
-            filteredRows.reduce((s, r) => s + r.services[idx].value, 0)
+        const totals = services.map((_s, idx) =>
+            filteredRows.reduce((s, r) => s + r.cells[idx], 0)
         );
         const grand = totals.reduce((a, b) => a + b, 0);
 
-        return { cols: deptCols, rows: filteredRows, totals, grand };
-    }, [data, deptLabel, deptCode]);
+        return { rows: filteredRows, totals, grand };
+    }, [data, services]);
 
     const handleExportCSV = () => {
-        if (!view || view.rows.length === 0) return;
-        const headers = ['#', 'Cliente', 'Vertical', ...view.cols.map(c => c.name), 'TOTAL'];
+        if (!view || view.rows.length === 0 || !services) return;
+        const headers = ['#', 'Cliente', 'Vertical', ...services.map(s => s.plName), 'TOTAL'];
         const body = view.rows.map((r, i) => [
             i + 1, r.client_name, r.vertical || '',
-            ...r.services.map(s => s.value),
-            r.total
+            ...r.cells,
+            r.total,
         ]);
         const totals = ['', 'TOTALES', '', ...view.totals, view.grand];
         const BOM = '﻿';
@@ -120,10 +118,10 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
             </div>
 
             {/* KPI cards */}
-            {view && view.rows.length > 0 && (
+            {view && view.rows.length > 0 && services && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <KPI icon={<Users className="h-4 w-4" />} label="Clientes facturados" value={String(view.rows.length)} tone="indigo" />
-                    <KPI icon={<Layers className="h-4 w-4" />} label="Servicios activos" value={String(view.cols.length)} tone="violet" />
+                    <KPI icon={<Layers className="h-4 w-4" />} label="Servicios del hub" value={String(services.length)} tone="violet" />
                     <KPI icon={<Receipt className="h-4 w-4" />} label="Total facturación" value={`${fmt(view.grand)} €`} tone="emerald" />
                 </div>
             )}
@@ -139,15 +137,15 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
                     <div className="p-10 text-center">
                         <p className="text-sm font-semibold text-red-600">Error al cargar los datos</p>
                     </div>
-                ) : !view || view.cols.length === 0 ? (
+                ) : !services ? (
                     <div className="p-12 text-center">
                         <Layers className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
-                        <p className="text-sm font-semibold text-foreground">No hay servicios definidos para {deptLabel}</p>
+                        <p className="text-sm font-semibold text-foreground">Hub no soportado</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                            Asigna servicios de este hub en el módulo de configuración para verlos aquí.
+                            Solo Immedia, Imcontent, Immoralia e Imsales tienen detalle de facturación.
                         </p>
                     </div>
-                ) : view.rows.length === 0 ? (
+                ) : !view || view.rows.length === 0 ? (
                     <div className="p-12 text-center">
                         <Users className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
                         <p className="text-sm font-semibold text-foreground">Sin facturación en este período</p>
@@ -163,9 +161,9 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
                                     <th className="px-3 py-2.5 text-left font-bold text-indigo-900 tracking-wide w-10">#</th>
                                     <th className="px-3 py-2.5 text-left font-bold text-indigo-900 tracking-wide">Cliente</th>
                                     <th className="px-3 py-2.5 text-left font-bold text-indigo-900 tracking-wide hidden md:table-cell">Vertical</th>
-                                    {view.cols.map(c => (
-                                        <th key={c.id} className="px-3 py-2.5 text-right font-bold text-indigo-900 tracking-wide whitespace-nowrap">
-                                            {c.name}
+                                    {services.map(s => (
+                                        <th key={s.plName} className="px-3 py-2.5 text-right font-bold text-indigo-900 tracking-wide whitespace-nowrap">
+                                            {s.plName}
                                         </th>
                                     ))}
                                     <th className="px-3 py-2.5 text-right font-bold text-indigo-900 tracking-wide bg-indigo-100">
@@ -185,10 +183,10 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
                                                 </span>
                                             )}
                                         </td>
-                                        {r.services.map((s, i) => (
+                                        {r.cells.map((v, i) => (
                                             <td key={i} className="px-3 py-2 text-right tabular-nums">
-                                                {s.value > 0
-                                                    ? <span className="font-medium text-foreground">{fmt(s.value)}</span>
+                                                {v > 0
+                                                    ? <span className="font-medium text-foreground">{fmt(v)}</span>
                                                     : <span className="text-muted-foreground/40">—</span>}
                                             </td>
                                         ))}
@@ -219,7 +217,7 @@ export default function BillingHubMirror({ deptCode, deptLabel }: BillingHubMirr
             </div>
 
             <p className="text-[11px] text-muted-foreground italic px-1">
-                💡 Vista espejo de Billing Matrix filtrada por hub. Para editar montos ve al módulo Billing Matrix.
+                💡 Vista espejo de Billing Matrix mapeada a los servicios del P&L. Para editar montos ve a Billing Matrix.
             </p>
         </div>
     );

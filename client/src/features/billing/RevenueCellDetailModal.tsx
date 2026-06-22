@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { X, Receipt, TrendingUp, Users, Search } from 'lucide-react';
+import { findHubService, buildColumnsByCode } from './hubBillingMap';
 
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -12,26 +13,20 @@ interface Props {
     year: number;
     monthIdx: number; // 0-11
     dept: string; // e.g. "Immedia"
-    serviceName: string; // e.g. "Branding"
-    expectedTotal: number; // amount shown in the PL cell
+    serviceName: string; // e.g. "Paid General"
+    expectedTotal: number; // monto mostrado en la celda P&L Real
 }
 
 const fmt = (n: number) =>
     Math.round(n).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-
-// Normaliza strings para comparar (sin acentos, lowercase, sin espacios extra)
-const norm = (s: string) =>
-    (s || '')
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '')
-        .trim();
 
 export default function RevenueCellDetailModal({
     isOpen, onClose, year, monthIdx, dept, serviceName, expectedTotal,
 }: Props) {
     const month = monthIdx + 1;
     const enabled = isOpen;
+
+    const mapping = useMemo(() => findHubService(dept, serviceName), [dept, serviceName]);
 
     const { data, isLoading, isError } = useQuery({
         queryKey: ['billing-matrix', year, month],
@@ -41,55 +36,24 @@ export default function RevenueCellDetailModal({
     });
 
     const view = useMemo(() => {
-        if (!data) return null;
+        if (!data || !mapping) return null;
         const cols: any[] = data.columns || [];
         const rows: any[] = data.rows || [];
-
-        const targetDept = norm(dept);
-        const targetSvc = norm(serviceName);
-
-        // 1) Try exact match on (dept + name)
-        let matchCols = cols.filter(c => {
-            const cd = norm(c.department?.name || '');
-            const cn = norm(c.name || '');
-            return cd === targetDept && cn === targetSvc;
-        });
-
-        // 2) Fallback: relaxed contains (handles label variants like "Setup inicial" vs "Set-up Inicial")
-        if (matchCols.length === 0) {
-            matchCols = cols.filter(c => {
-                const cd = norm(c.department?.name || '');
-                const cn = norm(c.name || '');
-                return cd === targetDept && (cn.includes(targetSvc) || targetSvc.includes(cn));
-            });
-        }
-
-        // 3) Last resort: match by name within department keyword
-        if (matchCols.length === 0) {
-            matchCols = cols.filter(c => {
-                const cn = norm(c.name || '');
-                return cn === targetSvc;
-            });
-        }
-
-        if (matchCols.length === 0) return { items: [], total: 0, matched: false };
+        const colsByCode = buildColumnsByCode(cols);
 
         const items = rows
-            .map(r => {
-                const value = matchCols.reduce((sum, c) => sum + Number(r.services?.[c.id] || 0), 0);
-                return {
-                    client_id: r.client_id,
-                    client_name: r.client_name,
-                    vertical: r.vertical,
-                    value,
-                };
-            })
+            .map(r => ({
+                client_id: r.client_id,
+                client_name: r.client_name,
+                vertical: r.vertical,
+                value: mapping.def.valueFor(r, colsByCode),
+            }))
             .filter(i => i.value > 0)
             .sort((a, b) => b.value - a.value);
 
         const total = items.reduce((s, i) => s + i.value, 0);
-        return { items, total, matched: true };
-    }, [data, dept, serviceName]);
+        return { items, total };
+    }, [data, mapping]);
 
     if (!isOpen) return null;
 
@@ -137,7 +101,15 @@ export default function RevenueCellDetailModal({
 
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto p-5">
-                    {isLoading ? (
+                    {!mapping ? (
+                        <div className="py-10 text-center">
+                            <Search className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+                            <p className="text-sm font-semibold text-foreground">Servicio no mapeado</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                                Solo hay detalle de clientes para servicios de Immedia, Imcontent, Immoralia e Imsales.
+                            </p>
+                        </div>
+                    ) : isLoading ? (
                         <div className="py-10 text-center">
                             <div className="h-7 w-7 rounded-full border-2 border-primary/20 border-t-primary animate-spin mx-auto mb-3" />
                             <p className="text-xs text-muted-foreground">Cargando facturación...</p>
@@ -146,20 +118,12 @@ export default function RevenueCellDetailModal({
                         <div className="py-10 text-center">
                             <p className="text-sm font-semibold text-red-600">No se pudo cargar el detalle</p>
                         </div>
-                    ) : !view || !view.matched ? (
-                        <div className="py-10 text-center">
-                            <Search className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
-                            <p className="text-sm font-semibold text-foreground">Sin coincidencia en Billing Matrix</p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                                El servicio "{serviceName}" de {dept} no existe en la matriz de facturación de este período.
-                            </p>
-                        </div>
-                    ) : view.items.length === 0 ? (
+                    ) : !view || view.items.length === 0 ? (
                         <div className="py-10 text-center">
                             <Users className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
                             <p className="text-sm font-semibold text-foreground">Sin clientes facturados</p>
                             <p className="text-xs text-muted-foreground mt-1">
-                                Ningún cliente tiene monto en este servicio para {MONTH_NAMES[monthIdx]} {year}.
+                                Ningún cliente tiene este servicio en Billing Matrix para {MONTH_NAMES[monthIdx]} {year}.
                             </p>
                         </div>
                     ) : (
