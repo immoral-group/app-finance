@@ -16,6 +16,8 @@ import { Sparkles } from 'lucide-react';
 import { useUrlState } from '@/hooks/useUrlState';
 import NutfruitBudget from './NutfruitBudget';
 import IcexBudget from './IcexBudget';
+import BillingHubMirror from '@/features/billing/BillingHubMirror';
+import RevenueCellDetailModal from '@/features/billing/RevenueCellDetailModal';
 
 // Premium tooltip shared across all dashboard charts
 function PremiumTooltip({ active, payload, label, formatter }: any) {
@@ -40,7 +42,7 @@ function PremiumTooltip({ active, payload, label, formatter }: any) {
     );
 }
 
-const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Forecast', 'Solicitudes'] as const;
+const TABS = ['Dashboard', 'Real', 'Presupuesto', 'Comparación', 'Forecast', 'Solicitudes', 'Facturación'] as const;
 type TabType = typeof TABS[number];
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -252,6 +254,11 @@ export default function DepartmentPL() {
     const [hoveredCell, setHoveredCell] = useState<{
         section: string; dept: string; item: string; monthIdx: number;
         viewType: DeptNoteType; x: number; y: number;
+    } | null>(null);
+
+    // Modal de detalle de facturación al clicar celdas de ingreso en pestaña Real
+    const [revenueDetail, setRevenueDetail] = useState<{
+        dept: string; service: string; monthIdx: number; total: number;
     } | null>(null);
 
     // Close context menu on click elsewhere
@@ -867,14 +874,18 @@ export default function DepartmentPL() {
         const tinted = scenarioActive && mult !== 1 && baseVal !== 0;
         const deltaPct = Math.round((mult - 1) * 100);
         const isUp = deltaPct > 0;
+        const isRevenueRealClickable = activeTab === 'Real' && section === 'revenue' && value > 0;
         return (
             <td
                 key={monthIdx}
-                className={`border border-gray-200 px-1 py-1 text-right text-xs tabular-nums relative cursor-context-menu ${tinted ? (isUp ? 'bg-emerald-100/80 text-emerald-900' : 'bg-rose-100/80 text-rose-900') : ''}`}
+                className={`border border-gray-200 px-1 py-1 text-right text-xs tabular-nums relative ${isRevenueRealClickable ? 'cursor-pointer hover:bg-indigo-50 hover:ring-1 hover:ring-inset hover:ring-indigo-300 hover:text-indigo-900 transition-colors' : 'cursor-context-menu'} ${tinted ? (isUp ? 'bg-emerald-100/80 text-emerald-900' : 'bg-rose-100/80 text-rose-900') : ''}`}
                 onContextMenu={(e) => handleContextMenu(e, section, dept, item, monthIdx)}
                 onMouseEnter={(e) => handleMouseEnter(e, section, dept, item, monthIdx)}
                 onMouseLeave={handleMouseLeave}
-                title={tinted ? `Base: ${Math.round(baseVal).toLocaleString('de-DE')} · Escenario: ${Math.round(value).toLocaleString('de-DE')} (${isUp ? '+' : ''}${deltaPct}%)` : undefined}
+                onClick={isRevenueRealClickable ? () => setRevenueDetail({ dept, service: item, monthIdx, total: value }) : undefined}
+                title={isRevenueRealClickable
+                    ? 'Click para ver detalle de clientes facturados'
+                    : (tinted ? `Base: ${Math.round(baseVal).toLocaleString('de-DE')} · Escenario: ${Math.round(value).toLocaleString('de-DE')} (${isUp ? '+' : ''}${deltaPct}%)` : undefined)}
             >
                 {hasNote && (
                     <div className="absolute top-0 right-0 w-0 h-0 border-t-[6px] border-l-[6px] border-t-orange-500 border-l-transparent pointer-events-none" />
@@ -2009,6 +2020,19 @@ export default function DepartmentPL() {
                     noteId={editingComment.noteId}
                 />
             )}
+
+            {/* Detalle de facturación al hacer click en celda de ingreso (Real) */}
+            {revenueDetail && (
+                <RevenueCellDetailModal
+                    isOpen={!!revenueDetail}
+                    onClose={() => setRevenueDetail(null)}
+                    year={year}
+                    monthIdx={revenueDetail.monthIdx}
+                    dept={revenueDetail.dept}
+                    serviceName={revenueDetail.service}
+                    expectedTotal={revenueDetail.total}
+                />
+            )}
         </>
     );
 
@@ -2497,6 +2521,17 @@ export default function DepartmentPL() {
             <div className="space-y-4 -mx-6 -mt-6">
                 {renderHeader(`SOLICITUDES PRESUPUESTO — ${deptLabel.toUpperCase()} ${year}`)}
                 {renderSolicitudesTab()}
+                {renderOverlays()}
+            </div>
+        );
+    }
+
+    // --- FACTURACIÓN TAB (espejo de Billing Matrix filtrado por hub) ---
+    if (activeTab === 'Facturación') {
+        return (
+            <div className="space-y-4 -mx-6 -mt-6">
+                {renderHeader(`FACTURACIÓN — ${deptLabel.toUpperCase()} ${year}`)}
+                <BillingHubMirror deptCode={deptCode || ''} deptLabel={deptLabel} />
                 {renderOverlays()}
             </div>
         );
