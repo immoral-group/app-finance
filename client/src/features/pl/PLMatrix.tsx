@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
-import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, scenarioSummary, HUBS, type ForecastScenario, type SavedScenario } from './ForecastScenarios';
+import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowsBySection, addedRowValue, scenarioSummary, HUBS, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from './ForecastScenarios';
 
 const TABS = ['Real', 'Presupuesto', 'Comparación', 'Forecast'] as const;
 type TabType = typeof TABS[number];
@@ -85,6 +85,17 @@ const EXPENSE_STRUCTURE = {
         { dept: 'Immedia', items: ['Adspent'] },
         { dept: 'Imcontent', items: ['Adspent Nutfruit', 'Influencers'] },
     ]
+};
+
+// Section key → structure key mapping (usado por escenarios y por mergedExpenseStructure)
+const EXPENSE_SECTION_TO_STRUCT: Record<string, keyof typeof EXPENSE_STRUCTURE> = {
+    personal: 'personalItems',
+    comisiones: 'comisionesItems',
+    marketing: 'marketingItems',
+    formacion: 'formacionItems',
+    software: 'softwareItems',
+    gastosOp: 'gastosOpItems',
+    adspent: 'adspentItems',
 };
 
 interface CellData {
@@ -897,6 +908,13 @@ export default function PLMatrix() {
     };
 
     // ── Merge custom rows into structures ─────────────────────────────────────
+    // Filas añadidas por el escenario activo — solo se muestran en las pestañas donde aplica.
+    const scenarioAddedRows: ScenarioAddedRow[] = useMemo(() => {
+        const tabAllows = activeTab === 'Forecast' || activeTab === 'Presupuesto';
+        if (!tabAllows || !activeScenario) return [];
+        return activeScenario.addedRows || [];
+    }, [activeTab, activeScenario]);
+
     const mergedExpenseStructure = useMemo(() => {
         const expCustom = customRows.filter(r => r.block_type === 'expense');
         const merged = { ...EXPENSE_STRUCTURE };
@@ -907,19 +925,8 @@ export default function PLMatrix() {
             merged[k] = merged[k].map(g => ({ ...g, items: [...g.items] }));
         });
 
-        // Section key → structure key mapping
-        const sectionToKey: Record<string, keyof typeof EXPENSE_STRUCTURE> = {
-            personal: 'personalItems',
-            comisiones: 'comisionesItems',
-            marketing: 'marketingItems',
-            formacion: 'formacionItems',
-            software: 'softwareItems',
-            gastosOp: 'gastosOpItems',
-            adspent: 'adspentItems',
-        };
-
         expCustom.forEach(cr => {
-            const structKey = sectionToKey[cr.section_key];
+            const structKey = EXPENSE_SECTION_TO_STRUCT[cr.section_key];
             if (!structKey) return;
             const arr = merged[structKey];
             // Find existing dept group or create one
@@ -933,8 +940,22 @@ export default function PLMatrix() {
             }
         });
 
+        // Inyectar filas añadidas por el escenario (sólo si aplica)
+        scenarioAddedRows.forEach(row => {
+            if (row.section === 'revenue') return;
+            const structKey = EXPENSE_SECTION_TO_STRUCT[row.section];
+            if (!structKey) return;
+            const arr = merged[structKey];
+            let group = arr.find(g => g.dept === row.dept);
+            if (!group) {
+                group = { dept: row.dept, items: [] };
+                arr.push(group);
+            }
+            if (!group.items.includes(row.name)) group.items.push(row.name);
+        });
+
         return merged;
-    }, [customRows]);
+    }, [customRows, scenarioAddedRows]);
 
     const mergedRevenueStructure = useMemo(() => {
         const revCustom = customRows.filter(r => r.block_type === 'revenue');
@@ -952,8 +973,19 @@ export default function PLMatrix() {
             }
         });
 
+        // Inyectar filas añadidas por el escenario (sólo si aplica)
+        scenarioAddedRows.forEach(row => {
+            if (row.section !== 'revenue') return;
+            let group = merged.find(g => g.dept === row.dept);
+            if (!group) {
+                group = { dept: row.dept, services: [] };
+                merged.push(group);
+            }
+            if (!group.services.includes(row.name)) group.services.push(row.name);
+        });
+
         return merged;
-    }, [customRows]);
+    }, [customRows, scenarioAddedRows]);
 
     // Notes query — loads ALL notes for the year from pl_cell_notes table
     const { data: notesData } = useQuery({
@@ -1049,6 +1081,15 @@ export default function PLMatrix() {
         const base = cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 };
         const tabAllowsScenario = activeTab === 'Forecast' || activeTab === 'Presupuesto';
         if (!tabAllowsScenario || !activeScenario) return base;
+        // Fila añadida por el escenario — su valor viene del propio escenario, no de cellValues
+        const added = (activeScenario.addedRows || []).find(r => r.section === section && r.dept === dept && r.name === item);
+        if (added) {
+            return { ...base, value: addedRowValue(added, monthIdx) };
+        }
+        // Fila eliminada por el escenario — vale 0 desde su fromMonth
+        if (isItemRemoved(activeScenario, section, dept, item, monthIdx)) {
+            return { ...base, value: 0 };
+        }
         const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
         if (mult === 1) return base;
         return { ...base, value: Math.round(base.value * mult * 100) / 100 };
@@ -1397,9 +1438,37 @@ export default function PLMatrix() {
         if (scenarioActive) {
             const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
             const baseVal = (cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 }).value;
+            const removed = isItemRemoved(activeScenario, section, dept, item, monthIdx);
+            const addedRow = (activeScenario.addedRows || []).find(r => r.section === section && r.dept === dept && r.name === item);
             const tinted = mult !== 1 && baseVal !== 0;
             const deltaPct = Math.round((mult - 1) * 100);
             const isUp = deltaPct > 0;
+            // Fila añadida por el escenario — celda destacada en violeta
+            if (addedRow) {
+                return (
+                    <td
+                        key={monthIdx}
+                        className="border border-violet-200 px-1 py-1 text-right text-xs relative bg-violet-100/70 text-violet-900"
+                        title={`Fila añadida por el escenario: ${addedRow.name} (${addedRow.monthlyAmount.toLocaleString('de-DE')} €/mes de ${MONTHS[addedRow.fromMonth - 1]} a ${MONTHS[addedRow.toMonth - 1]})`}
+                    >
+                        <div className="font-semibold tabular-nums">{currentVal ? fmtDisplay(currentVal) : <span className="text-violet-300">0</span>}</div>
+                        <div className="text-[9px] font-bold text-violet-700">NUEVA</div>
+                    </td>
+                );
+            }
+            // Fila eliminada — celda en rose con base tachada
+            if (removed) {
+                return (
+                    <td
+                        key={monthIdx}
+                        className="border border-rose-200 px-1 py-1 text-right text-xs relative bg-rose-100/70 text-rose-900"
+                        title={`Fila eliminada por el escenario a partir de ${MONTHS[activeScenario.removedItems!.find(r => r.section === section && r.dept === dept && r.item === item)!.fromMonth - 1]}`}
+                    >
+                        <div className="font-semibold tabular-nums line-through opacity-70">{baseVal ? Math.round(baseVal).toLocaleString('de-DE') : '0'}</div>
+                        <div className="text-[9px] font-bold text-rose-700">−100%</div>
+                    </td>
+                );
+            }
             return (
                 <td
                     key={monthIdx}
