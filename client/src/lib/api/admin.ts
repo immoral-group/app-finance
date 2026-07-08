@@ -595,6 +595,31 @@ export const adminApi = {
         fetchApi<{ item: HiddenItem }>('/profitability/hidden-items', { method: 'POST', body: JSON.stringify({ scope, ref_id }) }),
     unhideItem: (scope: HiddenScope, ref_id: string) =>
         fetchApi<{ ok: boolean }>(`/profitability/hidden-items/${scope}/${encodeURIComponent(ref_id)}`, { method: 'DELETE' }),
+
+    // ── Release notifications (envío de novedades por email a usuarios elegidos) ──
+    listReleaseTemplates: () =>
+        fetchApi<{ templates: { key: string; title: string; summary: string }[] }>(
+            '/release-notifications/templates'
+        ),
+    previewReleaseTemplate: (key: string, previewUrl?: string) =>
+        fetchApi<{
+            subject: string;
+            html: string;
+            text: string;
+            template: { key: string; title: string; summary: string };
+        }>(`/release-notifications/preview/${encodeURIComponent(key)}${previewUrl ? `?previewUrl=${encodeURIComponent(previewUrl)}` : ''}`),
+    sendReleaseNotification: (payload: { templateKey: string; to: string[]; previewUrl?: string }) =>
+        fetchApi<{
+            ok: boolean;
+            sent: number;
+            failed: number;
+            results: { to: string; ok: boolean; messageId?: string; error?: string }[];
+            template: { key: string; title: string; subject: string };
+            sentBy: string;
+        }>('/release-notifications/send', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }),
 };
 
 export type HiddenScope = 'client' | 'clickup_user' | 'manual_person';
