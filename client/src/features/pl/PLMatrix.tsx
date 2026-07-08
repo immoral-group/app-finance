@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
-import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowsBySection, addedRowValue, scenarioSummary, HUBS, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from './ForecastScenarios';
+import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowValue, scenarioSummary, HUBS, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from './ForecastScenarios';
 
 const TABS = ['Real', 'Presupuesto', 'Comparación', 'Forecast'] as const;
 type TabType = typeof TABS[number];
