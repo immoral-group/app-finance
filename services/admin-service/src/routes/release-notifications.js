@@ -54,14 +54,20 @@ async function requireSuperAdmin(req, res, next) {
     if (!authorization) return res.status(401).json({ error: 'no-auth' });
     const token = authorization.replace('Bearer ', '');
     const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) return res.status(401).json({ error: 'invalid-token' });
-    const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
+    if (error || !user) return res.status(401).json({ error: 'invalid-token', detail: error?.message });
+    // La tabla de perfiles se llama `user_profiles` en este proyecto (no `profiles`).
+    const { data: profile, error: profErr } = await supabase
+        .from('user_profiles')
+        .select('role, email')
         .eq('id', user.id)
         .single();
-    if (profile?.role !== 'superadmin') return res.status(403).json({ error: 'forbidden' });
-    req.superAdmin = { id: user.id, email: user.email };
+    if (profErr || !profile) {
+        return res.status(403).json({ error: 'forbidden', detail: profErr?.message || 'profile-not-found' });
+    }
+    if (profile.role !== 'superadmin') {
+        return res.status(403).json({ error: 'forbidden', detail: `role=${profile.role || 'null'}` });
+    }
+    req.superAdmin = { id: user.id, email: profile.email || user.email };
     next();
 }
 
