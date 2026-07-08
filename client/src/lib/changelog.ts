@@ -23,6 +23,16 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.41-escenarios-filas',
+        date: '2026-07-08',
+        title: 'Escenarios: añadir y quitar filas (bajas, altas y paga doble)',
+        description: 'Los escenarios ya no se limitan a subir o bajar porcentajes. Ahora puedes simular una baja de un trabajador a partir de un mes concreto, añadir una fila nueva (nuevo fichaje, nuevo software, adspend puntual...) con su coste €/mes y rango de meses, y estimar la paga doble o el extra de diciembre para altas en Personal. Disponible en Presupuesto y en Forecast — bibliotecas independientes, 100% retrocompatible con los escenarios guardados.',
+        type: 'new_module',
+        moduleKey: 'pl_matrix',
+        icon: 'Sparkles',
+        highlight: true,
+    },
+    {
         id: 'v1.40-rentabilidad-tiempo-real',
         date: '2026-06-16',
         title: 'Rentabilidad: actualización en tiempo real',

@@ -67,6 +67,53 @@ router.get('/templates', requireSuperAdmin, (_req, res) => {
     res.json({ templates: listTemplates() });
 });
 
+// ── POST /release-notifications/send-html ────────────────────────────────────
+// Envía un correo pre-renderizado por el cliente. Es el endpoint principal —
+// el cliente elige la ChangelogEntry, la renderiza a HTML y lo envía aquí.
+// Body: { subject: string, html: string, text?: string, to: string[] }
+router.post('/send-html', requireSuperAdmin, async (req, res) => {
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        return res.status(500).json({ error: 'smtp-not-configured' });
+    }
+    const { subject, html, text, to } = req.body || {};
+    if (!subject || !html) return res.status(400).json({ error: 'missing-subject-or-html' });
+    const recipients = Array.isArray(to) ? to.filter(Boolean) : (to ? [to] : []);
+    if (recipients.length === 0) return res.status(400).json({ error: 'no-recipients' });
+
+    // Validación básica de emails
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const valid = recipients.filter(e => emailRe.test(e));
+    if (valid.length === 0) return res.status(400).json({ error: 'no-valid-recipients' });
+
+    const t = getTransporter();
+    const results = [];
+    for (const addr of valid) {
+        try {
+            const info = await t.sendMail({
+                from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
+                to: addr,
+                subject,
+                text: text || undefined,
+                html,
+            });
+            results.push({ to: addr, ok: true, messageId: info.messageId });
+        } catch (err) {
+            transporter = null;
+            console.error('[RELEASE-NOTIFICATIONS] send error to', addr, err.message);
+            results.push({ to: addr, ok: false, error: err.message || 'send-failed' });
+        }
+    }
+    const okCount = results.filter(r => r.ok).length;
+    res.json({
+        ok: okCount > 0,
+        sent: okCount,
+        failed: valid.length - okCount,
+        skippedInvalid: recipients.length - valid.length,
+        results,
+        sentBy: req.superAdmin.email,
+    });
+});
+
 // ── GET /release-notifications/preview/:key ──────────────────────────────────
 // Devuelve el subject y el HTML del template para pintarlo con iframe srcDoc.
 router.get('/preview/:key', requireSuperAdmin, (req, res) => {

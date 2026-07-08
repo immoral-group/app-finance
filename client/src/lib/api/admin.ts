@@ -620,6 +620,20 @@ export const adminApi = {
             method: 'POST',
             body: JSON.stringify(payload),
         }),
+
+    // Envía HTML ya renderizado por el cliente (para usar con builders del changelog).
+    sendReleaseNotificationHtml: (payload: { subject: string; html: string; text?: string; to: string[] }) =>
+        fetchApi<{
+            ok: boolean;
+            sent: number;
+            failed: number;
+            skippedInvalid: number;
+            results: { to: string; ok: boolean; messageId?: string; error?: string }[];
+            sentBy: string;
+        }>('/release-notifications/send-html', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }),
 };
 
 export type HiddenScope = 'client' | 'clickup_user' | 'manual_person';
