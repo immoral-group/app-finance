@@ -26,6 +26,7 @@ import { ClientsPage } from '@/features/clients/ClientsPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import UserManagement from '@/features/users/UserManagement';
 import Developers from '@/features/developers/Developers';
+import ReleaseNotifications from '@/features/release-notifications/ReleaseNotifications';
 import Profitability from '@/features/profitability/Profitability';
 
 // Placeholder components
@@ -77,6 +78,7 @@ function App() {
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="users" element={<UserManagement />} />
                   <Route path="developers" element={<Developers />} />
+                  <Route path="release-notifications" element={<ReleaseNotifications />} />
                   <Route path="profitability" element={<Profitability />} />
                 </Route>
               </Route>

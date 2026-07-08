@@ -977,3 +977,194 @@ Antes era un stub sin acción. Ahora aplica a Real, Presupuesto, Forecast y Comp
 - `1543fa4` feat(hubs): avisos NUEVO en pestañas Real y Facturación
 - `0dd8126` feat(hubs): exportar P&L a CSV/PDF desde dropdown del header
 - `bb47c8f` merge commit en main
+
+---
+
+### 2026-07-08 — Feature: Añadir y eliminar filas dentro de los Escenarios (Presupuesto & Forecast)
+
+**Motivo:** Los escenarios solo permitían subir o bajar valores en porcentajes. No se podía simular la baja de un trabajador a partir de un mes ni el alta de uno nuevo (con su coste). Tampoco cubría casos típicos de nómina como la paga doble en diciembre.
+
+**Rama:** `fix/escenarios2`
+
+#### Nueva funcionalidad — Filas del escenario
+
+Dentro del modal ✨ Escenarios (tanto para el scope `budget` como `forecast`) hay una sección nueva **"Filas del escenario"** con dos acciones:
+
+1. **Eliminar fila existente**
+   - Buscador por nombre, hub o categoría (case-insensitive).
+   - Lista agrupada por sección: `Facturación · Personal · Comisiones · Marketing · Formación · Software · Adspent · Gastos Operativos`. Con búsqueda activa se auto-expanden las categorías con match.
+   - Al marcar una fila, se elige el mes desde el que aplica la baja (por defecto `range.from` del escenario). Los meses anteriores se quedan intactos; desde ese mes la fila se pone a 0.
+
+2. **Añadir fila nueva**
+   - Selección de sección, hub, nombre, coste `€/mes`, y rango de meses (`fromMonth` → `toMonth`).
+   - Cuando la sección es **Personal**, aparecen dos controles adicionales:
+     - Checkbox "Paga doble en diciembre" — duplica automáticamente el mes 12 (14 pagas ES).
+     - Input libre "Extra dic. (€)" — para estimar un importe extra que no sea exactamente el sueldo.
+   - Estos ajustes se guardan en `extraByMonth: { 12: X }` — retrocompatible.
+
+#### Cambios en tipos (`client/src/features/pl/ForecastScenarios.tsx`)
+
+Se extendió `ForecastScenario` con dos campos opcionales para no romper escenarios ya guardados:
+
+```ts
+removedItems?: Array<{ id, section, dept, item, fromMonth }>
+addedRows?:    Array<{ id, section, dept, name, monthlyAmount, fromMonth, toMonth, extraByMonth? }>
+```
+
+Nuevos helpers exportados:
+- `isItemRemoved(scenario, section, dept, item, monthIdx)`
+- `addedRowValue(row, monthIdx)` — suma el `monthlyAmount` y el `extraByMonth[m]` si aplica.
+- `addedRowsBySection(scenario, section)`
+
+#### Integración en la matriz
+
+- `PLMatrix.tsx` (vista superadmin) y `DepartmentPL.tsx` (vista por depto) inyectan las `addedRows` del escenario dentro de `mergedRevenueStructure` / `mergedExpenseStructure` **solo cuando el escenario aplica** (`activeTab ∈ {Forecast, Presupuesto}`). No se altera la base de datos.
+- `getCellValue` (y `getScenarioValue` en DepartmentPL) devuelven:
+  - `addedRowValue(row, monthIdx)` si la fila fue añadida por el escenario.
+  - `0` si `isItemRemoved(...)` es cierto para ese mes.
+  - Multiplicador de porcentaje habitual en el resto de casos.
+
+#### Visualización de celdas
+
+- Filas **añadidas**: fondo violeta + label `NUEVA` + tooltip con detalle (importe/mes y rango).
+- Filas **eliminadas**: fondo rose + valor base tachado + label `−100%` + tooltip con el mes desde el que aplica.
+- Se preserva el resto de comportamiento previo (tinted `emerald`/`rose` para % up/down).
+
+#### UX del modal
+
+- Los desplegables de "Eliminar fila existente" y "Añadir fila nueva" son controlados (`useState`) y llevan un botón **X** para cerrarlos, además del toggle mostrar/ocultar.
+- Badge `NUEVO` junto al título "Filas del escenario".
+- Guía "En 5 pasos" (antes 4) — se añadió el paso "Añade o quita filas ✨".
+
+#### Avisos NEW (`NewFeatureBubble`)
+
+Nueva `localStorage` key: `scenario_rows_seen_v1`.
+- En `PLMatrix.tsx`: burbuja anunciando "Añadir y quitar filas" junto al botón ✨ Escenarios (después de que el usuario haya visto la primaria).
+- En `DepartmentPL.tsx`: misma burbuja envolviendo el botón Escenarios.
+- Al abrir el panel se marca automáticamente como vista.
+
+#### Garantías de no-romper
+
+- El tipo `ForecastScenario` solo se extiende con campos **opcionales** — los escenarios guardados en DB (JSONB) siguen funcionando idénticos.
+- Cuando el escenario no tiene `removedItems` ni `addedRows`, todos los helpers y `getCellValue` se comportan exactamente igual que antes.
+- Presupuesto y Forecast siguen siendo bibliotecas independientes (`scope` en `forecast_scenarios`).
+- Las filas añadidas solo se muestran en las pestañas donde aplica el escenario; no se persisten en `pl_matrix` ni en `pl_custom_rows`.
+- Dept heads (`canEdit={false}`) solo consumen escenarios compartidos — nunca ven la UI de edición de filas.
+
+#### Archivos modificados
+
+| Archivo | Descripción |
+|---|---|
+| `client/src/features/pl/ForecastScenarios.tsx` | Tipos + helpers + UI del modal (nueva sección "Filas del escenario") |
+| `client/src/features/pl/PLMatrix.tsx` | `getCellValue`, merges y celdas coloreadas — vista superadmin |
+| `client/src/features/dashboard/DepartmentPL.tsx` | `getCellValue`/`getScenarioValue`, merges y celdas — vista por depto |
+
+**Commits relevantes:**
+- `90e83e0` escenarios: soportar añadir y eliminar filas en el modal
+- `d820e31` escenarios: aplicar filas añadidas/eliminadas en Presupuesto y Forecast
+- `2a67939` escenarios: aplicar filas añadidas/eliminadas en vista por departamento
+- `4189b7e` arreglo en escenario: quitar import no usado que rompía el build
+- `c0debbd` escenarios: agrupar por sección en eliminar, cerrar bloques con X y paga doble/extra en personal
+
+---
+
+### 2026-07-08 — Feature: Enviar novedades por email desde la app
+
+**Motivo:** Anunciar novedades del producto exigía redactar correos por fuera (Gmail o similar). Necesitamos una vía dentro de la app que reutilice el historial de novedades (`CHANGELOG`), evite duplicar el copy y permita elegir con precisión quién debe recibir cada aviso, incluyendo direcciones externas a la plataforma.
+
+**Rama:** `fix/escenarios2`
+
+#### Nueva pantalla — Enviar novedades
+
+Menú lateral (solo superadmins) → **✉️ Enviar novedades** (`/release-notifications`).
+
+**Layout en dos columnas:**
+
+- **Izquierda:**
+  1. *Elige la novedad* — lista completa del `CHANGELOG` con buscador por título/descripción y filtro por tipo (Nuevo · Mejora · Corrección · En desarrollo). Cada entry muestra badge de tipo, fecha, título y preview corta de la descripción.
+  2. *Elige destinatarios* — bloque "Añadir emails manuales" (acepta coma/espacio/`;` como separadores, valida al vuelo, chips con `X` para eliminar) + tabla de usuarios de la app con buscador (email/nombre), filtro por rol y por departamento, botón "Seleccionar todos los visibles" y "Limpiar todo". Contador diferencia internos vs externos.
+  - CTA sticky con contador total (Enviar).
+
+- **Derecha:** vista previa del correo tal cual lo recibirá el destinatario — se pinta con un `<iframe srcDoc>` a partir del HTML generado en el cliente.
+
+**Modal de confirmación** — antes de enviar muestra:
+- Título de la novedad + total de destinatarios.
+- Lista completa (usuarios de la app y externos etiquetados como *externo*).
+- Aviso amber: "cada destinatario recibirá el correo en su dirección. Esta acción no se puede deshacer".
+- Banner rojo con el detalle si el envío falla, con resultado por destinatario (✓/✗ + error si lo hay).
+- Botón **Probar SMTP** que llama a `/release-notifications/diagnose?verify=1` — hace un handshake real con el servidor y devuelve `ok`/`smtp-not-configured`/`smtp-verify-failed`.
+
+#### Sistema de templates (`client/src/lib/releaseEmailBuilder.ts`)
+
+`buildChangelogEmail(entry)` devuelve `{ subject, html, text }`:
+- **Builder por defecto** — hero con gradiente según el tipo (`new_module` verde/cyan, `improvement` índigo/rosa, `fix` naranja, `in_progress` violeta), badge del tipo, título, descripción, CTA y footer. Sirve para cualquier `ChangelogEntry`.
+- **Builders específicos** — para entradas destacadas con contenido rico. Actualmente:
+  - `v1.41-escenarios-filas` → tarjetas de Bajas/Altas/Paga doble.
+  - `v1.42-enviar-novedades-email` → tarjetas 1·2·3 del flujo.
+
+Añadir una novedad con builder custom = registrar `id` → `builder` en `CUSTOM_BUILDERS`.
+
+#### Endpoints backend (`services/admin-service/src/routes/release-notifications.js`)
+
+Middleware `requireSuperAdmin`:
+- Verifica token con `supabase.auth.getUser`.
+- Consulta `user_profiles` (nombre real de la tabla en este proyecto — el primer intento fallaba porque miraba `profiles`).
+- Requiere `role === 'superadmin'`, si no → 403 con `detail` para debug.
+
+| Método | Path | Descripción |
+|---|---|---|
+| GET | `/release-notifications/templates` | Templates del legacy flow (mantiene compat) |
+| GET | `/release-notifications/diagnose[?verify=1]` | Estado del SMTP (env vars + handshake real si se pide) |
+| GET | `/release-notifications/preview/:key` | HTML del template legacy |
+| POST | `/release-notifications/send` | Envío usando template legacy |
+| POST | `/release-notifications/send-html` | **Endpoint principal** — recibe `{ subject, html, text?, to[] }` renderizado por el cliente |
+| POST | `/release-notifications/scenarios-rows` | Atajo directo (legacy) |
+
+Detalles:
+- Transporter de nodemailer con `pool: false` (Vercel serverless), `connectionTimeout: 8000`, `greetingTimeout: 8000`, `socketTimeout: 15000`.
+- Envío 1-a-1: cada destinatario recibe correo dedicado, no se expone la lista.
+- Validación server-side de emails con regex; los inválidos se ignoran y se cuentan en `skippedInvalid`.
+- Devuelve `{ ok, sent, failed, skippedInvalid, results[], sentBy }`.
+
+#### Timeout global en `fetchApi` (`client/src/lib/api/client.ts`)
+
+Añadido `AbortController` con timeout configurable (default 45s) para que ninguna petición se cuelgue indefinidamente. Si expira, `Error("Timeout tras 45s esperando al servidor")` visible al usuario.
+
+#### Sidebar + Sistema NEW
+
+- `client/src/lib/constants.ts`: nuevo ítem `{ label: 'Enviar novedades', path: '/release-notifications', icon: 'Mail', requiredPermission: 'release_notifications', superadminOnly: true }` + entrada en `ALL_MODULES` (`release_notifications`).
+- `client/src/components/layout/Sidebar.tsx`: importa el icono `Mail`.
+- `client/src/lib/changelog.ts`: dos nuevas entries en la cabecera (`v1.41-escenarios-filas` y `v1.42-enviar-novedades-email`) — con `highlight: true` para que aparezca el punto pulsante en el sidebar hasta que el usuario lo vea.
+- `client/src/components/shared/WhatsNew.tsx`: añadidos `Mail` y `Sparkles` al `ICON_MAP` para que se pinten en el panel superior.
+
+#### Garantías
+
+- Endpoint bloqueado si el user no es superadmin (403 explícito).
+- El `CHANGELOG` sigue siendo la única fuente de verdad — cambios de copy o de metadata se hacen ahí y se propagan tanto al panel superior como a la pantalla de envío.
+- Si el SMTP no está configurado, el envío no rompe la app: devuelve 500 controlado, la UI muestra el error con recomendaciones.
+
+**Archivos añadidos/modificados:**
+
+| Archivo | Descripción |
+|---|---|
+| `client/src/features/release-notifications/ReleaseNotifications.tsx` | Página principal |
+| `client/src/lib/releaseEmailBuilder.ts` | Builders de correo (default + custom) |
+| `client/src/lib/changelog.ts` | Nuevas entries |
+| `client/src/lib/api/admin.ts` | `sendReleaseNotificationHtml`, `diagnoseReleaseSmtp`, `listReleaseTemplates`, `previewReleaseTemplate` |
+| `client/src/lib/api/client.ts` | Timeout global con `AbortController` |
+| `client/src/lib/constants.ts` | Nuevo módulo + NAV item |
+| `client/src/components/layout/Sidebar.tsx` | Icono Mail |
+| `client/src/components/shared/WhatsNew.tsx` | ICON_MAP ampliado |
+| `client/src/App.tsx` | Ruta `/release-notifications` |
+| `services/admin-service/src/routes/release-notifications.js` | Middleware + endpoints |
+| `services/admin-service/src/lib/releaseEmail.js` | Template legacy (mantiene compat) |
+| `services/admin-service/src/index.js` | Mount de la nueva ruta |
+| `scripts/send_release_email.js` | Script CLI para lanzar el correo con envs SMTP |
+| `scripts/release_email_template.js` | Template compartido con el CLI |
+
+**Commits relevantes:**
+- `dbe68d2` novedades: endpoints templates/preview/send con auth superadmin
+- `0b2b1c9` novedades: página Enviar novedades con selector template, usuarios y preview
+- `340989a` novedades: listar CHANGELOG completo, preview client-side y emails manuales
+- `7a85477` novedades: diagnóstico SMTP, timeouts y errores visibles en el modal
+- `79b114a` novedades: fix 403 — la tabla es user_profiles, no profiles

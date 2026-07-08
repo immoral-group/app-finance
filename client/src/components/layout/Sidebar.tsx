@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 import {
     LayoutDashboard, Receipt, BarChart3, CreditCard, Users,
     PieChart, FileText, Settings, LogOut, Wallet, Handshake,
-    LineChart, Building2, ChevronDown, ChevronRight, Shield, X, Activity, ShoppingCart
+    LineChart, Building2, ChevronDown, ChevronRight, Shield, X, Activity, ShoppingCart, Mail
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -16,7 +16,7 @@ import logoPath from '@/assets/logo.png';
 const Icons: Record<string, any> = {
     LayoutDashboard, Receipt, BarChart3, CreditCard, Users,
     PieChart, FileText, Settings, Wallet, Handshake,
-    LineChart, Building2, Shield, Activity, ShoppingCart
+    LineChart, Building2, Shield, Activity, ShoppingCart, Mail
 };
 
 // ── Highlight Tooltip (rendered via portal to body) ──────

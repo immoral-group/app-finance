@@ -595,6 +595,58 @@ export const adminApi = {
         fetchApi<{ item: HiddenItem }>('/profitability/hidden-items', { method: 'POST', body: JSON.stringify({ scope, ref_id }) }),
     unhideItem: (scope: HiddenScope, ref_id: string) =>
         fetchApi<{ ok: boolean }>(`/profitability/hidden-items/${scope}/${encodeURIComponent(ref_id)}`, { method: 'DELETE' }),
+
+    // ── Release notifications (envío de novedades por email a usuarios elegidos) ──
+    listReleaseTemplates: () =>
+        fetchApi<{ templates: { key: string; title: string; summary: string }[] }>(
+            '/release-notifications/templates'
+        ),
+    previewReleaseTemplate: (key: string, previewUrl?: string) =>
+        fetchApi<{
+            subject: string;
+            html: string;
+            text: string;
+            template: { key: string; title: string; summary: string };
+        }>(`/release-notifications/preview/${encodeURIComponent(key)}${previewUrl ? `?previewUrl=${encodeURIComponent(previewUrl)}` : ''}`),
+    sendReleaseNotification: (payload: { templateKey: string; to: string[]; previewUrl?: string }) =>
+        fetchApi<{
+            ok: boolean;
+            sent: number;
+            failed: number;
+            results: { to: string; ok: boolean; messageId?: string; error?: string }[];
+            template: { key: string; title: string; subject: string };
+            sentBy: string;
+        }>('/release-notifications/send', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }),
+
+    // Envía HTML ya renderizado por el cliente (para usar con builders del changelog).
+    sendReleaseNotificationHtml: (payload: { subject: string; html: string; text?: string; to: string[] }) =>
+        fetchApi<{
+            ok: boolean;
+            sent: number;
+            failed: number;
+            skippedInvalid: number;
+            results: { to: string; ok: boolean; messageId?: string; error?: string }[];
+            sentBy: string;
+        }>('/release-notifications/send-html', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }),
+    diagnoseReleaseSmtp: (verify: boolean = false) =>
+        fetchApi<{
+            ok: boolean;
+            verified?: boolean;
+            reason?: string;
+            error?: string;
+            smtp_user_set: boolean;
+            smtp_pass_set: boolean;
+            smtp_host: string;
+            smtp_port: number;
+            smtp_from: string | null;
+            app_url: string;
+        }>(`/release-notifications/diagnose${verify ? '?verify=1' : ''}`),
 };
 
 export type HiddenScope = 'client' | 'clickup_user' | 'manual_person';
