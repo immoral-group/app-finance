@@ -669,7 +669,7 @@ export const ForecastScenariosModal = ({
                                 <div className="flex items-start justify-between mb-2">
                                     <div className="flex items-center gap-1.5">
                                         <span className="text-[10px] font-extrabold tracking-widest text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded">CÓMO FUNCIONA</span>
-                                        <span className="text-xs font-bold text-gray-800">En 4 pasos</span>
+                                        <span className="text-xs font-bold text-gray-800">En 5 pasos</span>
                                     </div>
                                     <button
                                         onClick={dismissGuide}
@@ -684,7 +684,8 @@ export const ForecastScenariosModal = ({
                                         { n: 1, icon: <Wand2 size={12} />, title: 'Elige plantilla o crea', desc: 'Presets rápidos o ajustes a medida.' },
                                         { n: 2, icon: <CalendarRange size={12} />, title: 'Define el rango', desc: 'Solo afecta los meses que elijas.' },
                                         { n: 3, icon: <SlidersHorizontal size={12} />, title: 'Ajusta ingresos / gastos', desc: '±5% a ±30% global o por dept/categoría.' },
-                                        { n: 4, icon: <SaveIcon size={12} />, title: 'Aplica y guarda', desc: 'Mira el resultado y guarda desde el chip.' },
+                                        { n: 4, icon: <UserPlus size={12} />, title: 'Añade o quita filas ✨', desc: 'Simula bajas, altas nuevas y paga doble en dic.' },
+                                        { n: 5, icon: <SaveIcon size={12} />, title: 'Aplica y guarda', desc: 'Mira el resultado y guarda desde el chip.' },
                                     ].map(step => (
                                         <div key={step.n} className="flex items-start gap-2 rounded-lg border border-gray-100 bg-white px-2 py-1.5">
                                             <span className="flex-shrink-0 mt-0.5 h-5 w-5 rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-white text-[10px] font-bold inline-flex items-center justify-center shadow-sm">
@@ -1051,6 +1052,7 @@ export const ForecastScenariosModal = ({
                     <section>
                         <h3 className="text-xs font-bold uppercase tracking-wider text-violet-700 mb-2 flex items-center gap-1.5">
                             <UserPlus size={12} /> Filas del escenario
+                            <span className="text-[9px] font-extrabold tracking-widest text-white bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-1.5 py-0.5 rounded shadow-sm">NUEVO</span>
                         </h3>
                         <div className="space-y-3 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
                             <p className="text-[11px] text-gray-600 leading-snug">

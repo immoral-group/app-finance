@@ -709,6 +709,8 @@ export default function PLMatrix() {
         setSaveBoxOpen(true);
     };
     const [scenarioBtnSeen, setScenarioBtnSeen] = useState(() => localStorage.getItem('forecast_scenarios_seen_v2') === '1');
+    // Aviso NUEVO específico para la función de añadir/eliminar filas dentro del escenario
+    const [scenarioRowsSeen, setScenarioRowsSeen] = useState(() => localStorage.getItem('scenario_rows_seen_v1') === '1');
 
     // scope para los escenarios — separa biblioteca Forecast y Presupuesto
     const scenarioScope: 'forecast' | 'budget' = activeTab === 'Presupuesto' ? 'budget' : 'forecast';
@@ -756,6 +758,10 @@ export default function PLMatrix() {
         if (!scenarioBtnSeen) {
             localStorage.setItem('forecast_scenarios_seen_v2', '1');
             setScenarioBtnSeen(true);
+        }
+        if (!scenarioRowsSeen) {
+            localStorage.setItem('scenario_rows_seen_v1', '1');
+            setScenarioRowsSeen(true);
         }
     };
     const openForecastInfo = () => {
@@ -1934,6 +1940,14 @@ export default function PLMatrix() {
                                     title="Simula escenarios"
                                     description="Qué pasa si suben los gastos o baja la facturación"
                                     onDismiss={() => { localStorage.setItem('forecast_scenarios_seen_v2', '1'); setScenarioBtnSeen(true); }}
+                                    align="end"
+                                />
+                            )}
+                            {scenarioBtnSeen && !scenarioRowsSeen && (
+                                <NewFeatureBubble
+                                    title="Añadir y quitar filas"
+                                    description="Simula bajas de trabajadores, altas nuevas y pagas dobles"
+                                    onDismiss={() => { localStorage.setItem('scenario_rows_seen_v1', '1'); setScenarioRowsSeen(true); }}
                                     align="end"
                                 />
                             )}

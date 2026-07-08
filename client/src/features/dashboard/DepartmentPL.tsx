@@ -196,6 +196,8 @@ export default function DepartmentPL() {
         }
     };
     const [scenarioOpen, setScenarioOpen] = useState(false);
+    // Aviso NUEVO específico para la función de añadir/eliminar filas dentro del escenario
+    const [scenarioRowsSeen, setScenarioRowsSeen] = useState(() => localStorage.getItem('scenario_rows_seen_v1') === '1');
     const [activeScenario, setActiveScenario] = useState<ForecastScenario | null>(null);
 
     // Scope basado en pestaña activa (escenarios Forecast vs Presupuesto)
@@ -2234,20 +2236,36 @@ export default function DepartmentPL() {
                     {year + 1} →
                 </Button>
                 {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && sharedScenariosCount > 0 && (
-                    <Button
-                        size="sm"
-                        onClick={() => setScenarioOpen(true)}
-                        className="relative gap-1 h-7 text-xs text-white border-0 shadow-md ml-2"
-                        style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
-                    >
-                        <Sparkles size={12} /> Escenarios
-                        <span
-                            className="ml-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-white text-indigo-700 text-[10px] font-bold shadow-sm"
-                            title={`${sharedScenariosCount} compartido${sharedScenariosCount > 1 ? 's' : ''}`}
+                    <div className="relative">
+                        <Button
+                            size="sm"
+                            onClick={() => {
+                                setScenarioOpen(true);
+                                if (!scenarioRowsSeen) {
+                                    localStorage.setItem('scenario_rows_seen_v1', '1');
+                                    setScenarioRowsSeen(true);
+                                }
+                            }}
+                            className="relative gap-1 h-7 text-xs text-white border-0 shadow-md ml-2"
+                            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)' }}
                         >
-                            {sharedScenariosCount}
-                        </span>
-                    </Button>
+                            <Sparkles size={12} /> Escenarios
+                            <span
+                                className="ml-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-white text-indigo-700 text-[10px] font-bold shadow-sm"
+                                title={`${sharedScenariosCount} compartido${sharedScenariosCount > 1 ? 's' : ''}`}
+                            >
+                                {sharedScenariosCount}
+                            </span>
+                        </Button>
+                        {!scenarioRowsSeen && (
+                            <NewFeatureBubble
+                                title="Añadir y quitar filas"
+                                description="Ahora los escenarios simulan bajas, altas y pagas dobles"
+                                onDismiss={() => { localStorage.setItem('scenario_rows_seen_v1', '1'); setScenarioRowsSeen(true); }}
+                                align="end"
+                            />
+                        )}
+                    </div>
                 )}
                 {activeTab !== 'Dashboard' && activeTab !== 'Solicitudes' && activeTab !== 'Facturación' && (
                     <DropdownMenu>
