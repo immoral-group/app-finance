@@ -977,3 +977,91 @@ Antes era un stub sin acción. Ahora aplica a Real, Presupuesto, Forecast y Comp
 - `1543fa4` feat(hubs): avisos NUEVO en pestañas Real y Facturación
 - `0dd8126` feat(hubs): exportar P&L a CSV/PDF desde dropdown del header
 - `bb47c8f` merge commit en main
+
+---
+
+### 2026-07-08 — Feature: Añadir y eliminar filas dentro de los Escenarios (Presupuesto & Forecast)
+
+**Motivo:** Los escenarios solo permitían subir o bajar valores en porcentajes. No se podía simular la baja de un trabajador a partir de un mes ni el alta de uno nuevo (con su coste). Tampoco cubría casos típicos de nómina como la paga doble en diciembre.
+
+**Rama:** `fix/escenarios2`
+
+#### Nueva funcionalidad — Filas del escenario
+
+Dentro del modal ✨ Escenarios (tanto para el scope `budget` como `forecast`) hay una sección nueva **"Filas del escenario"** con dos acciones:
+
+1. **Eliminar fila existente**
+   - Buscador por nombre, hub o categoría (case-insensitive).
+   - Lista agrupada por sección: `Facturación · Personal · Comisiones · Marketing · Formación · Software · Adspent · Gastos Operativos`. Con búsqueda activa se auto-expanden las categorías con match.
+   - Al marcar una fila, se elige el mes desde el que aplica la baja (por defecto `range.from` del escenario). Los meses anteriores se quedan intactos; desde ese mes la fila se pone a 0.
+
+2. **Añadir fila nueva**
+   - Selección de sección, hub, nombre, coste `€/mes`, y rango de meses (`fromMonth` → `toMonth`).
+   - Cuando la sección es **Personal**, aparecen dos controles adicionales:
+     - Checkbox "Paga doble en diciembre" — duplica automáticamente el mes 12 (14 pagas ES).
+     - Input libre "Extra dic. (€)" — para estimar un importe extra que no sea exactamente el sueldo.
+   - Estos ajustes se guardan en `extraByMonth: { 12: X }` — retrocompatible.
+
+#### Cambios en tipos (`client/src/features/pl/ForecastScenarios.tsx`)
+
+Se extendió `ForecastScenario` con dos campos opcionales para no romper escenarios ya guardados:
+
+```ts
+removedItems?: Array<{ id, section, dept, item, fromMonth }>
+addedRows?:    Array<{ id, section, dept, name, monthlyAmount, fromMonth, toMonth, extraByMonth? }>
+```
+
+Nuevos helpers exportados:
+- `isItemRemoved(scenario, section, dept, item, monthIdx)`
+- `addedRowValue(row, monthIdx)` — suma el `monthlyAmount` y el `extraByMonth[m]` si aplica.
+- `addedRowsBySection(scenario, section)`
+
+#### Integración en la matriz
+
+- `PLMatrix.tsx` (vista superadmin) y `DepartmentPL.tsx` (vista por depto) inyectan las `addedRows` del escenario dentro de `mergedRevenueStructure` / `mergedExpenseStructure` **solo cuando el escenario aplica** (`activeTab ∈ {Forecast, Presupuesto}`). No se altera la base de datos.
+- `getCellValue` (y `getScenarioValue` en DepartmentPL) devuelven:
+  - `addedRowValue(row, monthIdx)` si la fila fue añadida por el escenario.
+  - `0` si `isItemRemoved(...)` es cierto para ese mes.
+  - Multiplicador de porcentaje habitual en el resto de casos.
+
+#### Visualización de celdas
+
+- Filas **añadidas**: fondo violeta + label `NUEVA` + tooltip con detalle (importe/mes y rango).
+- Filas **eliminadas**: fondo rose + valor base tachado + label `−100%` + tooltip con el mes desde el que aplica.
+- Se preserva el resto de comportamiento previo (tinted `emerald`/`rose` para % up/down).
+
+#### UX del modal
+
+- Los desplegables de "Eliminar fila existente" y "Añadir fila nueva" son controlados (`useState`) y llevan un botón **X** para cerrarlos, además del toggle mostrar/ocultar.
+- Badge `NUEVO` junto al título "Filas del escenario".
+- Guía "En 5 pasos" (antes 4) — se añadió el paso "Añade o quita filas ✨".
+
+#### Avisos NEW (`NewFeatureBubble`)
+
+Nueva `localStorage` key: `scenario_rows_seen_v1`.
+- En `PLMatrix.tsx`: burbuja anunciando "Añadir y quitar filas" junto al botón ✨ Escenarios (después de que el usuario haya visto la primaria).
+- En `DepartmentPL.tsx`: misma burbuja envolviendo el botón Escenarios.
+- Al abrir el panel se marca automáticamente como vista.
+
+#### Garantías de no-romper
+
+- El tipo `ForecastScenario` solo se extiende con campos **opcionales** — los escenarios guardados en DB (JSONB) siguen funcionando idénticos.
+- Cuando el escenario no tiene `removedItems` ni `addedRows`, todos los helpers y `getCellValue` se comportan exactamente igual que antes.
+- Presupuesto y Forecast siguen siendo bibliotecas independientes (`scope` en `forecast_scenarios`).
+- Las filas añadidas solo se muestran en las pestañas donde aplica el escenario; no se persisten en `pl_matrix` ni en `pl_custom_rows`.
+- Dept heads (`canEdit={false}`) solo consumen escenarios compartidos — nunca ven la UI de edición de filas.
+
+#### Archivos modificados
+
+| Archivo | Descripción |
+|---|---|
+| `client/src/features/pl/ForecastScenarios.tsx` | Tipos + helpers + UI del modal (nueva sección "Filas del escenario") |
+| `client/src/features/pl/PLMatrix.tsx` | `getCellValue`, merges y celdas coloreadas — vista superadmin |
+| `client/src/features/dashboard/DepartmentPL.tsx` | `getCellValue`/`getScenarioValue`, merges y celdas — vista por depto |
+
+**Commits relevantes:**
+- `90e83e0` escenarios: soportar añadir y eliminar filas en el modal
+- `d820e31` escenarios: aplicar filas añadidas/eliminadas en Presupuesto y Forecast
+- `2a67939` escenarios: aplicar filas añadidas/eliminadas en vista por departamento
+- `4189b7e` arreglo en escenario: quitar import no usado que rompía el build
+- `c0debbd` escenarios: agrupar por sección en eliminar, cerrar bloques con X y paga doble/extra en personal
