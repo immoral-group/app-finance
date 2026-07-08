@@ -94,10 +94,13 @@ export default function ReleaseNotifications() {
     );
 
     // ── Preview generado en el cliente ──────────────────────────────────────
+    // Usamos el origin actual del navegador como appUrl (así los links del correo
+    // apuntan al dominio real donde el user está ahora, no a un hardcoded que ya no existe).
+    const appOrigin = typeof window !== 'undefined' ? window.location.origin : undefined;
     const preview = useMemo(() => {
         if (!currentEntry) return null;
-        return buildChangelogEmail(currentEntry);
-    }, [currentEntry]);
+        return buildChangelogEmail(currentEntry, { appUrl: appOrigin });
+    }, [currentEntry, appOrigin]);
 
     // ── Filtered users ──────────────────────────────────────────────────────
     const filteredUsers = useMemo(() => {
