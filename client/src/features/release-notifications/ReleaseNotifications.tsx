@@ -152,6 +152,8 @@ export default function ReleaseNotifications() {
     };
 
     // ── Send mutation ────────────────────────────────────────────────────────
+    const [sendError, setSendError] = useState<string | null>(null);
+    const [sendResults, setSendResults] = useState<{ to: string; ok: boolean; error?: string }[]>([]);
     const sendMutation = useMutation({
         mutationFn: () => {
             if (!preview) throw new Error('No hay preview');
@@ -162,17 +164,42 @@ export default function ReleaseNotifications() {
                 to: allEmails,
             });
         },
+        onMutate: () => {
+            setSendError(null);
+            setSendResults([]);
+        },
         onSuccess: (data) => {
-            setConfirmOpen(false);
+            setSendResults(data.results || []);
             if (data.failed > 0) {
                 toast.warning(`Enviados ${data.sent} · Fallaron ${data.failed}`);
+                setSendError(`Enviados ${data.sent} correctamente, fallaron ${data.failed}. Revisa los detalles abajo.`);
             } else {
+                setConfirmOpen(false);
                 toast.success(`Correo enviado a ${data.sent} destinatario${data.sent === 1 ? '' : 's'}`);
                 clearSelection();
                 setExtraEmails([]);
             }
         },
-        onError: (err: any) => toast.error(err?.message || 'Error al enviar'),
+        onError: (err: any) => {
+            const msg = err?.message || 'Error al enviar';
+            setSendError(msg);
+            toast.error(msg);
+        },
+    });
+
+    // ── Diagnóstico SMTP ─────────────────────────────────────────────────────
+    const diagnoseMutation = useMutation({
+        mutationFn: () => adminApi.diagnoseReleaseSmtp(true),
+        onSuccess: (data) => {
+            if (data.ok && data.verified) {
+                toast.success(`SMTP OK · desde ${data.smtp_from} (${data.smtp_host}:${data.smtp_port})`);
+            } else if (data.reason === 'smtp-not-configured') {
+                toast.error('SMTP no configurado en el servidor (faltan SMTP_USER / SMTP_PASS)');
+            } else {
+                toast.error(`SMTP: ${data.reason || 'fallo'} · ${data.error || ''}`);
+            }
+        },
+        onError: (err: any) => toast.error(err?.message || 'No se pudo diagnosticar'),
     });
 
     // ── Render ───────────────────────────────────────────────────────────────
@@ -495,11 +522,53 @@ export default function ReleaseNotifications() {
                                     <div className="text-gray-500 italic">… y {allEmails.length - 15} más</div>
                                 )}
                             </div>
+
+                            {sendError && (
+                                <div className="rounded-md bg-rose-50 border border-rose-200 px-3 py-2 text-[12px] text-rose-800 space-y-1.5">
+                                    <div className="flex items-start gap-1.5">
+                                        <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
+                                        <div className="flex-1">
+                                            <strong>Error al enviar:</strong> {sendError}
+                                        </div>
+                                    </div>
+                                    {sendError.toLowerCase().includes('smtp') && (
+                                        <div className="text-[11px] text-rose-700 pl-5">
+                                            Prueba pulsando "Probar SMTP" abajo. Si dice <em>smtp-not-configured</em>, el admin de Vercel debe añadir las variables <code className="bg-white/60 px-1 rounded">SMTP_USER</code> y <code className="bg-white/60 px-1 rounded">SMTP_PASS</code> en las env vars del proyecto.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {sendResults.length > 0 && sendResults.some(r => !r.ok) && (
+                                <div className="rounded-md bg-gray-50 border border-gray-200 max-h-32 overflow-y-auto text-[11px] p-2 space-y-0.5">
+                                    <div className="font-semibold text-gray-700 mb-1">Detalles por destinatario:</div>
+                                    {sendResults.map(r => (
+                                        <div key={r.to} className={`truncate ${r.ok ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                            {r.ok ? '✓' : '✗'} {r.to}{r.error ? ` — ${r.error}` : ''}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
                             <div className="rounded-md bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-800">
                                 <strong>Aviso:</strong> cada destinatario recibirá el correo en su dirección. Esta acción no se puede deshacer.
                             </div>
                         </div>
-                        <div className="border-t bg-gray-50 px-5 py-3 flex items-center justify-end gap-2">
+                        <div className="border-t bg-gray-50 px-5 py-3 flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => diagnoseMutation.mutate()}
+                                disabled={diagnoseMutation.isPending}
+                                className="text-[11px] gap-1"
+                                title="Comprueba las credenciales SMTP del servidor"
+                            >
+                                {diagnoseMutation.isPending
+                                    ? <><Loader2 size={11} className="animate-spin" /> Probando...</>
+                                    : 'Probar SMTP'
+                                }
+                            </Button>
+                            <div className="flex-1" />
                             <Button variant="outline" size="sm" onClick={() => setConfirmOpen(false)} disabled={sendMutation.isPending}>
                                 Cancelar
                             </Button>

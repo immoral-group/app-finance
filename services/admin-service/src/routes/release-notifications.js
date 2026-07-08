@@ -15,8 +15,12 @@ function getTransporter() {
             port: parseInt(process.env.SMTP_PORT || '587'),
             secure: false,
             auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-            pool: true,
-            maxConnections: 3,
+            // En serverless (Vercel) no compartimos pool entre invocaciones — cada request
+            // abre su propia conexión y se cierra. Timeouts cortos para no colgarse.
+            pool: false,
+            connectionTimeout: 8000,
+            greetingTimeout: 8000,
+            socketTimeout: 15000,
         });
     }
     return transporter;
@@ -65,6 +69,37 @@ async function requireSuperAdmin(req, res, next) {
 // Lista los templates disponibles para elegir en la UI.
 router.get('/templates', requireSuperAdmin, (_req, res) => {
     res.json({ templates: listTemplates() });
+});
+
+// ── GET /release-notifications/diagnose ──────────────────────────────────────
+// Diagnóstico rápido: comprueba SMTP env vars y opcionalmente hace verify().
+router.get('/diagnose', requireSuperAdmin, async (req, res) => {
+    const hasUser = !!process.env.SMTP_USER;
+    const hasPass = !!process.env.SMTP_PASS;
+    const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const port = parseInt(process.env.SMTP_PORT || '587');
+    const info = {
+        smtp_user_set: hasUser,
+        smtp_pass_set: hasPass,
+        smtp_host: host,
+        smtp_port: port,
+        smtp_from: process.env.SMTP_USER || null,
+        app_url: process.env.APP_URL || 'https://app-finance.vercel.app',
+    };
+    if (!hasUser || !hasPass) {
+        return res.json({ ok: false, reason: 'smtp-not-configured', ...info });
+    }
+    if (req.query.verify !== '1') {
+        return res.json({ ok: true, verified: false, ...info });
+    }
+    // verify hace un handshake al servidor SMTP para confirmar credenciales
+    try {
+        await getTransporter().verify();
+        res.json({ ok: true, verified: true, ...info });
+    } catch (err) {
+        transporter = null;
+        res.status(500).json({ ok: false, verified: false, reason: 'smtp-verify-failed', error: err.message, ...info });
+    }
 });
 
 // ── POST /release-notifications/send-html ────────────────────────────────────

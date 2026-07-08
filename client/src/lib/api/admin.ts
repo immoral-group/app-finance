@@ -634,6 +634,19 @@ export const adminApi = {
             method: 'POST',
             body: JSON.stringify(payload),
         }),
+    diagnoseReleaseSmtp: (verify: boolean = false) =>
+        fetchApi<{
+            ok: boolean;
+            verified?: boolean;
+            reason?: string;
+            error?: string;
+            smtp_user_set: boolean;
+            smtp_pass_set: boolean;
+            smtp_host: string;
+            smtp_port: number;
+            smtp_from: string | null;
+            app_url: string;
+        }>(`/release-notifications/diagnose${verify ? '?verify=1' : ''}`),
 };
 
 export type HiddenScope = 'client' | 'clickup_user' | 'manual_person';
