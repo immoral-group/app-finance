@@ -34,6 +34,7 @@ import icexRoutes from './routes/icex.js';
 import profitabilityRoutes from './routes/profitability.js';
 import paymentLinksRoutes from './routes/payment-links.js';
 import webhooksRoutes from './routes/webhooks.js';
+import releaseNotificationsRoutes from './routes/release-notifications.js';
 
 dotenv.config();
 
@@ -81,6 +82,7 @@ app.use('/nutfruit', nutfruitRoutes);
 app.use('/icex', icexRoutes);
 app.use('/profitability', profitabilityRoutes);
 app.use('/payment-links', paymentLinksRoutes);
+app.use('/release-notifications', releaseNotificationsRoutes);
 
 
 // Health Check
