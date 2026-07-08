@@ -111,6 +111,9 @@ export interface ScenarioAddedRow {
     monthlyAmount: number;
     fromMonth: number; // 1-12
     toMonth: number;   // 1-12
+    // Extras por mes (opcional). Clave = mes 1-12, valor = € añadidos a ese mes
+    // sobre el monthlyAmount base. Útil para paga doble en diciembre, extra en julio, etc.
+    extraByMonth?: Record<number, number>;
 }
 
 export interface ForecastScenario {
@@ -254,10 +257,12 @@ export function isItemRemoved(
 }
 
 // Valor de una fila añadida (virtual) para un mes concreto — 0 si está fuera del rango.
+// Suma el "extra" configurado para ese mes (paga doble en diciembre, etc.) si aplica.
 export function addedRowValue(row: ScenarioAddedRow, monthIdx: number): number {
     const month = monthIdx + 1;
     if (month < row.fromMonth || month > row.toMonth) return 0;
-    return row.monthlyAmount;
+    const extra = row.extraByMonth?.[month] || 0;
+    return row.monthlyAmount + extra;
 }
 
 // Devuelve las filas añadidas que aplican a una sección (agrupadas por dept)
@@ -423,14 +428,25 @@ export const ForecastScenariosModal = ({
     const [showGuide, setShowGuide] = useState(() => localStorage.getItem('scenarios_guide_seen') !== '1');
     // Buscador para "quitar fila"
     const [removeSearch, setRemoveSearch] = useState('');
-    // Formulario de nueva fila
-    const [newRow, setNewRow] = useState<{ section: string; dept: string; name: string; monthlyAmount: string; fromMonth: number; toMonth: number }>({
+    // Controlled open/close de los dos bloques (para poder cerrarlos con la X)
+    const [removeOpen, setRemoveOpen] = useState(false);
+    const [addOpen, setAddOpen] = useState(false);
+    // Qué secciones están expandidas en el árbol de "eliminar fila"
+    const [removeExpandedSections, setRemoveExpandedSections] = useState<Record<string, boolean>>({});
+    // Formulario de nueva fila (con paga doble/extra opcionales para personal)
+    const [newRow, setNewRow] = useState<{
+        section: string; dept: string; name: string; monthlyAmount: string;
+        fromMonth: number; toMonth: number;
+        doublePayDecember: boolean; extraDecember: string;
+    }>({
         section: 'personal',
         dept: '',
         name: '',
         monthlyAmount: '',
         fromMonth: (initial?.range.from) || defaultRange().from,
         toMonth: 12,
+        doublePayDecember: false,
+        extraDecember: '',
     });
     const dismissGuide = () => {
         localStorage.setItem('scenarios_guide_seen', '1');
@@ -563,13 +579,31 @@ export const ForecastScenariosModal = ({
 
     const filteredRemoveRows = useMemo(() => {
         const q = removeSearch.trim().toLowerCase();
-        if (!q) return allRows.slice(0, 40);
+        if (!q) return allRows;
         return allRows.filter(r =>
             r.item.toLowerCase().includes(q) ||
             r.dept.toLowerCase().includes(q) ||
             r.label.toLowerCase().includes(q),
-        ).slice(0, 40);
+        );
     }, [allRows, removeSearch]);
+
+    // Agrupamos las filas filtradas por sección para presentarlas en árbol (Facturación · Personal · ...)
+    // Mantenemos el orden definido en SCENARIO_ROW_SECTIONS.
+    const groupedRemoveRows = useMemo(() => {
+        const bySection: Record<string, { section: string; label: string; rows: typeof allRows }> = {};
+        filteredRemoveRows.forEach(r => {
+            const label = r.section === 'revenue' ? 'Facturación' : (EXPENSE_SECTION_LABELS[r.section] || r.section);
+            if (!bySection[r.section]) bySection[r.section] = { section: r.section, label, rows: [] };
+            bySection[r.section].rows.push(r);
+        });
+        // Devolver en el orden canónico
+        const order = ['revenue', 'personal', 'comisiones', 'marketing', 'formacion', 'software', 'adspent', 'gastosOp'];
+        return order
+            .map(s => bySection[s])
+            .filter(Boolean);
+    }, [filteredRemoveRows]);
+
+    const isSearching = removeSearch.trim().length > 0;
 
     // Departamentos disponibles para el formulario "añadir fila", según la sección elegida
     const deptsForNewRow = useMemo(() => {
@@ -1034,7 +1068,7 @@ export const ForecastScenariosModal = ({
                                             <div key={r.id} className="flex items-center gap-2 rounded-md bg-white border border-rose-200 px-2 py-1">
                                                 <div className="flex-1 min-w-0">
                                                     <div className="text-[11px] font-semibold text-gray-800 truncate">{r.item}</div>
-                                                    <div className="text-[10px] text-gray-500 truncate">{EXPENSE_SECTION_LABELS[r.section] || (r.section === 'revenue' ? 'Ingresos' : r.section)} · {r.dept}</div>
+                                                    <div className="text-[10px] text-gray-500 truncate">{r.section === 'revenue' ? 'Facturación' : (EXPENSE_SECTION_LABELS[r.section] || r.section)} · {r.dept}</div>
                                                 </div>
                                                 <span className="text-[10px] text-gray-600">desde</span>
                                                 <select
@@ -1059,45 +1093,84 @@ export const ForecastScenariosModal = ({
                                 </div>
                             )}
 
-                            {/* Buscador para eliminar filas existentes */}
+                            {/* Bloque "Eliminar fila existente" — controlado (X para cerrar) y agrupado por sección */}
                             {allRows.length > 0 && (
-                                <details>
-                                    <summary className="cursor-pointer text-[11px] font-semibold text-rose-700 hover:text-rose-900 select-none flex items-center gap-1">
-                                        <UserMinus size={11} /> Eliminar fila existente
-                                    </summary>
-                                    <div className="mt-2 space-y-1.5">
-                                        <input
-                                            value={removeSearch}
-                                            onChange={e => setRemoveSearch(e.target.value)}
-                                            placeholder="Buscar por nombre, hub o categoría..."
-                                            className="w-full h-7 px-2 text-[11px] rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-rose-200"
-                                        />
-                                        <div className="max-h-52 overflow-y-auto rounded-md border border-gray-100 bg-white divide-y divide-gray-50">
-                                            {filteredRemoveRows.length === 0 && (
-                                                <div className="text-[11px] text-gray-400 px-2 py-3 text-center">Sin resultados</div>
-                                            )}
-                                            {filteredRemoveRows.map(r => {
-                                                const removed = isRowRemoved(r.section, r.dept, r.item);
-                                                return (
-                                                    <button
-                                                        key={`${r.section}-${r.dept}-${r.item}`}
-                                                        onClick={() => toggleRemoveRow(r.section, r.dept, r.item)}
-                                                        className={`w-full flex items-center gap-2 px-2 py-1 text-left transition-colors ${removed ? 'bg-rose-50 hover:bg-rose-100' : 'hover:bg-gray-50'}`}
-                                                    >
-                                                        <span className={`flex-shrink-0 h-4 w-4 rounded border ${removed ? 'bg-rose-600 border-rose-600 text-white' : 'border-gray-300 bg-white'} flex items-center justify-center`}>
-                                                            {removed && <Check size={10} />}
-                                                        </span>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="text-[11px] font-medium text-gray-800 truncate">{r.item}</div>
-                                                            <div className="text-[10px] text-gray-500 truncate">{r.label} · {r.dept}</div>
-                                                        </div>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                        <p className="text-[10px] text-gray-500 italic">Al eliminar una fila su valor pasa a 0 desde el mes que elijas, sin tocar la base.</p>
+                                <div className="rounded-md bg-white/60 border border-rose-100">
+                                    <div className="flex items-center justify-between px-2 py-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => setRemoveOpen(v => !v)}
+                                            className="flex-1 text-left text-[11px] font-semibold text-rose-700 hover:text-rose-900 flex items-center gap-1"
+                                        >
+                                            <UserMinus size={11} /> Eliminar fila existente
+                                            <span className="ml-auto text-[10px] text-gray-400">{removeOpen ? 'Ocultar' : 'Mostrar'}</span>
+                                        </button>
+                                        {removeOpen && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setRemoveOpen(false)}
+                                                className="ml-1 p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                                                title="Cerrar"
+                                            >
+                                                <X size={11} />
+                                            </button>
+                                        )}
                                     </div>
-                                </details>
+                                    {removeOpen && (
+                                        <div className="border-t border-rose-100 p-2 space-y-1.5">
+                                            <input
+                                                value={removeSearch}
+                                                onChange={e => setRemoveSearch(e.target.value)}
+                                                placeholder="Buscar por nombre, hub o categoría..."
+                                                className="w-full h-7 px-2 text-[11px] rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-rose-200"
+                                            />
+                                            <div className="max-h-64 overflow-y-auto rounded-md border border-gray-100 bg-white">
+                                                {groupedRemoveRows.length === 0 && (
+                                                    <div className="text-[11px] text-gray-400 px-2 py-3 text-center">Sin resultados</div>
+                                                )}
+                                                {groupedRemoveRows.map(group => {
+                                                    const forcedOpen = isSearching;
+                                                    const expanded = forcedOpen || !!removeExpandedSections[group.section];
+                                                    return (
+                                                        <div key={group.section} className="border-b border-gray-50 last:border-b-0">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => !forcedOpen && setRemoveExpandedSections(s => ({ ...s, [group.section]: !s[group.section] }))}
+                                                                className={`w-full flex items-center justify-between px-2 py-1 text-left text-[11px] font-semibold ${group.section === 'revenue' ? 'text-emerald-800 bg-emerald-50/60' : 'text-gray-700 bg-gray-50'} hover:bg-gray-100`}
+                                                            >
+                                                                <span>{group.label} <span className="text-[10px] font-normal text-gray-500">({group.rows.length})</span></span>
+                                                                <span className="text-gray-400">{expanded ? '▾' : '▸'}</span>
+                                                            </button>
+                                                            {expanded && (
+                                                                <div className="divide-y divide-gray-50">
+                                                                    {group.rows.map(r => {
+                                                                        const removed = isRowRemoved(r.section, r.dept, r.item);
+                                                                        return (
+                                                                            <button
+                                                                                key={`${r.section}-${r.dept}-${r.item}`}
+                                                                                onClick={() => toggleRemoveRow(r.section, r.dept, r.item)}
+                                                                                className={`w-full flex items-center gap-2 px-2 py-1 text-left transition-colors ${removed ? 'bg-rose-50 hover:bg-rose-100' : 'hover:bg-gray-50'}`}
+                                                                            >
+                                                                                <span className={`flex-shrink-0 h-4 w-4 rounded border ${removed ? 'bg-rose-600 border-rose-600 text-white' : 'border-gray-300 bg-white'} flex items-center justify-center`}>
+                                                                                    {removed && <Check size={10} />}
+                                                                                </span>
+                                                                                <div className="flex-1 min-w-0">
+                                                                                    <div className="text-[11px] font-medium text-gray-800 truncate">{r.item}</div>
+                                                                                    <div className="text-[10px] text-gray-500 truncate">{r.dept}</div>
+                                                                                </div>
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <p className="text-[10px] text-gray-500 italic">Al eliminar una fila su valor pasa a 0 desde el mes que elijas, sin tocar la base.</p>
+                                        </div>
+                                    )}
+                                </div>
                             )}
 
                             {/* Filas añadidas — lista y editor */}
@@ -1107,7 +1180,10 @@ export const ForecastScenariosModal = ({
                                         <UserPlus size={10} /> Añadidas ({(draft.addedRows || []).length})
                                     </div>
                                     <div className="space-y-1.5">
-                                        {(draft.addedRows || []).map(r => (
+                                        {(draft.addedRows || []).map(r => {
+                                            const decExtra = r.extraByMonth?.[12] || 0;
+                                            const isDouble = decExtra === r.monthlyAmount && r.monthlyAmount > 0;
+                                            return (
                                             <div key={r.id} className="rounded-md bg-white border border-emerald-200 px-2 py-1.5">
                                                 <div className="flex items-center gap-2 mb-1">
                                                     <div className="flex-1 min-w-0">
@@ -1151,7 +1227,15 @@ export const ForecastScenariosModal = ({
                                                         <input
                                                             type="number"
                                                             value={r.monthlyAmount}
-                                                            onChange={e => updateAddedRow(r.id, { monthlyAmount: Number(e.target.value) || 0 })}
+                                                            onChange={e => {
+                                                                const val = Number(e.target.value) || 0;
+                                                                const patch: Partial<ScenarioAddedRow> = { monthlyAmount: val };
+                                                                // Si el usuario tenía activada "paga doble", mantener sincronía
+                                                                if (isDouble) {
+                                                                    patch.extraByMonth = { ...(r.extraByMonth || {}), 12: val };
+                                                                }
+                                                                updateAddedRow(r.id, patch);
+                                                            }}
                                                             className="flex-1 h-6 px-1.5 tabular-nums rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-300"
                                                         />
                                                     </div>
@@ -1183,101 +1267,187 @@ export const ForecastScenariosModal = ({
                                                             ))}
                                                         </select>
                                                     </div>
+                                                    {r.section === 'personal' && (
+                                                        <div className="col-span-2 rounded bg-emerald-50/50 border border-emerald-100 px-1.5 py-1 space-y-1">
+                                                            <label className="flex items-center gap-1.5 cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={isDouble}
+                                                                    onChange={e => {
+                                                                        const next = { ...(r.extraByMonth || {}) };
+                                                                        if (e.target.checked) next[12] = r.monthlyAmount;
+                                                                        else delete next[12];
+                                                                        updateAddedRow(r.id, { extraByMonth: next });
+                                                                    }}
+                                                                    className="h-3 w-3"
+                                                                />
+                                                                <span className="text-emerald-800">Paga doble en diciembre</span>
+                                                            </label>
+                                                            <div className="flex items-center gap-1">
+                                                                <span className="text-gray-600">Extra dic. (€)</span>
+                                                                <input
+                                                                    type="number"
+                                                                    value={isDouble ? '' : (decExtra || '')}
+                                                                    disabled={isDouble}
+                                                                    onChange={e => {
+                                                                        const v = Number(e.target.value) || 0;
+                                                                        const next = { ...(r.extraByMonth || {}) };
+                                                                        if (v) next[12] = v; else delete next[12];
+                                                                        updateAddedRow(r.id, { extraByMonth: next });
+                                                                    }}
+                                                                    placeholder={isDouble ? 'automático' : '0'}
+                                                                    className="flex-1 h-6 px-1.5 tabular-nums rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-300 disabled:bg-gray-50 disabled:text-gray-400"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
 
-                            {/* Formulario añadir nueva fila */}
-                            <details>
-                                <summary className="cursor-pointer text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 select-none flex items-center gap-1">
-                                    <UserPlus size={11} /> Añadir fila nueva
-                                </summary>
-                                <div className="mt-2 grid grid-cols-2 gap-1.5">
-                                    <select
-                                        value={newRow.section}
-                                        onChange={e => setNewRow(r => ({ ...r, section: e.target.value, dept: '' }))}
-                                        className="h-7 px-1.5 text-[11px] rounded border border-gray-200 bg-white"
+                            {/* Bloque "Añadir fila nueva" — controlado (X para cerrar) */}
+                            <div className="rounded-md bg-white/60 border border-emerald-100">
+                                <div className="flex items-center justify-between px-2 py-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => setAddOpen(v => !v)}
+                                        className="flex-1 text-left text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 flex items-center gap-1"
                                     >
-                                        {SCENARIO_ROW_SECTIONS.map(s => (
-                                            <option key={s.key} value={s.key}>{s.label}</option>
-                                        ))}
-                                    </select>
-                                    <select
-                                        value={newRow.dept}
-                                        onChange={e => setNewRow(r => ({ ...r, dept: e.target.value }))}
-                                        className="h-7 px-1.5 text-[11px] rounded border border-gray-200 bg-white"
-                                    >
-                                        <option value="">Hub o vertical...</option>
-                                        {deptsForNewRow.map(d => (
-                                            <option key={d} value={d}>{d}</option>
-                                        ))}
-                                    </select>
-                                    <input
-                                        value={newRow.name}
-                                        onChange={e => setNewRow(r => ({ ...r, name: e.target.value }))}
-                                        placeholder="Nombre (ej. Nuevo trabajador)"
-                                        className="col-span-2 h-7 px-2 text-[11px] rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-300"
-                                    />
-                                    <input
-                                        type="number"
-                                        value={newRow.monthlyAmount}
-                                        onChange={e => setNewRow(r => ({ ...r, monthlyAmount: e.target.value }))}
-                                        placeholder="Coste €/mes"
-                                        className="h-7 px-2 text-[11px] tabular-nums rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-300"
-                                    />
-                                    <div className="flex items-center gap-1 text-[11px]">
-                                        <select
-                                            value={newRow.fromMonth}
-                                            onChange={e => {
-                                                const from = Number(e.target.value);
-                                                setNewRow(r => ({ ...r, fromMonth: from, toMonth: Math.max(r.toMonth, from) }));
-                                            }}
-                                            className="h-7 px-1 rounded border border-gray-200 bg-white"
+                                        <UserPlus size={11} /> Añadir fila nueva
+                                        <span className="ml-auto text-[10px] text-gray-400">{addOpen ? 'Ocultar' : 'Mostrar'}</span>
+                                    </button>
+                                    {addOpen && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setAddOpen(false)}
+                                            className="ml-1 p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                                            title="Cerrar"
                                         >
-                                            {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                                                <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
-                                            ))}
-                                        </select>
-                                        <span className="text-gray-500">a</span>
-                                        <select
-                                            value={newRow.toMonth}
-                                            onChange={e => {
-                                                const to = Number(e.target.value);
-                                                setNewRow(r => ({ ...r, toMonth: to, fromMonth: Math.min(r.fromMonth, to) }));
-                                            }}
-                                            className="h-7 px-1 rounded border border-gray-200 bg-white"
-                                        >
-                                            {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                                                <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <Button
-                                        size="sm"
-                                        onClick={() => {
-                                            const monthly = Number(newRow.monthlyAmount) || 0;
-                                            if (!newRow.name.trim() || !newRow.dept) return;
-                                            addNewRow({
-                                                section: newRow.section,
-                                                dept: newRow.dept,
-                                                name: newRow.name.trim(),
-                                                monthlyAmount: monthly,
-                                                fromMonth: newRow.fromMonth,
-                                                toMonth: newRow.toMonth,
-                                            });
-                                            setNewRow(r => ({ ...r, name: '', monthlyAmount: '' }));
-                                        }}
-                                        disabled={!newRow.name.trim() || !newRow.dept}
-                                        className="col-span-2 h-7 text-[11px] gap-1"
-                                    >
-                                        <Plus size={11} /> Añadir fila
-                                    </Button>
+                                            <X size={11} />
+                                        </button>
+                                    )}
                                 </div>
-                                <p className="mt-1.5 text-[10px] text-gray-500 italic">La fila añadida solo existe dentro del escenario — no se guarda en la base ni afecta a otros meses.</p>
-                            </details>
+                                {addOpen && (
+                                    <div className="border-t border-emerald-100 p-2 space-y-1.5">
+                                        <div className="grid grid-cols-2 gap-1.5">
+                                            <select
+                                                value={newRow.section}
+                                                onChange={e => setNewRow(r => ({ ...r, section: e.target.value, dept: '' }))}
+                                                className="h-7 px-1.5 text-[11px] rounded border border-gray-200 bg-white"
+                                            >
+                                                {SCENARIO_ROW_SECTIONS.map(s => (
+                                                    <option key={s.key} value={s.key}>{s.label}</option>
+                                                ))}
+                                            </select>
+                                            <select
+                                                value={newRow.dept}
+                                                onChange={e => setNewRow(r => ({ ...r, dept: e.target.value }))}
+                                                className="h-7 px-1.5 text-[11px] rounded border border-gray-200 bg-white"
+                                            >
+                                                <option value="">Hub o vertical...</option>
+                                                {deptsForNewRow.map(d => (
+                                                    <option key={d} value={d}>{d}</option>
+                                                ))}
+                                            </select>
+                                            <input
+                                                value={newRow.name}
+                                                onChange={e => setNewRow(r => ({ ...r, name: e.target.value }))}
+                                                placeholder="Nombre (ej. Nuevo trabajador)"
+                                                className="col-span-2 h-7 px-2 text-[11px] rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-300"
+                                            />
+                                            <input
+                                                type="number"
+                                                value={newRow.monthlyAmount}
+                                                onChange={e => setNewRow(r => ({ ...r, monthlyAmount: e.target.value }))}
+                                                placeholder="Coste €/mes"
+                                                className="h-7 px-2 text-[11px] tabular-nums rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-300"
+                                            />
+                                            <div className="flex items-center gap-1 text-[11px]">
+                                                <select
+                                                    value={newRow.fromMonth}
+                                                    onChange={e => {
+                                                        const from = Number(e.target.value);
+                                                        setNewRow(r => ({ ...r, fromMonth: from, toMonth: Math.max(r.toMonth, from) }));
+                                                    }}
+                                                    className="h-7 px-1 rounded border border-gray-200 bg-white"
+                                                >
+                                                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                        <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                    ))}
+                                                </select>
+                                                <span className="text-gray-500">a</span>
+                                                <select
+                                                    value={newRow.toMonth}
+                                                    onChange={e => {
+                                                        const to = Number(e.target.value);
+                                                        setNewRow(r => ({ ...r, toMonth: to, fromMonth: Math.min(r.fromMonth, to) }));
+                                                    }}
+                                                    className="h-7 px-1 rounded border border-gray-200 bg-white"
+                                                >
+                                                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                        <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            {newRow.section === 'personal' && (
+                                                <div className="col-span-2 rounded bg-emerald-50/50 border border-emerald-100 px-1.5 py-1 space-y-1 text-[11px]">
+                                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={newRow.doublePayDecember}
+                                                            onChange={e => setNewRow(r => ({ ...r, doublePayDecember: e.target.checked, extraDecember: e.target.checked ? '' : r.extraDecember }))}
+                                                            className="h-3 w-3"
+                                                        />
+                                                        <span className="text-emerald-800">Paga doble en diciembre</span>
+                                                    </label>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-gray-600">Extra dic. (€)</span>
+                                                        <input
+                                                            type="number"
+                                                            value={newRow.doublePayDecember ? '' : newRow.extraDecember}
+                                                            disabled={newRow.doublePayDecember}
+                                                            onChange={e => setNewRow(r => ({ ...r, extraDecember: e.target.value }))}
+                                                            placeholder={newRow.doublePayDecember ? 'automático' : '0'}
+                                                            className="flex-1 h-6 px-1.5 tabular-nums rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-300 disabled:bg-gray-50 disabled:text-gray-400"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                            <Button
+                                                size="sm"
+                                                onClick={() => {
+                                                    const monthly = Number(newRow.monthlyAmount) || 0;
+                                                    if (!newRow.name.trim() || !newRow.dept) return;
+                                                    let extraByMonth: Record<number, number> | undefined;
+                                                    if (newRow.section === 'personal') {
+                                                        if (newRow.doublePayDecember) extraByMonth = { 12: monthly };
+                                                        else if (Number(newRow.extraDecember) > 0) extraByMonth = { 12: Number(newRow.extraDecember) };
+                                                    }
+                                                    addNewRow({
+                                                        section: newRow.section,
+                                                        dept: newRow.dept,
+                                                        name: newRow.name.trim(),
+                                                        monthlyAmount: monthly,
+                                                        fromMonth: newRow.fromMonth,
+                                                        toMonth: newRow.toMonth,
+                                                        ...(extraByMonth ? { extraByMonth } : {}),
+                                                    });
+                                                    setNewRow(r => ({ ...r, name: '', monthlyAmount: '', doublePayDecember: false, extraDecember: '' }));
+                                                }}
+                                                disabled={!newRow.name.trim() || !newRow.dept}
+                                                className="col-span-2 h-7 text-[11px] gap-1"
+                                            >
+                                                <Plus size={11} /> Añadir fila
+                                            </Button>
+                                        </div>
+                                        <p className="text-[10px] text-gray-500 italic">La fila añadida solo existe dentro del escenario — no se guarda en la base ni afecta a otros meses.</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </section>
 
