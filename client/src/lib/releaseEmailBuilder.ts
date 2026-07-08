@@ -56,12 +56,24 @@ interface BuildOpts {
     ctaLabel?: string;
 }
 
+// Fallback seguro para el appUrl cuando el caller no lo pasa.
+// Prioriza el origin actual del navegador (siempre válido), y si estamos
+// en Node/SSR/CLI usa un placeholder inofensivo. Nunca devolvemos una URL
+// que se sabe que no existe (como el antiguo hardcoded app-finance.vercel.app).
+function resolveAppUrl(explicit?: string): string {
+    if (explicit) return explicit.replace(/\/$/, '');
+    if (typeof window !== 'undefined' && window.location?.origin) {
+        return window.location.origin;
+    }
+    return '';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Builder por defecto — usa el tipo, título, descripción y fecha del entry
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildDefault(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
-    const appUrl = opts.appUrl || 'https://app-finance.vercel.app';
+    const appUrl = resolveAppUrl(opts.appUrl);
     const ctaLabel = opts.ctaLabel || 'Abrir en la app';
     const meta = TYPE_META[entry.type];
     const subject = `✨ ${entry.title}`;
@@ -136,7 +148,7 @@ function buildDefault(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildScenariosRows(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
-    const appUrl = opts.appUrl || 'https://app-finance.vercel.app';
+    const appUrl = resolveAppUrl(opts.appUrl);
     const subject = '✨ Nuevo en Escenarios: añade y quita filas para simular altas, bajas y pagas dobles';
     const text = [
         'Novedad en Immoral Finance — Escenarios',
@@ -288,7 +300,7 @@ function buildScenariosRows(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltE
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildEnviarNovedadesEmail(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
-    const appUrl = opts.appUrl || 'https://app-finance.vercel.app';
+    const appUrl = resolveAppUrl(opts.appUrl);
     const subject = '📬 Nuevo en Immoral Finance: envía novedades por email desde la app';
     const text = [
         'Novedad en Immoral Finance — Enviar novedades',
