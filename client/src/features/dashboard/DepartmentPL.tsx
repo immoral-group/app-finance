@@ -20,7 +20,7 @@ import {
     ReferenceLine
 } from 'recharts';
 import { CommentModal, ForecastInfoModal } from '@/features/pl/PLMatrix';
-import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, scenarioSummary, type ForecastScenario, type SavedScenario } from '@/features/pl/ForecastScenarios';
+import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowValue, scenarioSummary, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from '@/features/pl/ForecastScenarios';
 import { Sparkles } from 'lucide-react';
 import { useUrlState } from '@/hooks/useUrlState';
 import NutfruitBudget from './NutfruitBudget';
@@ -510,6 +510,13 @@ export default function DepartmentPL() {
     });
     const customRows = customRowsData?.rows || [];
 
+    // Filas añadidas por el escenario activo — solo en pestañas donde aplica
+    const scenarioAddedRows: ScenarioAddedRow[] = useMemo(() => {
+        const tabAllows = activeTab === 'Forecast' || activeTab === 'Presupuesto';
+        if (!tabAllows || !activeScenario) return [];
+        return activeScenario.addedRows || [];
+    }, [activeTab, activeScenario]);
+
     // Merge custom rows into structures
     const mergedExpenseKeyMap = useMemo(() => {
         const expCustom = customRows.filter(r => r.block_type === 'expense');
@@ -526,8 +533,19 @@ export default function DepartmentPL() {
             }
             if (!group.items.includes(cr.item_name)) group.items.push(cr.item_name);
         });
+        // Inyectar filas añadidas del escenario (solo secciones de gasto)
+        scenarioAddedRows.forEach(row => {
+            if (row.section === 'revenue') return;
+            if (!merged[row.section]) merged[row.section] = [];
+            let group = merged[row.section].find(g => g.dept === row.dept);
+            if (!group) {
+                group = { dept: row.dept, items: [] };
+                merged[row.section].push(group);
+            }
+            if (!group.items.includes(row.name)) group.items.push(row.name);
+        });
         return merged;
-    }, [customRows]);
+    }, [customRows, scenarioAddedRows]);
 
     const mergedRevenueStructure = useMemo(() => {
         const revCustom = customRows.filter(r => r.block_type === 'revenue');
@@ -540,8 +558,18 @@ export default function DepartmentPL() {
             }
             if (!group.services.includes(cr.item_name)) group.services.push(cr.item_name);
         });
+        // Inyectar filas añadidas del escenario (solo revenue)
+        scenarioAddedRows.forEach(row => {
+            if (row.section !== 'revenue') return;
+            let group = merged.find(g => g.dept === row.dept);
+            if (!group) {
+                group = { dept: row.dept, services: [] };
+                merged.push(group);
+            }
+            if (!group.services.includes(row.name)) group.services.push(row.name);
+        });
         return merged;
-    }, [customRows]);
+    }, [customRows, scenarioAddedRows]);
 
     // Populate cellValues from API data.
     // Uses string key to avoid re-parsing on background refetches while editing.
@@ -764,6 +792,11 @@ export default function DepartmentPL() {
         const base = cellValues[getCellKey(section, dept, item, monthIdx)] || 0;
         const tabAllows = activeTab === 'Forecast' || activeTab === 'Presupuesto';
         if (!tabAllows || !activeScenario) return base;
+        // Fila añadida por el escenario — valor viene del propio escenario
+        const added = (activeScenario.addedRows || []).find(r => r.section === section && r.dept === dept && r.name === item);
+        if (added) return addedRowValue(added, monthIdx);
+        // Fila eliminada por el escenario — vale 0 desde su fromMonth
+        if (isItemRemoved(activeScenario, section, dept, item, monthIdx)) return 0;
         const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
         if (mult === 1) return base;
         return Math.round(base * mult * 100) / 100;
@@ -820,6 +853,9 @@ export default function DepartmentPL() {
         const base = source[`${section}-${dept}-${item}-${monthIdx}`] || 0;
         const tabAllows = activeTab === 'Forecast' || activeTab === 'Presupuesto';
         if (!tabAllows || !activeScenario) return base;
+        const added = (activeScenario.addedRows || []).find(r => r.section === section && r.dept === dept && r.name === item);
+        if (added) return addedRowValue(added, monthIdx);
+        if (isItemRemoved(activeScenario, section, dept, item, monthIdx)) return 0;
         const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
         return base * mult;
     };
@@ -899,11 +935,39 @@ export default function DepartmentPL() {
         const note = getCellNote(deptNoteType, normalizedSection, dept, item, monthIdx);
         const hasNote = !!note?.comment || (note?.assigned_to && note.assigned_to.length > 0);
         const scenarioActive = (activeTab === 'Forecast' || activeTab === 'Presupuesto') && !!activeScenario && !isScenarioEmpty(activeScenario);
+        const addedRow = scenarioActive ? (activeScenario!.addedRows || []).find(r => r.section === section && r.dept === dept && r.name === item) : undefined;
+        const removed = scenarioActive && isItemRemoved(activeScenario, section, dept, item, monthIdx);
         const mult = scenarioActive ? resolveMultiplier(activeScenario, section, dept, item, monthIdx) : 1;
-        const tinted = scenarioActive && mult !== 1 && baseVal !== 0;
+        const tinted = scenarioActive && !addedRow && !removed && mult !== 1 && baseVal !== 0;
         const deltaPct = Math.round((mult - 1) * 100);
         const isUp = deltaPct > 0;
-        const isRevenueRealClickable = activeTab === 'Real' && section === 'revenue' && value > 0;
+        const isRevenueRealClickable = activeTab === 'Real' && section === 'revenue' && value > 0 && !addedRow;
+
+        if (addedRow) {
+            return (
+                <td
+                    key={monthIdx}
+                    className="border border-violet-200 px-1 py-1 text-right text-xs tabular-nums relative bg-violet-100/70 text-violet-900"
+                    title={`Fila añadida por el escenario: ${addedRow.name} (${addedRow.monthlyAmount.toLocaleString('de-DE')} €/mes de ${MONTHS[addedRow.fromMonth - 1]} a ${MONTHS[addedRow.toMonth - 1]})`}
+                >
+                    <div className="font-semibold">{value ? fmtDisplay(value) : <span className="text-violet-300">0</span>}</div>
+                    <div className="text-[9px] font-bold text-violet-700">NUEVA</div>
+                </td>
+            );
+        }
+        if (removed) {
+            const removedRow = activeScenario!.removedItems!.find(r => r.section === section && r.dept === dept && r.item === item)!;
+            return (
+                <td
+                    key={monthIdx}
+                    className="border border-rose-200 px-1 py-1 text-right text-xs tabular-nums relative bg-rose-100/70 text-rose-900"
+                    title={`Fila eliminada por el escenario a partir de ${MONTHS[removedRow.fromMonth - 1]}`}
+                >
+                    <div className="font-semibold line-through opacity-70">{baseVal ? Math.round(baseVal).toLocaleString('de-DE') : '0'}</div>
+                    <div className="text-[9px] font-bold text-rose-700">−100%</div>
+                </td>
+            );
+        }
         return (
             <td
                 key={monthIdx}
