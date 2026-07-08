@@ -23,6 +23,17 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.42-enviar-novedades-email',
+        date: '2026-07-08',
+        title: 'Enviar novedades por email desde la app',
+        description: 'Nueva pantalla para superadmins: elige cualquier novedad del historial, decide a quién enviársela (usuarios de la app filtrados por rol/depto o direcciones externas escritas a mano) y previsualiza el correo antes de enviar. Cada destinatario recibe un correo dedicado con el diseño de Immoral Finance. Ideal para avisar a todo el equipo o a clientes específicos cuando lanzamos algo nuevo.',
+        type: 'new_module',
+        moduleKey: 'release_notifications',
+        superadminOnly: true,
+        icon: 'Mail',
+        highlight: true,
+    },
+    {
         id: 'v1.41-escenarios-filas',
         date: '2026-07-08',
         title: 'Escenarios: añadir y quitar filas (bajas, altas y paga doble)',

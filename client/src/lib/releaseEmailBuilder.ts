@@ -283,8 +283,140 @@ function buildScenariosRows(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltE
 // Registro de builders específicos (opcional). Si no hay match, usa el default.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Builder específico — Enviar novedades por email
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildEnviarNovedadesEmail(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
+    const appUrl = opts.appUrl || 'https://app-finance.vercel.app';
+    const subject = '📬 Nuevo en Immoral Finance: envía novedades por email desde la app';
+    const text = [
+        'Novedad en Immoral Finance — Enviar novedades',
+        '',
+        'Los superadmins ahora pueden mandar novedades por correo desde la propia app:',
+        '  • Elige cualquier novedad del historial (todas las que se han publicado).',
+        '  • Filtra usuarios por rol y departamento, y escríbe también emails externos.',
+        '  • Previsualiza el correo antes de enviar.',
+        '  • Cada destinatario recibe un correo dedicado, no ve al resto.',
+        '',
+        `Abre la app: ${appUrl}/release-notifications`,
+        '— Immoral Finance',
+    ].join('\n');
+
+    const html = `<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${esc(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+<div style="display:none;max-height:0;overflow:hidden;">Ya puedes enviar novedades por email desde la propia app — elige la novedad, los destinatarios y envía.</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f3f4f6;padding:32px 12px;">
+  <tr><td align="center">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 24px 60px -20px rgba(16,185,129,0.35);">
+
+      <tr>
+        <td style="background:linear-gradient(135deg,#10b981 0%,#06b6d4 45%,#6366f1 100%);padding:36px 32px 28px 32px;color:#ffffff;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td><span style="display:inline-block;background:rgba(255,255,255,0.18);color:#ffffff;font-size:10px;font-weight:800;letter-spacing:2px;padding:5px 10px;border-radius:999px;text-transform:uppercase;">📬 Novedad · Comunicación</span></td>
+              <td align="right" style="color:rgba(255,255,255,0.75);font-size:11px;">Immoral Finance · Solo superadmins</td>
+            </tr>
+          </table>
+          <h1 style="margin:18px 0 8px 0;font-size:26px;font-weight:800;line-height:1.2;">Envía novedades por email desde la app</h1>
+          <p style="margin:0;font-size:15px;line-height:1.55;color:rgba(255,255,255,0.92);">Ya no hace falta redactar correos por fuera. Elige una novedad, escoge a quién enviársela y <strong>previsualiza el correo antes de darle al botón</strong>. Cada destinatario recibe su copia dedicada.</p>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="padding:28px 32px 8px 32px;">
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#374151;">
+            Encuéntralo en el menú lateral, bajo <strong>✉️ Enviar novedades</strong>. La biblioteca de novedades es la misma que ves en el badge <span style="color:#6366f1;">✨</span> — así que todo lo que se publique en el <em>changelog</em> ya está listo para enviar por email.
+          </p>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="padding:12px 32px 8px 32px;">
+
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:12px 0;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:14px;">
+            <tr>
+              <td width="52" valign="top" style="padding:16px 0 16px 16px;">
+                <div style="width:40px;height:40px;background:linear-gradient(135deg,#10b981,#059669);border-radius:12px;color:#ffffff;font-size:18px;font-weight:800;text-align:center;line-height:40px;">1</div>
+              </td>
+              <td valign="top" style="padding:14px 16px 14px 12px;">
+                <div style="font-size:14px;font-weight:700;color:#065f46;margin-bottom:4px;">Elige la novedad</div>
+                <div style="font-size:13px;line-height:1.55;color:#4b5563;">Lista completa del historial con buscador y filtro por tipo (Nuevo / Mejora / Corrección / En desarrollo). El correo se genera automáticamente con el diseño de Immoral Finance.</div>
+              </td>
+            </tr>
+          </table>
+
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:12px 0;background:#ecfeff;border:1px solid #a5f3fc;border-radius:14px;">
+            <tr>
+              <td width="52" valign="top" style="padding:16px 0 16px 16px;">
+                <div style="width:40px;height:40px;background:linear-gradient(135deg,#06b6d4,#0891b2);border-radius:12px;color:#ffffff;font-size:18px;font-weight:800;text-align:center;line-height:40px;">2</div>
+              </td>
+              <td valign="top" style="padding:14px 16px 14px 12px;">
+                <div style="font-size:14px;font-weight:700;color:#0e7490;margin-bottom:4px;">Elige destinatarios</div>
+                <div style="font-size:13px;line-height:1.55;color:#4b5563;">Marca uno o varios usuarios de la app filtrando por rol o departamento, o añade <strong>emails externos</strong> escribiéndolos a mano (útil para clientes, partners o gente que no está dentro de la plataforma).</div>
+              </td>
+            </tr>
+          </table>
+
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:12px 0;background:#eef2ff;border:1px solid #c7d2fe;border-radius:14px;">
+            <tr>
+              <td width="52" valign="top" style="padding:16px 0 16px 16px;">
+                <div style="width:40px;height:40px;background:linear-gradient(135deg,#6366f1,#4f46e5);border-radius:12px;color:#ffffff;font-size:18px;font-weight:800;text-align:center;line-height:40px;">3</div>
+              </td>
+              <td valign="top" style="padding:14px 16px 14px 12px;">
+                <div style="font-size:14px;font-weight:700;color:#3730a3;margin-bottom:4px;">Previsualiza y envía</div>
+                <div style="font-size:13px;line-height:1.55;color:#4b5563;">A la derecha ves el correo tal y como lo recibirá el destinatario. Antes de enviar, la app te muestra un resumen con los destinatarios y te pide confirmación. Puedes probar el SMTP en cualquier momento con el botón "Probar SMTP".</div>
+              </td>
+            </tr>
+          </table>
+
+        </td>
+      </tr>
+
+      <tr>
+        <td align="center" style="padding:28px 32px 8px 32px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td style="background:linear-gradient(135deg,#10b981,#06b6d4);border-radius:12px;">
+              <a href="${appUrl}/release-notifications" target="_blank" style="display:inline-block;padding:14px 30px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">Abrir Enviar novedades →</a>
+            </td>
+          </tr></table>
+          <div style="margin-top:10px;font-size:11px;color:#9ca3af;">Disponible solo para <strong>superadmins</strong> · en el sidebar bajo <span style="color:#10b981;">✉️ Enviar novedades</span></div>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="padding:16px 32px 24px 32px;">
+          <div style="background:#f9fafb;border:1px dashed #d1d5db;border-radius:10px;padding:12px 14px;font-size:12px;color:#4b5563;line-height:1.55;">
+            <strong style="color:#111827;">Privacidad:</strong> cada destinatario recibe un correo dedicado a su dirección. La lista de destinatarios no se expone (no se usa BCC).
+          </div>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="background:#f9fafb;padding:18px 32px;border-top:1px solid #e5e7eb;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td style="font-size:11px;color:#9ca3af;">Immoral Finance · Notificación de nueva funcionalidad</td>
+            <td align="right" style="font-size:11px;"><a href="${appUrl}" target="_blank" style="color:#10b981;text-decoration:none;">Ir a la app</a></td>
+          </tr></table>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+    void entry;
+    return { subject, html, text };
+}
+
 const CUSTOM_BUILDERS: Record<string, (entry: ChangelogEntry, opts?: BuildOpts) => BuiltEmail> = {
     'v1.41-escenarios-filas': buildScenariosRows,
+    'v1.42-enviar-novedades-email': buildEnviarNovedadesEmail,
 };
 
 export function buildChangelogEmail(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
