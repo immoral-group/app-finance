@@ -564,7 +564,7 @@ async function computeRealCostPerPerson(year) {
     // permite sumar todas sus líneas en lugar de quedarnos sólo con una.
     const PERSONAL_ITEMS = {
         Immedia: ['Alba', 'Andrés Barrios', 'Leidy', 'Yure'],
-        Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'],
+        Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie', 'Nueva Trabajadora'],
         Immoralia: ['David', 'Manel', 'Julian'],
         Immoral: ['Yure'],
     };

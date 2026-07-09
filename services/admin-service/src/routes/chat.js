@@ -376,7 +376,7 @@ function getExpenseCategoryGroup(exp) {
     const n = catName || '';
     
     // Personal
-    if (['Alba', 'Andrés', 'Leidy', 'Flor', 'Bruno', 'Grego', 'Silvia', 'Angie', 'David', 'Manel', 'Daniel', 'Mery', 'Yure', 'Marco', 'Jorge Orts', 'Externos', 'Externos puntuales', 'Gastos de Personal'].includes(n)) return 'personal';
+    if (['Alba', 'Andrés', 'Leidy', 'Flor', 'Bruno', 'Grego', 'Silvia', 'Angie', 'Nueva Trabajadora', 'David', 'Manel', 'Daniel', 'Mery', 'Yure', 'Marco', 'Jorge Orts', 'Externos', 'Externos puntuales', 'Gastos de Personal'].includes(n)) return 'personal';
     // Marketing
     if (n === 'Marketing') return 'marketing';
     // Formación
