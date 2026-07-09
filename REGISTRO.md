@@ -1167,4 +1167,36 @@ Añadido `AbortController` con timeout configurable (default 45s) para que ningu
 - `0b2b1c9` novedades: página Enviar novedades con selector template, usuarios y preview
 - `340989a` novedades: listar CHANGELOG completo, preview client-side y emails manuales
 - `7a85477` novedades: diagnóstico SMTP, timeouts y errores visibles en el modal
+
+---
+
+### 2026-07-09 — Provisión de nueva trabajadora en el hub Imcontent
+
+**Contexto:**
+Se incorpora una nueva persona al equipo de Imcontent que aún no tiene nombre asignado (está pendiente de contratación). Hay que dejar la fila creada en la estructura para poder cargar presupuesto y forecast desde ya, y tener el hueco listo cuando llegue el momento de registrar su sueldo real.
+
+**Solución:**
+Se añade la fila `Nueva Trabajadora` en la sección Personal → Imcontent del `EXPENSE_STRUCTURE` compartido. Aparece automáticamente en Real, Presupuesto, Comparación, Forecast y Escenarios porque los cuatro tabs comparten la misma fuente de verdad.
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---|---|
+| `client/src/features/pl/PLMatrix.tsx` | `EXPENSE_STRUCTURE.personalItems` — Imcontent |
+| `client/src/features/dashboard/DepartmentPL.tsx` | Mismo array replicado por hub |
+| `client/src/features/dashboard/Dashboard.tsx` | Mismo array replicado |
+| `client/src/features/dashboard/DashboardDetalle.tsx` | Mismo array replicado |
+| `services/admin-service/src/routes/pl.js` | `PERSONAL_ITEMS.Imcontent` para conteo de personas del hub |
+| `services/admin-service/src/routes/profitability.js` | `PERSONAL_ITEMS.Imcontent` para coste/hora |
+| `services/admin-service/src/routes/chat.js` | Clasificador de categoría `personal` |
+| `services/admin-service/src/routes/dashboard.js` | Clasificador de categoría `personal` |
+
+**Base de datos:**
+No requiere migración. La categoría en `expense_categories` se autocrea la primera vez que se guarda un valor en la celda (ver `pl.js:855-874`) y se asigna al año fiscal actual en `category_year_assignments`.
+
+**Cuando llegue el nombre real:**
+Buscar/reemplazar `"Nueva Trabajadora"` en los 8 archivos anteriores por el nombre definitivo. Si ya se hubieran cargado valores en BBDD, renombrar también la entrada en `expense_categories` para no perder el histórico.
+
+**Commit:**
+- `d5bce5d` Añadir fila "Nueva Trabajadora" en el hub Imcontent
 - `79b114a` novedades: fix 403 — la tabla es user_profiles, no profiles
