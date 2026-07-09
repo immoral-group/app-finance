@@ -1336,7 +1336,7 @@ router.get('/cost-per-hour/:year/:dept', async (req, res) => {
     // These are used to identify which expense items are "personal" for counting people
     const PERSONAL_ITEMS = {
         Immedia: ['Alba', 'Andrés', 'Leidy', 'Yure'],
-        Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie'],
+        Imcontent: ['Flor', 'Bruno', 'Grego', 'Silvia', 'Angie', 'Nueva Trabajadora'],
         Immoralia: ['David', 'Manel', 'Julian'],
     };
 
