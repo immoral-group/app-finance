@@ -10,12 +10,18 @@
 // → default de producción.
 function resolveLogoSrc(url, baseUrl) {
     const configured = String(url || '').trim();
-    // Si el user configuró una URL propia (que NO sea la default de prod), usarla.
     if (configured && configured !== 'https://imfinance.immoral.es/logo.png') return configured;
 
-    const base = baseUrl
-        || process.env.APP_URL
-        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+    // Preferencia: host del request actual > VERCEL_URL (autogenerada) > APP_URL manual.
+    // APP_URL va al final porque puede llevar tabs/espacios accidentales o apuntar a un
+    // dominio que aún no está configurado en DNS. Todas las opciones se trimean.
+    const cleanBaseUrl = String(baseUrl || '').trim();
+    const cleanAppUrl = String(process.env.APP_URL || '').trim();
+    const cleanVercelUrl = String(process.env.VERCEL_URL || '').trim();
+
+    const base = cleanBaseUrl
+        || (cleanVercelUrl ? `https://${cleanVercelUrl}` : null)
+        || cleanAppUrl
         || 'https://imfinance.immoral.es';
     return `${base}/api/admin/dunning/logo`;
 }

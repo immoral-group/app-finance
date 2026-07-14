@@ -94,17 +94,23 @@ router.get('/logo', (_req, res) => {
 router.get('/logo-debug', (req, res) => {
     const host = req.get('host');
     const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
-    const computed = process.env.APP_URL
-        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
-        || `${proto}://${host}`;
+    const cleanAppUrl = String(process.env.APP_URL || '').trim();
+    const cleanVercelUrl = String(process.env.VERCEL_URL || '').trim();
+    const baseUrl = `${proto}://${host}`;
+    const computed = baseUrl
+        || (cleanVercelUrl ? `https://${cleanVercelUrl}` : null)
+        || cleanAppUrl
+        || 'https://imfinance.immoral.es';
     res.json({
-        env_APP_URL: process.env.APP_URL || null,
-        env_VERCEL_URL: process.env.VERCEL_URL || null,
+        env_APP_URL_raw: process.env.APP_URL || null,
+        env_APP_URL_trimmed: cleanAppUrl || null,
+        env_APP_URL_has_whitespace: (process.env.APP_URL || '') !== cleanAppUrl,
+        env_VERCEL_URL: cleanVercelUrl || null,
         request_host: host,
         request_proto: proto,
         computed_base: computed,
-        logo_full_url: `${computed}/api/admin/dunning/logo`,
-        logo_endpoint_direct: `${proto}://${host}/api/admin/dunning/logo`,
+        logo_full_url_used_in_email: `${computed}/api/admin/dunning/logo`,
+        logo_endpoint_direct: `${baseUrl}/api/admin/dunning/logo`,
     });
 });
 
