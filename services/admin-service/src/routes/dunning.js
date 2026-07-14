@@ -235,6 +235,7 @@ async function executeSend({ dryRun = false, forcedConfig = null }) {
         }
 
         try {
+            const isTestEnvio = !!redirect_reason;
             const { data: caseRow, error: caseErr } = await supabase
                 .from('dunning_cases')
                 .upsert({
@@ -248,6 +249,7 @@ async function executeSend({ dryRun = false, forcedConfig = null }) {
                     invoice_date: item.invoice.invoice_date ? new Date(item.invoice.invoice_date).toISOString() : null,
                     due_date: item.invoice.due_date ? new Date(item.invoice.due_date).toISOString() : null,
                     status: 'open',
+                    is_test: isTestEnvio,
                     updated_at: new Date().toISOString(),
                 }, { onConflict: 'invoice_id' })
                 .select().single();
@@ -317,6 +319,7 @@ async function executeSend({ dryRun = false, forcedConfig = null }) {
                 stripe_session_id,
                 stripe_payment_url: stripe_url,
                 status: 'sent',
+                is_test: isTestEnvio,
             });
 
             await supabase.from('dunning_cases').update({
@@ -675,6 +678,8 @@ router.get('/cases/:id', async (req, res) => {
 // de facturas vencidas actuales viene de /overdue-invoices (Holded live).
 router.get('/stats', async (_req, res) => {
     try {
+        // Excluimos los envíos hechos en modo prueba (is_test=true) para que
+        // no ensucien los KPIs. Los casos test tampoco cuentan.
         const [
             { count: openCases },
             { count: paidCases },
@@ -682,11 +687,11 @@ router.get('/stats', async (_req, res) => {
             { count: totalReminders },
             { data: remindersByLevel },
         ] = await Promise.all([
-            supabase.from('dunning_cases').select('*', { count: 'exact', head: true }).eq('status', 'open'),
-            supabase.from('dunning_cases').select('*', { count: 'exact', head: true }).eq('status', 'paid'),
-            supabase.from('dunning_cases').select('days_to_pay').eq('status', 'paid').not('days_to_pay', 'is', null),
-            supabase.from('dunning_reminders').select('*', { count: 'exact', head: true }),
-            supabase.from('dunning_reminders').select('level').eq('status', 'sent'),
+            supabase.from('dunning_cases').select('*', { count: 'exact', head: true }).eq('status', 'open').eq('is_test', false),
+            supabase.from('dunning_cases').select('*', { count: 'exact', head: true }).eq('status', 'paid').eq('is_test', false),
+            supabase.from('dunning_cases').select('days_to_pay').eq('status', 'paid').eq('is_test', false).not('days_to_pay', 'is', null),
+            supabase.from('dunning_reminders').select('*', { count: 'exact', head: true }).eq('is_test', false),
+            supabase.from('dunning_reminders').select('level').eq('status', 'sent').eq('is_test', false),
         ]);
 
         const daysArr = (paidWithDays || []).map(r => r.days_to_pay).filter(n => n != null);
