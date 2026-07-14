@@ -110,6 +110,7 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
 
 function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
     const [form, setForm] = useState(config);
+    const [justSaved, setJustSaved] = useState(false);
     useEffect(() => setForm(config), [config]);
 
     const toggleDay = (day: number) => {
@@ -118,6 +119,24 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
         setForm({ ...form, send_days: Array.from(set).sort() });
     };
 
+    const handleSave = () => {
+        onSave(form);
+        setJustSaved(true);
+        setTimeout(() => setJustSaved(false), 3000);
+    };
+
+    // Resumen del estado ACTUALMENTE GUARDADO (leído de config, no de form).
+    const savedDaysLabel = (config.send_days || []).length === 0
+        ? 'ningún día'
+        : (config.send_days || []).map(d => DAY_LABELS[d]).join(', ');
+    const savedHourLabel = `${String(config.send_hour).padStart(2, '0')}:${String(config.send_minute).padStart(2, '0')}`;
+
+    const hasUnsaved = JSON.stringify({
+        e: form.enabled, d: form.send_days, h: form.send_hour, m: form.send_minute, tz: form.timezone,
+    }) !== JSON.stringify({
+        e: config.enabled, d: config.send_days, h: config.send_hour, m: config.send_minute, tz: config.timezone,
+    });
+
     return (
         <Card>
             <CardHeader>
@@ -125,6 +144,50 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
                 <p className="text-xs text-muted-foreground">Elige uno o varios días de la semana y la hora del envío.</p>
             </CardHeader>
             <CardContent className="space-y-6">
+                {/* Resumen del estado guardado — siempre visible */}
+                {config.enabled ? (
+                    (config.send_days || []).length > 0 ? (
+                        <div className="rounded-lg border-2 border-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-700 p-4 flex items-start gap-3">
+                            <div className="h-9 w-9 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                                <Check className="text-white" size={18} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-200">Sistema ACTIVO</p>
+                                <p className="text-xs text-emerald-800 dark:text-emerald-300/90 mt-0.5">
+                                    Se envían recordatorios los <strong>{savedDaysLabel}</strong> a las <strong>{savedHourLabel}</strong> ({config.timezone}).
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="rounded-lg border-2 border-amber-400 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 p-4 flex items-start gap-3">
+                            <AlertTriangle className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" size={18} />
+                            <div>
+                                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">Sistema activo pero sin días configurados</p>
+                                <p className="text-xs text-amber-800 dark:text-amber-300/90 mt-0.5">Selecciona al menos un día abajo y guarda.</p>
+                            </div>
+                        </div>
+                    )
+                ) : (
+                    <div className="rounded-lg border-2 border-muted-foreground/30 bg-muted/30 p-4 flex items-start gap-3">
+                        <div className="h-9 w-9 rounded-full bg-muted-foreground/30 flex items-center justify-center shrink-0">
+                            <X className="text-muted-foreground" size={18} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-foreground">Sistema DESACTIVADO</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                No se envía nada automáticamente. Actívalo abajo y pulsa <em>Guardar programación</em>.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {hasUnsaved && (
+                    <div className="rounded-lg border border-blue-300 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800 p-2 text-xs text-blue-900 dark:text-blue-200 flex items-center gap-2">
+                        <Info size={14} className="shrink-0" />
+                        Tienes cambios sin guardar. Pulsa <em>Guardar programación</em> abajo para aplicarlos.
+                    </div>
+                )}
+
                 <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
                     <div>
                         <p className="text-sm font-semibold text-foreground">Sistema activo</p>
@@ -199,8 +262,13 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
                     </div>
                 </div>
 
-                <div className="flex justify-end pt-2 border-t">
-                    <Button onClick={() => onSave(form)} disabled={saving}>
+                <div className="flex justify-end items-center gap-3 pt-2 border-t">
+                    {justSaved && !saving && (
+                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1 animate-in fade-in">
+                            <Check size={14} /> Guardado
+                        </span>
+                    )}
+                    <Button onClick={handleSave} disabled={saving}>
                         {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
                         Guardar programación
                     </Button>
