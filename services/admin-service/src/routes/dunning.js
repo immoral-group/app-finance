@@ -2,7 +2,9 @@ import express from 'express';
 import nodemailer from 'nodemailer';
 import supabase from '../config/supabase.js';
 import { renderDunningEmail, SAMPLE_VARS } from '../lib/dunningRenderer.js';
+import { renderDunningEmailV2, SAMPLE_INVOICE } from '../lib/dunningEmailV2.js';
 import { buildDunningPlan, summarizePlan, holdedFetch } from '../lib/dunningWorker.js';
+import { createCheckoutSession, isConfigured as isStripeConfigured } from '../lib/stripe.js';
 
 const router = express.Router();
 
@@ -116,6 +118,10 @@ router.put('/config', async (req, res) => {
             'level_2_days_min', 'level_2_days_max', 'level_3_days_min',
             'level_3_repeat_every_days',
             'min_amount', 'excluded_contact_ids', 'bcc_email',
+            // Fase 3: marca + bancos + labels
+            'brand_logo_text', 'brand_primary_color', 'brand_secondary_color',
+            'signature_html', 'cta_stripe_label', 'cta_bank_prefix', 'status_label',
+            'banks',
         ];
         const patch = {};
         for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
@@ -151,7 +157,8 @@ router.get('/templates', async (req, res) => {
 // ── PUT /dunning/templates/:id ────────────────────────────────────────────────
 router.put('/templates/:id', async (req, res) => {
     try {
-        const allowed = ['name', 'subject', 'blocks', 'active'];
+        const allowed = ['name', 'subject', 'blocks', 'active',
+            'hero_title', 'hero_subtitle', 'intro_copy', 'outro_copy'];
         const patch = {};
         for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
         patch.updated_at = new Date().toISOString();
@@ -170,8 +177,8 @@ router.put('/templates/:id', async (req, res) => {
 });
 
 // ── POST /dunning/preview ─────────────────────────────────────────────────────
-// Renderiza HTML a partir de bloques + subject con SAMPLE_VARS. Usado por el
-// editor para la previsualización en vivo.
+// (LEGACY) Renderiza HTML a partir de bloques + subject con SAMPLE_VARS. Mantengo
+// para compatibilidad con el editor por bloques, aunque el flujo por defecto es V2.
 router.post('/preview', (req, res) => {
     try {
         const { blocks = [], subject = '', vars } = req.body || {};
@@ -181,6 +188,45 @@ router.post('/preview', (req, res) => {
             vars: { ...SAMPLE_VARS, ...(vars || {}) },
         });
         res.json({ ...rendered, sample_vars: SAMPLE_VARS });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /dunning/preview-v2 ──────────────────────────────────────────────────
+// Renderiza el diseño premium con el config + template dados (o los de BD si no).
+// Body: { template?: {...}, config?: {...}, invoice?: {...}, stripe_url?: string }
+// Si no se pasa template/config, se cargan de BD.
+router.post('/preview-v2', async (req, res) => {
+    try {
+        let template = req.body?.template;
+        let config = req.body?.config;
+
+        if (!template && req.body?.template_id) {
+            const { data } = await supabase.from('dunning_templates')
+                .select('*').eq('id', req.body.template_id).single();
+            template = data;
+        }
+        if (!template && req.body?.level) {
+            const { data } = await supabase.from('dunning_templates')
+                .select('*').eq('level', req.body.level).eq('active', true).limit(1).single();
+            template = data;
+        }
+        if (!config) {
+            const { data } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
+            config = data;
+        }
+
+        if (!template || !config) {
+            return res.status(400).json({ error: 'missing-template-or-config' });
+        }
+
+        const invoice = { ...SAMPLE_INVOICE, ...(req.body?.invoice || {}) };
+        // Preview usa una URL simulada. En envío real se genera Stripe live.
+        const stripe_url = req.body?.stripe_url || 'https://checkout.stripe.com/preview';
+
+        const rendered = renderDunningEmailV2({ config, template, invoice, stripe_url });
+        res.json({ ...rendered, sample_invoice: SAMPLE_INVOICE });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -341,7 +387,8 @@ router.post('/preview-run', async (_req, res) => {
 });
 
 // ── POST /dunning/test-send ───────────────────────────────────────────────────
-// Envía UN recordatorio de una plantilla concreta a una dirección de prueba.
+// Envía UN recordatorio de prueba (diseño V2) a una dirección. Usa datos de
+// ejemplo salvo que se pasen en `sample`. NO genera Stripe real — usa URL fake.
 // No toca dunning_cases ni dunning_reminders.
 // Body: { template_id: uuid, to_email: string, sample?: object }
 router.post('/test-send', async (req, res) => {
@@ -356,14 +403,18 @@ router.post('/test-send', async (req, res) => {
         const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRe.test(to_email)) return res.status(400).json({ error: 'invalid-email' });
 
-        const { data: template, error } = await supabase
-            .from('dunning_templates').select('*').eq('id', template_id).single();
-        if (error || !template) return res.status(404).json({ error: 'template-not-found' });
+        const [{ data: template, error: tplErr }, { data: config }] = await Promise.all([
+            supabase.from('dunning_templates').select('*').eq('id', template_id).single(),
+            supabase.from('dunning_config').select('*').eq('id', 1).single(),
+        ]);
+        if (tplErr || !template) return res.status(404).json({ error: 'template-not-found' });
 
-        const rendered = renderDunningEmail({
-            blocks: template.blocks || [],
-            subject: template.subject,
-            vars: { ...SAMPLE_VARS, ...(sample || {}) },
+        const invoice = { ...SAMPLE_INVOICE, ...(sample || {}) };
+        const rendered = renderDunningEmailV2({
+            config,
+            template,
+            invoice,
+            stripe_url: 'https://checkout.stripe.com/preview',
         });
 
         const info = await getTransporter().sendMail({
@@ -446,11 +497,44 @@ router.post('/run', async (req, res) => {
                     .single();
                 if (caseErr) throw new Error(caseErr.message);
 
-                const vars = invoiceVars(item.invoice, item.days_overdue);
-                const rendered = renderDunningEmail({
-                    blocks: template.blocks || [],
-                    subject: template.subject,
-                    vars,
+                // Generar link Stripe (opcional — si Stripe no está configurado, se envía sin botón).
+                let stripe_session_id = null;
+                let stripe_url = null;
+                if (isStripeConfigured() && Number(item.invoice.amount) > 0) {
+                    try {
+                        const session = await createCheckoutSession({
+                            amountCents: Math.round(Number(item.invoice.amount) * 100),
+                            currency: (item.invoice.currency || 'EUR').toLowerCase(),
+                            concept: `Factura ${item.invoice.invoice_number || item.invoice.id}`,
+                            customerEmail: item.invoice.contact_email,
+                            metadata: {
+                                source: 'dunning',
+                                dunning_level: String(item.level),
+                                holded_invoice_id: item.invoice.id,
+                                holded_doc_number: item.invoice.invoice_number || '',
+                                days_overdue: String(item.days_overdue),
+                            },
+                        });
+                        stripe_session_id = session.id;
+                        stripe_url = session.url;
+                    } catch (stripeErr) {
+                        console.warn('[dunning] Stripe checkout failed, sending without card button:', stripeErr.message);
+                    }
+                }
+
+                const rendered = renderDunningEmailV2({
+                    config,
+                    template,
+                    invoice: {
+                        contact_name: item.invoice.contact_name,
+                        invoice_number: item.invoice.invoice_number,
+                        invoice_date: item.invoice.invoice_date ? new Date(item.invoice.invoice_date).toLocaleDateString('es-ES') : '',
+                        due_date: item.invoice.due_date ? new Date(item.invoice.due_date).toLocaleDateString('es-ES') : '',
+                        days_overdue: item.days_overdue,
+                        amount: item.invoice.amount,
+                        currency: item.invoice.currency || 'EUR',
+                    },
+                    stripe_url,
                 });
 
                 const info = await getTransporter().sendMail({
@@ -471,6 +555,8 @@ router.post('/run', async (req, res) => {
                     subject: rendered.subject,
                     body_html_snapshot: rendered.html,
                     smtp_message_id: info.messageId || null,
+                    stripe_session_id,
+                    stripe_payment_url: stripe_url,
                     status: 'sent',
                 });
 

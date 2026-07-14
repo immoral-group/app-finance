@@ -16,6 +16,12 @@ export interface DunningBlock {
     props: Record<string, unknown>;
 }
 
+export interface DunningBank {
+    name: string;
+    url: string;
+    color: string;
+}
+
 export interface DunningConfig {
     id: number;
     enabled: boolean;
@@ -33,6 +39,15 @@ export interface DunningConfig {
     excluded_contact_ids: string[];
     bcc_email: string | null;
     updated_at: string;
+    // Fase 3: marca y bancos
+    brand_logo_text: string;
+    brand_primary_color: string;
+    brand_secondary_color: string;
+    signature_html: string;
+    cta_stripe_label: string;
+    cta_bank_prefix: string;
+    status_label: string;
+    banks: DunningBank[];
 }
 
 export interface DunningTemplate {
@@ -40,10 +55,15 @@ export interface DunningTemplate {
     level: 1 | 2 | 3;
     name: string;
     subject: string;
-    blocks: DunningBlock[];
+    blocks: DunningBlock[];    // legacy
     active: boolean;
     created_at: string;
     updated_at: string;
+    // Fase 3: diseño premium
+    hero_title: string | null;
+    hero_subtitle: string | null;
+    intro_copy: string | null;
+    outro_copy: string | null;
 }
 
 export interface OverdueInvoice {
@@ -173,6 +193,18 @@ export const dunningApi = {
 
     preview: (payload: { blocks: DunningBlock[]; subject: string; vars?: Record<string, unknown> }) =>
         fetchApi<{ subject: string; html: string; sample_vars: Record<string, unknown> }>('/dunning/preview', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }),
+
+    previewV2: (payload: {
+        template?: Partial<DunningTemplate>;
+        config?: Partial<DunningConfig>;
+        template_id?: string;
+        level?: 1 | 2 | 3;
+        invoice?: Record<string, unknown>;
+    }) =>
+        fetchApi<{ subject: string; html: string; sample_invoice: Record<string, unknown> }>('/dunning/preview-v2', {
             method: 'POST',
             body: JSON.stringify(payload),
         }),
