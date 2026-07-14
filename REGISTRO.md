@@ -1200,3 +1200,213 @@ Buscar/reemplazar `"Nueva Trabajadora"` en los 8 archivos anteriores por el nomb
 **Commit:**
 - `d5bce5d` Añadir fila "Nueva Trabajadora" en el hub Imcontent
 - `79b114a` novedades: fix 403 — la tabla es user_profiles, no profiles
+
+---
+
+### 2026-07-14 — Feature: Módulo de Impagos (dunning)
+
+**Rama:** `feat/impagos`
+
+**Motivo:**
+Sustituir el flujo actual de n8n que envía recordatorios de facturas vencidas los lunes por un módulo integrado en la app con **trazabilidad completa**: cuántos recordatorios ha recibido cada cliente, en qué nivel, cuánto tarda en pagar, y KPIs de recuperación. Además integrar links de pago Stripe reales en cada correo.
+
+#### Arquitectura
+
+- **Backend**: nuevo router `services/admin-service/src/routes/dunning.js` + libs auxiliares.
+- **Base de datos**: 4 tablas nuevas (`dunning_config`, `dunning_templates`, `dunning_cases`, `dunning_reminders`) + tabla de overrides (`dunning_email_overrides`).
+- **Frontend**: 2 rutas nuevas dentro del desplegable Payments (`/payments/dunning` y `/payments/dunning/config`).
+- **Cron**: Vercel Cron cada hora + cron diario de sincronización de cobros.
+- **SMTP**: reutiliza nodemailer + Gmail SMTP ya configurado.
+- **Stripe**: reutiliza `createCheckoutSession()` de `lib/stripe.js`.
+
+#### Tablas nuevas (`database/migrations/add_dunning*.sql`)
+
+| Tabla | Propósito |
+|---|---|
+| `dunning_config` | Single-row. Reglas (rangos días por nivel), programación (send_days[], send_hour, timezone), marca (colores, logo, firma, bancos), modo prueba, metadatos del cron |
+| `dunning_templates` | Plantilla de email por nivel (1, 2, 3): asunto, hero_title/subtitle, intro_copy, outro_copy |
+| `dunning_cases` | Uno por factura vencida (`invoice_id` UNIQUE). Status: open/paid/cancelled |
+| `dunning_reminders` | Histórico de cada envío. Incluye stripe_session_id, is_test |
+| `dunning_email_overrides` | Redirigir emails de un contact_id concreto a otro email |
+
+Todas con RLS: solo superadmins. Service role del backend bypasea RLS.
+
+#### Backend — endpoints principales
+
+Auth: **`requireSuperAdmin`** para casi todo. Excepciones:
+- `GET /dunning/logo` — público (para `<img src>` en emails)
+- `GET /dunning/logo-debug` — diagnóstico
+- `POST /dunning/cron/run` y `/cron/sync-paid` — auth por `CRON_SECRET` (Vercel Cron)
+
+Endpoints:
+- `GET/PUT /dunning/config`
+- `GET/PUT /dunning/templates`
+- `POST /dunning/preview` y `/preview-v2` (render con datos de ejemplo)
+- `GET /dunning/overdue-invoices` (Holded en vivo + emails de `/contacts`)
+- `GET /dunning/cases`, `/cases/:id`, `/stats` (KPIs excluyen `is_test=true`)
+- `POST /dunning/preview-run` (plan de envíos, sin enviar)
+- `POST /dunning/test-send` (una plantilla a tu email con Stripe real)
+- `POST /dunning/run` (envío real, respeta test_mode + overrides)
+- `POST /dunning/sync-paid` (cruza casos abiertos con Holded, cierra pagados)
+- `POST /dunning/reset-test-data` (borra histórico — solo con test_mode ON)
+- CRUD `/dunning/overrides/:contact_id`
+
+#### Libs auxiliares
+
+- `lib/dunningWorker.js`: `buildDunningPlan()` decide qué facturas enviar y en qué nivel. Enriquece emails con `/contacts` de Holded (Holded no incluye contactEmail en `/documents/invoice`).
+- `lib/dunningEmailV2.js`: renderer del email premium. Reproduce el diseño oficial: hero con degradado, 6 cards de datos, botón Stripe, botones de bancos configurables. Compatible con Gmail (table-based + inline styles).
+- `lib/dunningLogo.js`: PNG del logo en base64 (para servir desde el endpoint público `/logo`).
+- `lib/dunningRenderer.js`: renderer legacy por bloques (deprecado pero preservado).
+
+#### Frontend — rutas y navegación
+
+`NAV_ITEMS` de `constants.ts`: añadidos 2 hijos al desplegable *Payments*:
+- **Impagos** → `/payments/dunning`
+- **Configuración de impagos** → `/payments/dunning/config`
+
+Nuevo permiso `dunning` en `ALL_MODULES`.
+
+#### Frontend — Dashboard `/payments/dunning`
+
+- KPIs (vencidas ahora, recordatorios enviados sin contar test, casos cobrados, media días hasta cobro, casos abiertos).
+- Reparto por nivel 1/2/3 con importes.
+- Tabla de facturas vencidas en vivo desde Holded, cruzada con `dunning_cases` para mostrar recordatorios enviados y último envío por caso.
+- Banner amarillo permanente si el sistema está en modo prueba.
+- Banner ámbar si el sistema está desactivado.
+
+#### Frontend — Configuración `/payments/dunning/config`
+
+Tabs:
+1. **Reglas**: rangos de días por nivel, repetición nivel 3, importe mínimo, BCC.
+2. **Programación**: toggle activar sistema, días de la semana (uno o varios), hora/minuto, timezone. Muestra última ejecución del cron y del sync-paid.
+3. **Marca y bancos**: toggle mostrar/ocultar logo, URL de imagen del logo (con preview + fallback a `/logo.png` local), color primario/secundario del degradado, firma HTML, textos de botones y badge, lista editable de bancos (nombre + URL + color).
+4. **Plantillas**: formulario simple por nivel (título hero, subtítulo, copies intro/outro, asunto) con preview live del diseño premium.
+5. **Ejecutar**: modo prueba dirigido + overrides por cliente + acciones (Ver preview, Enviar prueba, Sincronizar cobros, Resetear datos de prueba, Ejecutar ahora con dry-run).
+
+#### Modo prueba dirigido
+
+Toggle en tab Ejecutar. Cuando está activo:
+- TODOS los envíos (manuales o cron) van a `test_mode_email` en lugar de al cliente.
+- El email lleva un banner amarillo al inicio indicando el destinatario original.
+- El asunto se marca con `[PRUEBA]`.
+- Los recordatorios se guardan en `dunning_reminders` con `is_test=true` → **no ensucian KPIs**.
+- Banner amarillo permanente en el dashboard mientras esté activo.
+
+#### Cron automático (Vercel Cron)
+
+En `vercel.json`:
+```json
+"crons": [
+    { "path": "/api/admin/dunning/cron/run", "schedule": "0 * * * *" },
+    { "path": "/api/admin/dunning/cron/sync-paid", "schedule": "0 6 * * *" }
+]
+```
+
+- `/cron/run` corre cada hora en punto (UTC). Chequea si toca según config (día de la semana + hora en la timezone de config). Idempotente: si se ejecutó hace menos de 30 min, salta.
+- `/cron/sync-paid` corre diariamente a las 6:00 UTC.
+- Auth por `CRON_SECRET` (env var en Vercel).
+
+#### Precedencia de destinatario del email (worker)
+
+`test_mode` → `override_email` → email real del contacto en Holded → skip por no-email.
+
+En test_mode/override el envío se hace aunque el cliente no tenga email en Holded.
+
+#### SQL a ejecutar en Supabase (6 migraciones, idempotentes)
+
+En orden:
+- `database/migrations/add_dunning.sql` — schema inicial + seed de 3 plantillas
+- `database/migrations/add_dunning_v2.sql` — brand + bancos + plantillas estructuradas
+- `database/migrations/add_dunning_v3.sql` — logo URL + test_mode + overrides
+- `database/migrations/add_dunning_v4.sql` — metadatos del cron
+- `database/migrations/add_dunning_v5.sql` — is_test para no contar prueba en KPIs
+- `database/migrations/add_dunning_v6.sql` — toggle show_logo
+
+#### Variables de entorno requeridas en Vercel
+
+| Variable | Uso |
+|---|---|
+| `HOLDED_API_KEY` | ya existente |
+| `STRIPE_SECRET_KEY` | ya existente |
+| `SMTP_USER`, `SMTP_PASS`, `SMTP_HOST` | ya existente |
+| `CRON_SECRET` | **nuevo** — cualquier string aleatorio largo |
+| `APP_URL` | opcional. Si se define, se prefiere para las URLs de imágenes en el email. Cuidado con espacios/tabs |
+
+#### Pendiente / limitaciones conocidas
+
+- El logo del email se sirve desde el endpoint público `/api/admin/dunning/logo`. En preview branches funciona con `VERCEL_URL`. En producción funciona con el dominio de la app. Si el logo no carga, hay un toggle *Mostrar logo* en Configuración → Marca y bancos para ocultarlo.
+- Los links Stripe expiran a las 23 horas (límite de Stripe Checkout Sessions). Si el cliente abre el email más tarde y necesita nuevo link, se genera desde el módulo Payments existente.
+
+#### Commits principales de la rama
+
+- `299c508` fase 1 — dashboard + esqueleto config + editor plantillas
+- `77e5511` fase 2a — envío bajo demanda + test-send + sync-paid
+- `13b6964` fase 3 — diseño premium + Stripe + bancos configurables
+- `7c36941` fase 3.1 — logo imagen + modo prueba dirigido + overrides
+- `86a3a2b` fixes — enrichment emails Holded + confirm contextual + destino visible en preview
+- `054c7c1` fix — logo base64 embed + resultados con nombre cliente
+- `1390638` fase 2b — cron Vercel automático
+- `93c61a2` fix — reasons legibles + botón resetear pruebas
+- `8b3ff75` fix — KPIs excluyen envíos en modo prueba
+- `5b33e70`/`abb386d`/`c5a610e` fixes — logo desde endpoint público
+- `9e84b6d` toggle mostrar/ocultar logo
+
+#### Ajustes finales (post-QA con usuario)
+
+**Toggle mostrar/ocultar logo** (`add_dunning_v6.sql`):
+- Nueva columna `dunning_config.show_logo boolean DEFAULT true`.
+- Toggle en Configuración → Marca y bancos → "Mostrar logo en el email".
+- Si se desactiva, el hero del email queda solo con título + subtítulo, sin bloque de logo.
+- Motivo: soluciona los casos donde el dominio de producción (`imfinance.immoral.es`) todavía no está configurado en DNS y el logo sale roto en preview branches.
+
+**Resumen del estado en la tab Programación**:
+- Card destacado al principio con el estado ACTUAL guardado (leído de `config`, no del form):
+  - Verde: *"Sistema ACTIVO — Se envían recordatorios los [días] a las HH:MM ([timezone])"*.
+  - Ámbar: *"Sistema activo pero sin días configurados"*.
+  - Gris: *"Sistema DESACTIVADO — No se envía nada automáticamente"*.
+- Banner azul si hay cambios sin guardar respecto a `config`.
+- Feedback "✓ Guardado" durante 3 segundos al pulsar el botón (`justSaved` timer).
+- Motivo: al pulsar Guardar el toggle solo cambiaba estado en BD pero no había confirmación visual.
+
+**Traducciones y limpieza UX**:
+- Los `reason` técnicos del worker (`waiting-repeat-0/7`, `level-2-already-sent`, etc.) se traducen a español legible en el modal de preview y en el resumen de envío.
+- El modal "Envío completado" muestra tabla con **nombre del cliente + número de factura + destino real + estado**, en lugar del `invoice_id` bruto.
+- El campo `to` en cada resultado es siempre el destino final (respetando test_mode/override), no el email original del cliente.
+- Confirmación al pulsar "Ejecutar ahora" es contextual: en modo prueba avisa que todo irá al email de prueba; en modo real avisa que va a los clientes.
+
+**Fix del logo en emails**:
+- Endpoint público `GET /api/admin/dunning/logo` que sirve el PNG binario desde el base64 embebido.
+- El renderer construye la URL usando `base_url` (host del request actual) → `VERCEL_URL` → `APP_URL` trimeada → fallback.
+- Endpoint diagnóstico `GET /api/admin/dunning/logo-debug` para verificar env vars y URL calculada.
+- Motivo: Gmail bloquea `data:` URIs por seguridad, así que hay que servir el logo desde un endpoint HTTP público real.
+
+**KPIs limpios** (`add_dunning_v5.sql`):
+- Columnas `is_test` en `dunning_reminders` y `dunning_cases`.
+- Cuando `test_mode=true` o hay `override`, el envío se marca como `is_test=true`.
+- El endpoint `/stats` filtra por `is_test=false` en TODAS sus queries.
+- La migración marca retroactivamente como test los envíos previos con prefijo `[PRUEBA]` o `[REDIRIGIDO]` en el asunto.
+
+**Resetear datos de prueba**:
+- Endpoint `POST /dunning/reset-test-data` que borra TODO el histórico de `dunning_reminders` y `dunning_cases`.
+- Protegido: solo funciona si `test_mode=true` (para no borrar histórico real por accidente).
+- Botón visible en Configuración → Ejecutar solo cuando modo prueba está activo.
+
+#### Flujo de QA recomendado
+
+1. Correr las 6 migraciones SQL en orden (`add_dunning.sql` → `add_dunning_v6.sql`).
+2. Configurar env var `CRON_SECRET` en Vercel (Production + Preview).
+3. En la app: *Configuración de impagos → Ejecutar* → activar **Modo prueba dirigido** con el email de administración.
+4. *Configuración → Marca y bancos* → ajustar colores, firma, lista de bancos. Desactivar el logo si no se está viendo en preview.
+5. *Configuración → Plantillas* → revisar copies de los 3 niveles.
+6. *Configuración → Reglas* → ajustar rangos si es necesario.
+7. *Configuración → Programación* → seleccionar días + hora + timezone. Activar sistema. Guardar.
+8. *Configuración → Ejecutar* → **Ver preview** → confirmar plan → **Ejecutar ahora** (los 12 llegan a la bandeja de administración con Stripe real).
+9. Verificar diseño, contenidos, botón Stripe (que abra el checkout con el importe correcto), botones de bancos.
+10. Repetir con **Resetear datos de prueba** entre pruebas.
+11. Cuando esté a gusto: apagar modo prueba. El cron enviará automáticamente en los días/hora configurados.
+
+#### Última mano
+
+**Commits añadidos tras el registro inicial:**
+- `ffe6302` docs: registrar módulo en REGISTRO y changelog
+- `8381bae` UX: resumen del estado + feedback guardado en Programación

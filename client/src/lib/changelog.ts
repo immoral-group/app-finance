@@ -23,6 +23,17 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.43-impagos',
+        date: '2026-07-14',
+        title: 'Impagos: gestión automática de recordatorios de pago',
+        description: 'Nuevo módulo dentro de Payments para gestionar el envío de recordatorios de facturas vencidas de forma automática y trazable. Sustituye el flujo antiguo de n8n que enviaba correos sin dejar rastro. Dashboard con KPIs (vencidas ahora, recordatorios enviados, cobrados, media de días hasta cobro), reparto por nivel y tabla en vivo desde Holded. Configuración por tabs: reglas (rangos de días 5-9 / 10-14 / +15), programación con día(s) y hora, marca visual (logo, colores, firma), lista editable de bancos para pago por transferencia, plantillas por nivel con hero + copies personalizables, y sección Ejecutar con preview, envío de prueba a tu email, sincronización de cobros desde Holded y ejecución manual. Genera links de Stripe reales por cada factura para pagar con tarjeta. Cron de Vercel dispara el envío automáticamente los días/hora configurados. Modo prueba dirigido para hacer QA sin arriesgar (todo va a un email destino) y overrides por cliente. KPIs excluyen los envíos hechos en modo prueba.',
+        type: 'new_module',
+        moduleKey: 'dunning',
+        superadminOnly: true,
+        icon: 'Mail',
+        highlight: true,
+    },
+    {
         id: 'v1.42-enviar-novedades-email',
         date: '2026-07-08',
         title: 'Enviar novedades por email desde la app',

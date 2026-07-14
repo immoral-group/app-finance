@@ -35,6 +35,7 @@ import profitabilityRoutes from './routes/profitability.js';
 import paymentLinksRoutes from './routes/payment-links.js';
 import webhooksRoutes from './routes/webhooks.js';
 import releaseNotificationsRoutes from './routes/release-notifications.js';
+import dunningRoutes from './routes/dunning.js';
 
 dotenv.config();
 
@@ -83,6 +84,7 @@ app.use('/icex', icexRoutes);
 app.use('/profitability', profitabilityRoutes);
 app.use('/payment-links', paymentLinksRoutes);
 app.use('/release-notifications', releaseNotificationsRoutes);
+app.use('/dunning', dunningRoutes);
 
 
 // Health Check

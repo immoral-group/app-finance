@@ -28,6 +28,8 @@ import UserManagement from '@/features/users/UserManagement';
 import Developers from '@/features/developers/Developers';
 import ReleaseNotifications from '@/features/release-notifications/ReleaseNotifications';
 import Profitability from '@/features/profitability/Profitability';
+import DunningDashboard from '@/features/dunning/DunningDashboard';
+import DunningConfig from '@/features/dunning/DunningConfig';
 
 // Placeholder components
 // Placeholder components removed
@@ -73,6 +75,8 @@ function App() {
                   <Route path="payments" element={<Payments />} />
                   <Route path="payments/generate-link" element={<GeneratePaymentLink />} />
                   <Route path="payments/links-history" element={<PaymentLinksHistory />} />
+                  <Route path="payments/dunning" element={<DunningDashboard />} />
+                  <Route path="payments/dunning/config" element={<DunningConfig />} />
                   <Route path="clients" element={<ClientsPage />} />
                   <Route path="client-billing" element={<ClientBillingReport />} />
                   <Route path="settings" element={<SettingsPage />} />
