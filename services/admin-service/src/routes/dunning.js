@@ -241,9 +241,18 @@ router.post('/preview-v2', async (req, res) => {
 router.get('/overdue-invoices', async (_req, res) => {
     try {
         const config = await getConfig();
-        const holded = await holdedFetch('/documents/invoice?paid=0');
-        const invoices = Array.isArray(holded) ? holded : [];
+        const [holdedInvoices, holdedContacts] = await Promise.all([
+            holdedFetch('/documents/invoice?paid=0'),
+            holdedFetch('/contacts').catch(err => { console.warn('[dunning] no /contacts:', err.message); return []; }),
+        ]);
+        const invoices = Array.isArray(holdedInvoices) ? holdedInvoices : [];
         const now = Date.now();
+
+        // Mapa contact_id → email (Holded no incluye email en /documents/invoice).
+        const emailByContact = new Map();
+        for (const c of (Array.isArray(holdedContacts) ? holdedContacts : [])) {
+            if (c.id && c.email) emailByContact.set(c.id, c.email);
+        }
 
         // Cargar casos existentes en un solo query para cruzar.
         const ids = invoices.map(i => i.id).filter(Boolean);
@@ -266,13 +275,14 @@ router.get('/overdue-invoices', async (_req, res) => {
 
             const level = classifyLevel(daysOverdue, config);
             const existingCase = caseByInvoice.get(inv.id);
+            const contactEmail = inv.contactEmail || inv.email || emailByContact.get(inv.contact) || '';
 
             overdue.push({
                 invoice_id: inv.id,
                 invoice_number: inv.docNumber || inv.num || '',
                 contact_id: inv.contact || '',
                 contact_name: inv.contactName || '',
-                contact_email: inv.contactEmail || inv.email || '',
+                contact_email: contactEmail,
                 amount: total,
                 currency: inv.currency || 'EUR',
                 invoice_date: normalizeTimestamp(inv.date),
@@ -377,10 +387,45 @@ router.get('/stats', async (_req, res) => {
 router.post('/preview-run', async (_req, res) => {
     try {
         const { plan, config } = await buildDunningPlan({ supabase });
+
+        // Resolvemos el destino final por item (respetando test_mode > override > cliente).
+        const { data: overridesRows } = await supabase
+            .from('dunning_email_overrides').select('contact_id, override_email');
+        const overrideByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_email]));
+
+        const enrichedPlan = plan.map(item => {
+            let dest_email = item.invoice.contact_email;
+            let redirect_reason = null;
+            if (config.test_mode && config.test_mode_email) {
+                dest_email = config.test_mode_email;
+                redirect_reason = 'test_mode';
+            } else if (overrideByContact.get(item.invoice.contact_id)) {
+                dest_email = overrideByContact.get(item.invoice.contact_id);
+                redirect_reason = 'override';
+            }
+            return { ...item, dest_email, redirect_reason };
+        });
+
+        // Recalcular summary considerando el destino final (en test_mode no se blockea por no-email).
+        const sendsFinal = enrichedPlan.filter(p => p.action === 'send' && !!p.dest_email);
+        const summary = {
+            total: enrichedPlan.length,
+            will_send: sendsFinal.length,
+            will_skip: enrichedPlan.length - sendsFinal.length,
+            blocked: enrichedPlan.filter(p => p.action === 'send' && !p.dest_email).length,
+            by_level: {
+                1: sendsFinal.filter(p => p.level === 1).length,
+                2: sendsFinal.filter(p => p.level === 2).length,
+                3: sendsFinal.filter(p => p.level === 3).length,
+            },
+        };
+
         res.json({
-            plan,
-            summary: summarizePlan(plan),
+            plan: enrichedPlan,
+            summary,
             config_enabled: config.enabled,
+            test_mode: !!config.test_mode,
+            test_mode_email: config.test_mode_email || null,
         });
     } catch (err) {
         console.error('[dunning] preview-run error:', err);
@@ -538,12 +583,9 @@ router.post('/run', async (req, res) => {
                 results.push({ invoice_id: item.invoice.id, status: 'skipped', reason: 'no-template' });
                 continue;
             }
-            if (!item.has_email) {
-                results.push({ invoice_id: item.invoice.id, status: 'skipped', reason: 'no-email' });
-                continue;
-            }
-
             // Precedencia de destino: test_mode > override_email > email real del cliente.
+            // Se calcula ANTES del skip por no-email: en test_mode/override el destino es
+            // válido aunque el cliente no tenga email en Holded.
             const originalEmail = item.invoice.contact_email;
             const overrideEmail = overrideByContact.get(item.invoice.contact_id);
             let destEmail = originalEmail;
@@ -554,6 +596,11 @@ router.post('/run', async (req, res) => {
             } else if (overrideEmail) {
                 destEmail = overrideEmail;
                 redirect_reason = 'override';
+            }
+
+            if (!destEmail) {
+                results.push({ invoice_id: item.invoice.id, status: 'skipped', reason: 'no-email' });
+                continue;
             }
 
             if (dryRun) {

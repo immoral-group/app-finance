@@ -79,6 +79,19 @@ export async function buildDunningPlan({ supabase, now = Date.now() }) {
     const holded = await holdedFetch('/documents/invoice?paid=0');
     const invoices = Array.isArray(holded) ? holded : [];
 
+    // 3b. Enrichment: /documents/invoice de Holded NO devuelve el email del contacto.
+    //     Traemos todos los contactos una sola vez y creamos un mapa contact_id → email.
+    const emailByContact = new Map();
+    try {
+        const contactsData = await holdedFetch('/contacts');
+        const contacts = Array.isArray(contactsData) ? contactsData : [];
+        for (const c of contacts) {
+            if (c.id && c.email) emailByContact.set(c.id, c.email);
+        }
+    } catch (err) {
+        console.warn('[dunning] no se pudo cargar /contacts, seguimos sin enrichment:', err.message);
+    }
+
     // 4. Casos existentes y recordatorios para cruzar.
     const invoiceIds = invoices.map(i => i.id).filter(Boolean);
     const { data: cases } = invoiceIds.length
@@ -118,13 +131,15 @@ export async function buildDunningPlan({ supabase, now = Date.now() }) {
 
         const decision = decideAction({ level, existingCase, remindersForCase, config, now });
 
+        const contactEmail = inv.contactEmail || inv.email || emailByContact.get(inv.contact) || '';
+
         plan.push({
             invoice: {
                 id: inv.id,
                 invoice_number: inv.docNumber || inv.num || '',
                 contact_id: inv.contact || '',
                 contact_name: inv.contactName || '',
-                contact_email: inv.contactEmail || inv.email || '',
+                contact_email: contactEmail,
                 amount: total,
                 currency: inv.currency || 'EUR',
                 invoice_date: normalizeTs(inv.date),
@@ -136,7 +151,7 @@ export async function buildDunningPlan({ supabase, now = Date.now() }) {
             template_name: template?.name || null,
             action: decision.action,
             reason: decision.reason,
-            has_email: !!(inv.contactEmail || inv.email),
+            has_email: !!contactEmail,
         });
     }
 

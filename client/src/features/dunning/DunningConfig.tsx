@@ -498,9 +498,11 @@ function ActionRow({ title, description, action, icon: Icon, danger = false }: {
     );
 }
 
-function PreviewModal({ plan, summary, onClose }: { plan: PlanItem[]; summary: PlanSummary; onClose: () => void }) {
-    const sends = plan.filter(p => p.action === 'send');
-    const skips = plan.filter(p => p.action === 'skip');
+function PreviewModal({ plan, summary, testMode, testModeEmail, onClose }: {
+    plan: PlanItem[]; summary: PlanSummary; testMode: boolean; testModeEmail: string | null; onClose: () => void;
+}) {
+    const sends = plan.filter(p => p.action === 'send' && !!p.dest_email);
+    const skips = plan.filter(p => p.action === 'skip' || (p.action === 'send' && !p.dest_email));
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
             <div className="bg-card rounded-xl border shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -513,6 +515,11 @@ function PreviewModal({ plan, summary, onClose }: { plan: PlanItem[]; summary: P
                     </div>
                     <button onClick={onClose} className="p-1 rounded hover:bg-muted"><X size={16} /></button>
                 </div>
+                {testMode && (
+                    <div className="px-5 py-2 bg-amber-100 dark:bg-amber-950/30 border-b border-amber-300 text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                        <AlertTriangle size={14} /> Modo prueba activo — todos los envíos irán a <strong>{testModeEmail || '(sin destino)'}</strong>, no a los clientes.
+                    </div>
+                )}
                 <div className="overflow-y-auto flex-1 p-4 space-y-4">
                     {sends.length > 0 && (
                         <div>
@@ -522,7 +529,7 @@ function PreviewModal({ plan, summary, onClose }: { plan: PlanItem[]; summary: P
                                     <tr>
                                         <th className="text-left py-1.5 px-2">Factura</th>
                                         <th className="text-left py-1.5 px-2">Cliente</th>
-                                        <th className="text-left py-1.5 px-2">Email</th>
+                                        <th className="text-left py-1.5 px-2">Destino</th>
                                         <th className="text-center py-1.5 px-2">Días</th>
                                         <th className="text-center py-1.5 px-2">Nivel</th>
                                         <th className="text-right py-1.5 px-2">Importe</th>
@@ -533,7 +540,19 @@ function PreviewModal({ plan, summary, onClose }: { plan: PlanItem[]; summary: P
                                         <tr key={p.invoice.id}>
                                             <td className="py-1.5 px-2 font-mono">{p.invoice.invoice_number || p.invoice.id.slice(0, 6)}</td>
                                             <td className="py-1.5 px-2">{p.invoice.contact_name}</td>
-                                            <td className="py-1.5 px-2 text-muted-foreground truncate max-w-[180px]">{p.invoice.contact_email || <span className="text-red-500 italic">sin email</span>}</td>
+                                            <td className="py-1.5 px-2 truncate max-w-[220px]">
+                                                <span className={p.redirect_reason ? 'text-amber-600 font-medium' : 'text-muted-foreground'}>
+                                                    {p.dest_email}
+                                                </span>
+                                                {p.redirect_reason && (
+                                                    <span className="ml-1 text-[10px] uppercase text-amber-500">
+                                                        [{p.redirect_reason === 'test_mode' ? 'PRUEBA' : 'OVERRIDE'}]
+                                                    </span>
+                                                )}
+                                                {p.redirect_reason && p.invoice.contact_email && (
+                                                    <div className="text-[10px] text-muted-foreground line-through">{p.invoice.contact_email}</div>
+                                                )}
+                                            </td>
                                             <td className="py-1.5 px-2 text-center font-semibold">{p.days_overdue}</td>
                                             <td className="py-1.5 px-2 text-center">
                                                 <span className="inline-flex px-1.5 rounded bg-primary/10 text-primary font-semibold">N{p.level}</span>
@@ -837,13 +856,18 @@ function OverridesPanel() {
 }
 
 function RunTab({ config }: { config: DunningConfigType }) {
-    const [preview, setPreview] = useState<{ plan: PlanItem[]; summary: PlanSummary } | null>(null);
+    const [preview, setPreview] = useState<{ plan: PlanItem[]; summary: PlanSummary; testMode: boolean; testModeEmail: string | null } | null>(null);
     const [showTestSend, setShowTestSend] = useState(false);
     const [runResults, setRunResults] = useState<{ results: RunResult[]; dryRun: boolean } | null>(null);
 
     const previewMutation = useMutation({
         mutationFn: () => dunningApi.previewRun(),
-        onSuccess: (data) => setPreview({ plan: data.plan, summary: data.summary }),
+        onSuccess: (data) => setPreview({
+            plan: data.plan,
+            summary: data.summary,
+            testMode: data.test_mode,
+            testModeEmail: data.test_mode_email,
+        }),
     });
 
     const runMutation = useMutation({
@@ -911,7 +935,10 @@ function RunTab({ config }: { config: DunningConfigType }) {
                                     Dry-run
                                 </Button>
                                 <Button onClick={() => {
-                                    if (confirm('Se enviarán los recordatorios reales a los clientes. ¿Continuar?')) {
+                                    const msg = config.test_mode
+                                        ? `MODO PRUEBA activo — TODOS los emails se enviarán a ${config.test_mode_email || '(sin destino)'} en lugar de a los clientes. ¿Continuar?`
+                                        : 'Se enviarán los recordatorios reales a los clientes. ¿Continuar?';
+                                    if (confirm(msg)) {
                                         runMutation.mutate(false);
                                     }
                                 }} disabled={runMutation.isPending}>
@@ -924,7 +951,7 @@ function RunTab({ config }: { config: DunningConfigType }) {
                 </CardContent>
             </Card>
 
-            {preview && <PreviewModal plan={preview.plan} summary={preview.summary} onClose={() => setPreview(null)} />}
+            {preview && <PreviewModal plan={preview.plan} summary={preview.summary} testMode={preview.testMode} testModeEmail={preview.testModeEmail} onClose={() => setPreview(null)} />}
             {showTestSend && <TestSendModal onClose={() => setShowTestSend(false)} />}
             {runResults && <RunResultsModal results={runResults.results} dryRun={runResults.dryRun} onClose={() => setRunResults(null)} />}
         </div>

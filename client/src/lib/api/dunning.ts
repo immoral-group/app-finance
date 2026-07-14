@@ -163,6 +163,9 @@ export interface PlanItem {
     action: 'send' | 'skip';
     reason: string;
     has_email: boolean;
+    // Enriquecido por preview-run: destino final y motivo de redirección si aplica.
+    dest_email?: string;
+    redirect_reason?: 'test_mode' | 'override' | null;
 }
 
 export interface PlanSummary {
@@ -236,9 +239,13 @@ export const dunningApi = {
     getStats: () => fetchApi<DunningStats>('/dunning/stats'),
 
     previewRun: () =>
-        fetchApi<{ plan: PlanItem[]; summary: PlanSummary; config_enabled: boolean }>('/dunning/preview-run', {
-            method: 'POST',
-        }),
+        fetchApi<{
+            plan: PlanItem[];
+            summary: PlanSummary;
+            config_enabled: boolean;
+            test_mode: boolean;
+            test_mode_email: string | null;
+        }>('/dunning/preview-run', { method: 'POST' }),
 
     testSend: (payload: { template_id: string; to_email: string; sample?: Record<string, unknown> }) =>
         fetchApi<{ success: boolean; message_id: string; to: string }>('/dunning/test-send', {
