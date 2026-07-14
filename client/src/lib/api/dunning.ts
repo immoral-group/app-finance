@@ -48,6 +48,19 @@ export interface DunningConfig {
     cta_bank_prefix: string;
     status_label: string;
     banks: DunningBank[];
+    // Fase 3.1: logo por URL + modo prueba dirigido
+    brand_logo_url: string;
+    test_mode: boolean;
+    test_mode_email: string | null;
+}
+
+export interface DunningEmailOverride {
+    contact_id: string;
+    contact_name: string | null;
+    override_email: string;
+    note: string | null;
+    created_at: string;
+    updated_at: string;
 }
 
 export interface DunningTemplate {
@@ -242,5 +255,19 @@ export const dunningApi = {
     syncPaid: () =>
         fetchApi<{ checked: number; closed: number }>('/dunning/sync-paid', {
             method: 'POST',
+        }),
+
+    listOverrides: () =>
+        fetchApi<{ overrides: DunningEmailOverride[] }>('/dunning/overrides'),
+
+    upsertOverride: (contact_id: string, payload: { override_email: string; contact_name?: string; note?: string }) =>
+        fetchApi<{ override: DunningEmailOverride }>(`/dunning/overrides/${encodeURIComponent(contact_id)}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        }),
+
+    deleteOverride: (contact_id: string) =>
+        fetchApi<{ success: boolean }>(`/dunning/overrides/${encodeURIComponent(contact_id)}`, {
+            method: 'DELETE',
         }),
 };

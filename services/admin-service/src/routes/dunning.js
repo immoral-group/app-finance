@@ -122,6 +122,8 @@ router.put('/config', async (req, res) => {
             'brand_logo_text', 'brand_primary_color', 'brand_secondary_color',
             'signature_html', 'cta_stripe_label', 'cta_bank_prefix', 'status_label',
             'banks',
+            // Fase 3.1: logo por URL + modo prueba dirigido
+            'brand_logo_url', 'test_mode', 'test_mode_email',
         ];
         const patch = {};
         for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
@@ -387,8 +389,8 @@ router.post('/preview-run', async (_req, res) => {
 });
 
 // ── POST /dunning/test-send ───────────────────────────────────────────────────
-// Envía UN recordatorio de prueba (diseño V2) a una dirección. Usa datos de
-// ejemplo salvo que se pasen en `sample`. NO genera Stripe real — usa URL fake.
+// Envía UN recordatorio de prueba (diseño V2) a una dirección. Genera un link
+// Stripe REAL con el importe de sample para validar el flujo completo.
 // No toca dunning_cases ni dunning_reminders.
 // Body: { template_id: uuid, to_email: string, sample?: object }
 router.post('/test-send', async (req, res) => {
@@ -410,12 +412,25 @@ router.post('/test-send', async (req, res) => {
         if (tplErr || !template) return res.status(404).json({ error: 'template-not-found' });
 
         const invoice = { ...SAMPLE_INVOICE, ...(sample || {}) };
-        const rendered = renderDunningEmailV2({
-            config,
-            template,
-            invoice,
-            stripe_url: 'https://checkout.stripe.com/preview',
-        });
+
+        // Stripe REAL para validar deliverability y flujo end-to-end.
+        let stripe_url = null;
+        if (isStripeConfigured() && Number(invoice.amount) > 0) {
+            try {
+                const session = await createCheckoutSession({
+                    amountCents: Math.round(Number(invoice.amount) * 100),
+                    currency: (invoice.currency || 'EUR').toLowerCase(),
+                    concept: `[PRUEBA] Factura ${invoice.invoice_number || 'F-TEST'}`,
+                    customerEmail: to_email,
+                    metadata: { source: 'dunning-test', invoice_number: invoice.invoice_number || 'F-TEST' },
+                });
+                stripe_url = session.url;
+            } catch (stripeErr) {
+                console.warn('[dunning] test-send Stripe failed:', stripeErr.message);
+            }
+        }
+
+        const rendered = renderDunningEmailV2({ config, template, invoice, stripe_url });
 
         const info = await getTransporter().sendMail({
             from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
@@ -424,9 +439,60 @@ router.post('/test-send', async (req, res) => {
             html: rendered.html,
         });
 
-        res.json({ success: true, message_id: info.messageId, to: to_email });
+        res.json({ success: true, message_id: info.messageId, to: to_email, stripe_url });
     } catch (err) {
         console.error('[dunning] test-send error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── /dunning/overrides ────────────────────────────────────────────────────────
+// CRUD de emails redirigidos por contact_id.
+
+router.get('/overrides', async (_req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('dunning_email_overrides').select('*')
+            .order('updated_at', { ascending: false });
+        if (error) throw new Error(error.message);
+        res.json({ overrides: data || [] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.put('/overrides/:contact_id', async (req, res) => {
+    try {
+        const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const { override_email, contact_name, note } = req.body || {};
+        if (!override_email || !emailRe.test(override_email)) {
+            return res.status(400).json({ error: 'invalid-override_email' });
+        }
+        const { data, error } = await supabase
+            .from('dunning_email_overrides')
+            .upsert({
+                contact_id: req.params.contact_id,
+                override_email,
+                contact_name: contact_name || null,
+                note: note || null,
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'contact_id' })
+            .select().single();
+        if (error) throw new Error(error.message);
+        res.json({ override: data });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.delete('/overrides/:contact_id', async (req, res) => {
+    try {
+        const { error } = await supabase
+            .from('dunning_email_overrides')
+            .delete().eq('contact_id', req.params.contact_id);
+        if (error) throw new Error(error.message);
+        res.json({ success: true });
+    } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
@@ -458,6 +524,11 @@ router.post('/run', async (req, res) => {
         const tplByLevel = new Map();
         for (const t of templates) if (t.active && !tplByLevel.has(t.level)) tplByLevel.set(t.level, t);
 
+        // Overrides por contact_id (mapa contact_id → override_email)
+        const { data: overridesRows } = await supabase
+            .from('dunning_email_overrides').select('contact_id, override_email');
+        const overrideByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_email]));
+
         const results = [];
         const toSend = plan.filter(p => p.action === 'send');
 
@@ -471,8 +542,29 @@ router.post('/run', async (req, res) => {
                 results.push({ invoice_id: item.invoice.id, status: 'skipped', reason: 'no-email' });
                 continue;
             }
+
+            // Precedencia de destino: test_mode > override_email > email real del cliente.
+            const originalEmail = item.invoice.contact_email;
+            const overrideEmail = overrideByContact.get(item.invoice.contact_id);
+            let destEmail = originalEmail;
+            let redirect_reason = null;
+            if (config.test_mode && config.test_mode_email) {
+                destEmail = config.test_mode_email;
+                redirect_reason = 'test_mode';
+            } else if (overrideEmail) {
+                destEmail = overrideEmail;
+                redirect_reason = 'override';
+            }
+
             if (dryRun) {
-                results.push({ invoice_id: item.invoice.id, status: 'would-send', level: item.level });
+                results.push({
+                    invoice_id: item.invoice.id,
+                    status: 'would-send',
+                    level: item.level,
+                    to: destEmail,
+                    original_to: originalEmail,
+                    redirect_reason,
+                });
                 continue;
             }
 
@@ -535,13 +627,17 @@ router.post('/run', async (req, res) => {
                         currency: item.invoice.currency || 'EUR',
                     },
                     stripe_url,
+                    test_context: redirect_reason ? {
+                        original_email: originalEmail,
+                        contact_name: item.invoice.contact_name,
+                    } : null,
                 });
 
                 const info = await getTransporter().sendMail({
                     from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
-                    to: item.invoice.contact_email,
+                    to: destEmail,
                     bcc: config.bcc_email || undefined,
-                    subject: rendered.subject,
+                    subject: redirect_reason ? `[${redirect_reason === 'test_mode' ? 'PRUEBA' : 'REDIRIGIDO'}] ${rendered.subject}` : rendered.subject,
                     html: rendered.html,
                 });
 
@@ -551,7 +647,7 @@ router.post('/run', async (req, res) => {
                     level: item.level,
                     template_id: template.id,
                     days_overdue: item.days_overdue,
-                    sent_to: item.invoice.contact_email,
+                    sent_to: destEmail,
                     subject: rendered.subject,
                     body_html_snapshot: rendered.html,
                     smtp_message_id: info.messageId || null,

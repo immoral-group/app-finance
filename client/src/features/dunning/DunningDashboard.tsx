@@ -125,6 +125,22 @@ export default function DunningDashboard() {
                 </div>
             </div>
 
+            {/* Banner MODO PRUEBA */}
+            {configData?.config?.test_mode && (
+                <div className="rounded-lg border-2 border-amber-400 bg-amber-100 dark:bg-amber-950/30 dark:border-amber-700 p-3 flex items-start gap-3">
+                    <AlertTriangle className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" size={18} />
+                    <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-amber-900 dark:text-amber-200">Sistema en MODO PRUEBA</p>
+                        <p className="text-xs text-amber-800 dark:text-amber-300/90 mt-0.5">
+                            Todos los recordatorios se redirigen a <strong>{configData.config.test_mode_email || '(sin destino)'}</strong>. Los clientes no reciben ningún email hasta que desactives el modo prueba.
+                        </p>
+                    </div>
+                    <Link to="/payments/dunning/config">
+                        <Button size="sm" variant="outline">Ir a configuración</Button>
+                    </Link>
+                </div>
+            )}
+
             {/* Estado del sistema */}
             {!isConfigured && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900 p-4 flex items-start gap-3">

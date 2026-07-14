@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     dunningApi, DunningBank, DunningConfig as DunningConfigType, DunningTemplate,
-    PlanItem, PlanSummary, RunResult,
+    DunningEmailOverride, PlanItem, PlanSummary, RunResult,
 } from '@/lib/api/dunning';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -218,7 +218,19 @@ function BrandTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div>
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Texto del logo (esquina superior)</label>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">URL del logo (imagen)</label>
+                        <Input value={form.brand_logo_url} onChange={e => setForm({ ...form, brand_logo_url: e.target.value })} placeholder="https://imfinance.immoral.es/logo.png" />
+                        {form.brand_logo_url && (
+                            <div className="mt-2 p-3 rounded-lg bg-slate-800 inline-block">
+                                <img src={form.brand_logo_url} alt="Logo preview" style={{ maxHeight: 34 }} />
+                            </div>
+                        )}
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                            URL pública del logotipo (PNG/SVG). Aparece en el hero de cada email. Por defecto se sirve <code>/logo.png</code> del propio proyecto.
+                        </p>
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Texto del logo (fallback si no hay imagen)</label>
                         <Input value={form.brand_logo_text} onChange={e => setForm({ ...form, brand_logo_text: e.target.value })} />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
@@ -670,6 +682,160 @@ function RunResultsModal({ results, dryRun, onClose }: { results: RunResult[]; d
     );
 }
 
+function TestModePanel({ config }: { config: DunningConfigType }) {
+    const queryClient = useQueryClient();
+    const [email, setEmail] = useState(config.test_mode_email || '');
+
+    useEffect(() => setEmail(config.test_mode_email || ''), [config.test_mode_email]);
+
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
+
+    return (
+        <Card className={config.test_mode ? 'border-amber-400 bg-amber-50/50 dark:bg-amber-950/10' : ''}>
+            <CardHeader>
+                <div className="flex items-center justify-between">
+                    <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                            {config.test_mode && <AlertTriangle className="text-amber-500" size={18} />}
+                            Modo prueba dirigido
+                        </CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            Cuando está activo, TODOS los recordatorios (Stripe real incluido) se envían a la dirección de prueba en lugar de a los clientes.
+                            El email incluye un banner amarillo indicando el destinatario original.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => saveMutation.mutate({ test_mode: !config.test_mode, test_mode_email: email || null })}
+                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors shrink-0 ${config.test_mode ? 'bg-amber-500' : 'bg-muted-foreground/30'}`}
+                        role="switch"
+                        aria-checked={config.test_mode}
+                    >
+                        <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${config.test_mode ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                </div>
+            </CardHeader>
+            <CardContent>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Email destino de prueba</label>
+                <div className="flex gap-2">
+                    <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="administracion@immoral.es" />
+                    <Button onClick={() => saveMutation.mutate({ test_mode_email: email })} disabled={saveMutation.isPending} variant="outline">
+                        {saveMutation.isPending ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+                    </Button>
+                </div>
+                {config.test_mode && (
+                    <div className="mt-3 rounded-lg bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-800 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                        <AlertTriangle className="shrink-0 mt-0.5" size={14} />
+                        <span>
+                            <strong>Sistema en modo prueba.</strong> Ni el cron ni las ejecuciones manuales enviarán a clientes reales — todo va a <strong>{config.test_mode_email || '(sin email definido)'}</strong>. Desactívalo antes de operar.
+                        </span>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function OverridesPanel() {
+    const queryClient = useQueryClient();
+    const { data } = useQuery({
+        queryKey: ['dunning', 'overrides'],
+        queryFn: () => dunningApi.listOverrides(),
+    });
+    const [contactId, setContactId] = useState('');
+    const [contactName, setContactName] = useState('');
+    const [overrideEmail, setOverrideEmail] = useState('');
+    const [note, setNote] = useState('');
+
+    const addMutation = useMutation({
+        mutationFn: () => dunningApi.upsertOverride(contactId, { override_email: overrideEmail, contact_name: contactName, note }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['dunning', 'overrides'] });
+            setContactId(''); setContactName(''); setOverrideEmail(''); setNote('');
+        },
+    });
+
+    const deleteMutation = useMutation({
+        mutationFn: (cid: string) => dunningApi.deleteOverride(cid),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'overrides'] }),
+    });
+
+    const overrides = data?.overrides || [];
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle className="text-base">Overrides por cliente</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                    Redirigir los recordatorios de un contacto concreto a otro email. Útil si el email en Holded es incorrecto o si quieres testear un caso específico sin activar el modo prueba global.
+                </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+                    <div className="md:col-span-1">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Contact ID (Holded)</label>
+                        <Input value={contactId} onChange={e => setContactId(e.target.value)} placeholder="6123abc…" />
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nombre (opcional)</label>
+                        <Input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Cliente XYZ SL" />
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Email destino</label>
+                        <Input type="email" value={overrideEmail} onChange={e => setOverrideEmail(e.target.value)} placeholder="nuevo@email.com" />
+                    </div>
+                    <Button
+                        onClick={() => addMutation.mutate()}
+                        disabled={!contactId || !overrideEmail || addMutation.isPending}
+                    >
+                        {addMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Plus size={14} className="mr-2" />}
+                        Añadir
+                    </Button>
+                </div>
+                <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nota (opcional)</label>
+                    <Input value={note} onChange={e => setNote(e.target.value)} placeholder="Motivo del override" />
+                </div>
+
+                {overrides.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">Sin overrides configurados. Los emails van directamente al email registrado en Holded.</p>
+                ) : (
+                    <div className="rounded-lg border overflow-hidden">
+                        <table className="w-full text-xs">
+                            <thead className="text-[11px] uppercase text-muted-foreground border-b bg-muted/30">
+                                <tr>
+                                    <th className="text-left py-2 px-2">Contact ID</th>
+                                    <th className="text-left py-2 px-2">Cliente</th>
+                                    <th className="text-left py-2 px-2">Email destino</th>
+                                    <th className="text-left py-2 px-2">Nota</th>
+                                    <th className="text-right py-2 px-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/40">
+                                {overrides.map(o => (
+                                    <tr key={o.contact_id}>
+                                        <td className="py-1.5 px-2 font-mono text-muted-foreground truncate max-w-[120px]">{o.contact_id}</td>
+                                        <td className="py-1.5 px-2">{o.contact_name || '—'}</td>
+                                        <td className="py-1.5 px-2 font-medium text-primary">{o.override_email}</td>
+                                        <td className="py-1.5 px-2 text-muted-foreground italic">{o.note || '—'}</td>
+                                        <td className="py-1.5 px-2 text-right">
+                                            <button onClick={() => deleteMutation.mutate(o.contact_id)} className="p-1 rounded hover:bg-red-50 text-red-500">
+                                                <Trash2 size={13} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
 function RunTab({ config }: { config: DunningConfigType }) {
     const [preview, setPreview] = useState<{ plan: PlanItem[]; summary: PlanSummary } | null>(null);
     const [showTestSend, setShowTestSend] = useState(false);
@@ -688,7 +854,11 @@ function RunTab({ config }: { config: DunningConfigType }) {
     const syncMutation = useMutation({ mutationFn: () => dunningApi.syncPaid() });
 
     return (
-        <>
+        <div className="space-y-4">
+            <TestModePanel config={config} />
+
+            <OverridesPanel />
+
             <Card>
                 <CardHeader>
                     <CardTitle className="text-base">Ejecutar bajo demanda</CardTitle>
@@ -757,7 +927,7 @@ function RunTab({ config }: { config: DunningConfigType }) {
             {preview && <PreviewModal plan={preview.plan} summary={preview.summary} onClose={() => setPreview(null)} />}
             {showTestSend && <TestSendModal onClose={() => setShowTestSend(false)} />}
             {runResults && <RunResultsModal results={runResults.results} dryRun={runResults.dryRun} onClose={() => setRunResults(null)} />}
-        </>
+        </div>
     );
 }
 

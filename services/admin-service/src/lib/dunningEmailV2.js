@@ -51,10 +51,12 @@ function renderBank(bank) {
  * @param {Object} p
  * @param {Object} p.config   fila de dunning_config
  * @param {Object} p.template fila de dunning_templates
- * @param {Object} p.invoice  datos de la factura (contact_name, invoice_number, invoice_date, due_date, days_overdue, amount, currency)
+ * @param {Object} p.invoice  datos de la factura
  * @param {String} p.stripe_url  URL de checkout Stripe generada previamente
+ * @param {Object} [p.test_context] Si se pasa, añade banner "MODO PRUEBA" al inicio.
+ *                                  { original_email: string, contact_name?: string }
  */
-export function renderDunningEmailV2({ config, template, invoice, stripe_url }) {
+export function renderDunningEmailV2({ config, template, invoice, stripe_url, test_context }) {
     const primary = config.brand_primary_color || '#0ea5e9';
     const secondary = config.brand_secondary_color || '#1e40af';
     const gradient = `linear-gradient(135deg, ${primary} 0%, ${secondary} 100%)`;
@@ -101,11 +103,20 @@ export function renderDunningEmailV2({ config, template, invoice, stripe_url }) 
 
     <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px -8px rgba(0,0,0,0.08);">
 
+      ${test_context ? `
+      <tr><td style="background:#fef3c7;border-bottom:2px solid #f59e0b;padding:10px 20px;color:#78350f;font-size:12px;font-family:monospace;">
+        <strong>⚠ MODO PRUEBA</strong> — Destinatario original: <strong>${escapeHtml(test_context.original_email || '?')}</strong>${test_context.contact_name ? ` (${escapeHtml(test_context.contact_name)})` : ''}. Este email se ha redirigido para QA.
+      </td></tr>` : ''}
+
       <!-- Hero -->
       <tr><td style="background:${gradient};padding:26px 28px 24px 28px;color:#ffffff;">
-        <div style="font-size:12px;font-weight:800;letter-spacing:2px;text-transform:lowercase;color:rgba(255,255,255,0.9);margin-bottom:8px;">
+        ${config.brand_logo_url ? `
+        <div style="margin-bottom:10px;">
+          <img src="${escapeHtml(config.brand_logo_url)}" alt="${escapeHtml(config.brand_logo_text || 'Logo')}" style="max-height:34px;width:auto;display:block;" />
+        </div>` : `
+        <div style="font-size:13px;font-weight:800;letter-spacing:2px;text-transform:lowercase;color:rgba(255,255,255,0.9);margin-bottom:8px;">
           ${escapeHtml(config.brand_logo_text || 'immoral')}
-        </div>
+        </div>`}
         <h1 style="margin:0 0 6px 0;font-size:22px;font-weight:800;line-height:1.25;color:#ffffff;">
           ${escapeHtml(heroTitle)}
         </h1>
