@@ -50,6 +50,7 @@ export interface DunningConfig {
     banks: DunningBank[];
     // Fase 3.1: logo por URL + modo prueba dirigido
     brand_logo_url: string;
+    show_logo: boolean;
     test_mode: boolean;
     test_mode_email: string | null;
     // Fase 2b: metadatos del cron

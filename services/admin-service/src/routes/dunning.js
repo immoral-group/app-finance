@@ -512,6 +512,8 @@ router.put('/config', async (req, res) => {
             'banks',
             // Fase 3.1: logo por URL + modo prueba dirigido
             'brand_logo_url', 'test_mode', 'test_mode_email',
+            // Fase 3.3: toggle logo
+            'show_logo',
         ];
         const patch = {};
         for (const k of allowed) if (k in req.body) patch[k] = req.body[k];

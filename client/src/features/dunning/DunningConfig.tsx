@@ -232,6 +232,20 @@ function BrandTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                     <p className="text-xs text-muted-foreground">Colores, logotipo textual y firma que aparecen en todos los recordatorios.</p>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                        <div>
+                            <p className="text-sm font-semibold text-foreground">Mostrar logo en el email</p>
+                            <p className="text-xs text-muted-foreground">Si lo desactivas, el hero solo muestra el título y subtítulo (sin imagen ni texto de logo).</p>
+                        </div>
+                        <button
+                            onClick={() => setForm({ ...form, show_logo: !form.show_logo })}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.show_logo ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                            role="switch"
+                            aria-checked={form.show_logo}
+                        >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.show_logo ? 'translate-x-6' : 'translate-x-1'}`} />
+                        </button>
+                    </div>
                     <div>
                         <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">URL del logo (imagen)</label>
                         <Input value={form.brand_logo_url} onChange={e => setForm({ ...form, brand_logo_url: e.target.value })} placeholder="https://imfinance.immoral.es/logo.png" />

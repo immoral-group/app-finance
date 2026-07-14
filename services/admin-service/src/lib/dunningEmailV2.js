@@ -133,9 +133,10 @@ export function renderDunningEmailV2({ config, template, invoice, stripe_url, te
 
       <!-- Hero -->
       <tr><td style="background:${gradient};padding:26px 28px 24px 28px;color:#ffffff;">
+        ${config.show_logo === false ? '' : `
         <div style="margin-bottom:10px;">
           <img src="${resolveLogoSrc(config.brand_logo_url, base_url)}" alt="${escapeHtml(config.brand_logo_text || 'Logo')}" style="max-height:34px;width:auto;display:block;" />
-        </div>
+        </div>`}
         <h1 style="margin:0 0 6px 0;font-size:22px;font-weight:800;line-height:1.25;color:#ffffff;">
           ${escapeHtml(heroTitle)}
         </h1>
