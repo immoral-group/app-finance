@@ -178,9 +178,13 @@ export interface PlanSummary {
 
 export interface RunResult {
     invoice_id: string;
+    invoice_number?: string;
+    contact_name?: string;
     status: 'sent' | 'skipped' | 'failed' | 'would-send';
     level?: number;
     to?: string;
+    original_to?: string;
+    redirect_reason?: 'test_mode' | 'override' | null;
     reason?: string;
     error?: string;
 }

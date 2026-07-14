@@ -3,6 +3,22 @@
 // CTA Stripe, botones de bancos configurables, copies estructurados y firma.
 // Compatible con Gmail/Outlook (table-based + inline styles).
 
+import { LOGO_BASE64 } from './dunningLogo.js';
+
+// Detecta URLs de default vacías o que aún no están disponibles (preview branches
+// donde imfinance.immoral.es aún no sirve el logo). En esos casos usamos el
+// logo embebido en base64 para asegurar que siempre se ve.
+function resolveLogoSrc(url) {
+    if (!url) return LOGO_BASE64;
+    const trimmed = String(url).trim();
+    if (!trimmed) return LOGO_BASE64;
+    // Si el user pone una URL propia (imgur, cloudinary, etc.), la respetamos.
+    // Si es la URL default de producción, usamos el embed para que funcione
+    // también en previews y localhost.
+    if (trimmed === 'https://imfinance.immoral.es/logo.png') return LOGO_BASE64;
+    return trimmed;
+}
+
 const escapeHtml = (s) => String(s ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -110,13 +126,9 @@ export function renderDunningEmailV2({ config, template, invoice, stripe_url, te
 
       <!-- Hero -->
       <tr><td style="background:${gradient};padding:26px 28px 24px 28px;color:#ffffff;">
-        ${config.brand_logo_url ? `
         <div style="margin-bottom:10px;">
-          <img src="${escapeHtml(config.brand_logo_url)}" alt="${escapeHtml(config.brand_logo_text || 'Logo')}" style="max-height:34px;width:auto;display:block;" />
-        </div>` : `
-        <div style="font-size:13px;font-weight:800;letter-spacing:2px;text-transform:lowercase;color:rgba(255,255,255,0.9);margin-bottom:8px;">
-          ${escapeHtml(config.brand_logo_text || 'immoral')}
-        </div>`}
+          <img src="${resolveLogoSrc(config.brand_logo_url)}" alt="${escapeHtml(config.brand_logo_text || 'Logo')}" style="max-height:34px;width:auto;display:block;" />
+        </div>
         <h1 style="margin:0 0 6px 0;font-size:22px;font-weight:800;line-height:1.25;color:#ffffff;">
           ${escapeHtml(heroTitle)}
         </h1>

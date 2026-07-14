@@ -580,7 +580,13 @@ router.post('/run', async (req, res) => {
         for (const item of toSend) {
             const template = tplByLevel.get(item.level);
             if (!template) {
-                results.push({ invoice_id: item.invoice.id, status: 'skipped', reason: 'no-template' });
+                results.push({
+                    invoice_id: item.invoice.id,
+                    invoice_number: item.invoice.invoice_number,
+                    contact_name: item.invoice.contact_name,
+                    status: 'skipped',
+                    reason: 'no-template',
+                });
                 continue;
             }
             // Precedencia de destino: test_mode > override_email > email real del cliente.
@@ -599,13 +605,21 @@ router.post('/run', async (req, res) => {
             }
 
             if (!destEmail) {
-                results.push({ invoice_id: item.invoice.id, status: 'skipped', reason: 'no-email' });
+                results.push({
+                    invoice_id: item.invoice.id,
+                    invoice_number: item.invoice.invoice_number,
+                    contact_name: item.invoice.contact_name,
+                    status: 'skipped',
+                    reason: 'no-email',
+                });
                 continue;
             }
 
             if (dryRun) {
                 results.push({
                     invoice_id: item.invoice.id,
+                    invoice_number: item.invoice.invoice_number,
+                    contact_name: item.invoice.contact_name,
                     status: 'would-send',
                     level: item.level,
                     to: destEmail,
@@ -711,7 +725,16 @@ router.post('/run', async (req, res) => {
                     updated_at: new Date().toISOString(),
                 }).eq('id', caseRow.id);
 
-                results.push({ invoice_id: item.invoice.id, status: 'sent', level: item.level, to: item.invoice.contact_email });
+                results.push({
+                    invoice_id: item.invoice.id,
+                    invoice_number: item.invoice.invoice_number,
+                    contact_name: item.invoice.contact_name,
+                    status: 'sent',
+                    level: item.level,
+                    to: destEmail,
+                    original_to: originalEmail,
+                    redirect_reason,
+                });
             } catch (sendErr) {
                 console.error('[dunning] send failed for invoice', item.invoice.id, sendErr);
                 // Registrar el fallo si tenemos el caso.
@@ -731,7 +754,13 @@ router.post('/run', async (req, res) => {
                         });
                     }
                 } catch { /* ignore */ }
-                results.push({ invoice_id: item.invoice.id, status: 'failed', error: String(sendErr.message || sendErr) });
+                results.push({
+                    invoice_id: item.invoice.id,
+                    invoice_number: item.invoice.invoice_number,
+                    contact_name: item.invoice.contact_name,
+                    status: 'failed',
+                    error: String(sendErr.message || sendErr),
+                });
             }
         }
 
