@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     dunningApi, DunningBank, DunningConfig as DunningConfigType, DunningTemplate,
-    DunningEmailOverride, PlanItem, PlanSummary, RunResult,
+    PlanItem, PlanSummary, RunResult,
 } from '@/lib/api/dunning';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
