@@ -1350,3 +1350,63 @@ En orden:
 - `8b3ff75` fix — KPIs excluyen envíos en modo prueba
 - `5b33e70`/`abb386d`/`c5a610e` fixes — logo desde endpoint público
 - `9e84b6d` toggle mostrar/ocultar logo
+
+#### Ajustes finales (post-QA con usuario)
+
+**Toggle mostrar/ocultar logo** (`add_dunning_v6.sql`):
+- Nueva columna `dunning_config.show_logo boolean DEFAULT true`.
+- Toggle en Configuración → Marca y bancos → "Mostrar logo en el email".
+- Si se desactiva, el hero del email queda solo con título + subtítulo, sin bloque de logo.
+- Motivo: soluciona los casos donde el dominio de producción (`imfinance.immoral.es`) todavía no está configurado en DNS y el logo sale roto en preview branches.
+
+**Resumen del estado en la tab Programación**:
+- Card destacado al principio con el estado ACTUAL guardado (leído de `config`, no del form):
+  - Verde: *"Sistema ACTIVO — Se envían recordatorios los [días] a las HH:MM ([timezone])"*.
+  - Ámbar: *"Sistema activo pero sin días configurados"*.
+  - Gris: *"Sistema DESACTIVADO — No se envía nada automáticamente"*.
+- Banner azul si hay cambios sin guardar respecto a `config`.
+- Feedback "✓ Guardado" durante 3 segundos al pulsar el botón (`justSaved` timer).
+- Motivo: al pulsar Guardar el toggle solo cambiaba estado en BD pero no había confirmación visual.
+
+**Traducciones y limpieza UX**:
+- Los `reason` técnicos del worker (`waiting-repeat-0/7`, `level-2-already-sent`, etc.) se traducen a español legible en el modal de preview y en el resumen de envío.
+- El modal "Envío completado" muestra tabla con **nombre del cliente + número de factura + destino real + estado**, en lugar del `invoice_id` bruto.
+- El campo `to` en cada resultado es siempre el destino final (respetando test_mode/override), no el email original del cliente.
+- Confirmación al pulsar "Ejecutar ahora" es contextual: en modo prueba avisa que todo irá al email de prueba; en modo real avisa que va a los clientes.
+
+**Fix del logo en emails**:
+- Endpoint público `GET /api/admin/dunning/logo` que sirve el PNG binario desde el base64 embebido.
+- El renderer construye la URL usando `base_url` (host del request actual) → `VERCEL_URL` → `APP_URL` trimeada → fallback.
+- Endpoint diagnóstico `GET /api/admin/dunning/logo-debug` para verificar env vars y URL calculada.
+- Motivo: Gmail bloquea `data:` URIs por seguridad, así que hay que servir el logo desde un endpoint HTTP público real.
+
+**KPIs limpios** (`add_dunning_v5.sql`):
+- Columnas `is_test` en `dunning_reminders` y `dunning_cases`.
+- Cuando `test_mode=true` o hay `override`, el envío se marca como `is_test=true`.
+- El endpoint `/stats` filtra por `is_test=false` en TODAS sus queries.
+- La migración marca retroactivamente como test los envíos previos con prefijo `[PRUEBA]` o `[REDIRIGIDO]` en el asunto.
+
+**Resetear datos de prueba**:
+- Endpoint `POST /dunning/reset-test-data` que borra TODO el histórico de `dunning_reminders` y `dunning_cases`.
+- Protegido: solo funciona si `test_mode=true` (para no borrar histórico real por accidente).
+- Botón visible en Configuración → Ejecutar solo cuando modo prueba está activo.
+
+#### Flujo de QA recomendado
+
+1. Correr las 6 migraciones SQL en orden (`add_dunning.sql` → `add_dunning_v6.sql`).
+2. Configurar env var `CRON_SECRET` en Vercel (Production + Preview).
+3. En la app: *Configuración de impagos → Ejecutar* → activar **Modo prueba dirigido** con el email de administración.
+4. *Configuración → Marca y bancos* → ajustar colores, firma, lista de bancos. Desactivar el logo si no se está viendo en preview.
+5. *Configuración → Plantillas* → revisar copies de los 3 niveles.
+6. *Configuración → Reglas* → ajustar rangos si es necesario.
+7. *Configuración → Programación* → seleccionar días + hora + timezone. Activar sistema. Guardar.
+8. *Configuración → Ejecutar* → **Ver preview** → confirmar plan → **Ejecutar ahora** (los 12 llegan a la bandeja de administración con Stripe real).
+9. Verificar diseño, contenidos, botón Stripe (que abra el checkout con el importe correcto), botones de bancos.
+10. Repetir con **Resetear datos de prueba** entre pruebas.
+11. Cuando esté a gusto: apagar modo prueba. El cron enviará automáticamente en los días/hora configurados.
+
+#### Última mano
+
+**Commits añadidos tras el registro inicial:**
+- `ffe6302` docs: registrar módulo en REGISTRO y changelog
+- `8381bae` UX: resumen del estado + feedback guardado en Programación
