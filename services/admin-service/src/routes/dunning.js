@@ -1,19 +1,47 @@
 import express from 'express';
+import nodemailer from 'nodemailer';
 import supabase from '../config/supabase.js';
 import { renderDunningEmail, SAMPLE_VARS } from '../lib/dunningRenderer.js';
+import { buildDunningPlan, summarizePlan, holdedFetch } from '../lib/dunningWorker.js';
 
 const router = express.Router();
 
-const HOLDED_BASE = 'https://api.holded.com/api/invoicing/v1';
+// SMTP transporter reutilizable (mismo patrón que release-notifications).
+let transporter = null;
+function getTransporter() {
+    if (!transporter) {
+        transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST || 'smtp.gmail.com',
+            port: parseInt(process.env.SMTP_PORT || '587'),
+            secure: false,
+            auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+            pool: false,
+            connectionTimeout: 8000,
+            greetingTimeout: 8000,
+            socketTimeout: 15000,
+        });
+    }
+    return transporter;
+}
 
-async function holdedFetch(path) {
-    const apiKey = process.env.HOLDED_API_KEY;
-    if (!apiKey) throw new Error('HOLDED_API_KEY not configured');
-    const res = await fetch(`${HOLDED_BASE}${path}`, {
-        headers: { key: apiKey, 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) throw new Error(`Holded API error ${res.status}: ${await res.text()}`);
-    return res.json();
+function formatDate(ms) {
+    if (!ms) return '';
+    try {
+        return new Date(ms).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    } catch { return ''; }
+}
+
+function invoiceVars(invoice, daysOverdue) {
+    return {
+        contact_name: invoice.contact_name || '',
+        invoice_number: invoice.invoice_number || '',
+        invoice_date: formatDate(invoice.invoice_date),
+        due_date: formatDate(invoice.due_date),
+        days_overdue: daysOverdue,
+        amount: Number(invoice.amount || 0),
+        currency: invoice.currency || 'EUR',
+        invoice_url: `https://app-finance.vercel.app/payments`,
+    };
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -288,6 +316,239 @@ router.get('/stats', async (_req, res) => {
             reminders_by_level: perLevel,
         });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Fase 2a — motor de envío (todo bajo demanda, sin cron)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── POST /dunning/preview-run ─────────────────────────────────────────────────
+// Devuelve el plan de envíos que se ejecutaría AHORA. No envía ni escribe.
+router.post('/preview-run', async (_req, res) => {
+    try {
+        const { plan, config } = await buildDunningPlan({ supabase });
+        res.json({
+            plan,
+            summary: summarizePlan(plan),
+            config_enabled: config.enabled,
+        });
+    } catch (err) {
+        console.error('[dunning] preview-run error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /dunning/test-send ───────────────────────────────────────────────────
+// Envía UN recordatorio de una plantilla concreta a una dirección de prueba.
+// No toca dunning_cases ni dunning_reminders.
+// Body: { template_id: uuid, to_email: string, sample?: object }
+router.post('/test-send', async (req, res) => {
+    try {
+        if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+            return res.status(500).json({ error: 'smtp-not-configured' });
+        }
+        const { template_id, to_email, sample } = req.body || {};
+        if (!template_id || !to_email) {
+            return res.status(400).json({ error: 'missing-template_id-or-to_email' });
+        }
+        const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRe.test(to_email)) return res.status(400).json({ error: 'invalid-email' });
+
+        const { data: template, error } = await supabase
+            .from('dunning_templates').select('*').eq('id', template_id).single();
+        if (error || !template) return res.status(404).json({ error: 'template-not-found' });
+
+        const rendered = renderDunningEmail({
+            blocks: template.blocks || [],
+            subject: template.subject,
+            vars: { ...SAMPLE_VARS, ...(sample || {}) },
+        });
+
+        const info = await getTransporter().sendMail({
+            from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
+            to: to_email,
+            subject: `[PRUEBA] ${rendered.subject}`,
+            html: rendered.html,
+        });
+
+        res.json({ success: true, message_id: info.messageId, to: to_email });
+    } catch (err) {
+        console.error('[dunning] test-send error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /dunning/run ─────────────────────────────────────────────────────────
+// Ejecuta el envío real siguiendo el plan.
+// Body: { dry_run?: boolean, force?: boolean }
+//   - dry_run: si true, no envía ni escribe (útil para testing sin efectos).
+//   - force: si true, ignora config.enabled. Útil para lanzar manualmente
+//     desde la UI antes de activar el sistema automático.
+router.post('/run', async (req, res) => {
+    try {
+        const dryRun = !!req.body?.dry_run;
+        const force = !!req.body?.force;
+
+        if (!dryRun && !process.env.SMTP_USER) {
+            return res.status(500).json({ error: 'smtp-not-configured' });
+        }
+
+        const { plan, config, templates } = await buildDunningPlan({ supabase });
+
+        if (!force && !config.enabled) {
+            return res.status(400).json({
+                error: 'system-disabled',
+                hint: 'Activa el sistema en configuración o usa force=true para una ejecución manual puntual.',
+            });
+        }
+
+        const tplByLevel = new Map();
+        for (const t of templates) if (t.active && !tplByLevel.has(t.level)) tplByLevel.set(t.level, t);
+
+        const results = [];
+        const toSend = plan.filter(p => p.action === 'send');
+
+        for (const item of toSend) {
+            const template = tplByLevel.get(item.level);
+            if (!template) {
+                results.push({ invoice_id: item.invoice.id, status: 'skipped', reason: 'no-template' });
+                continue;
+            }
+            if (!item.has_email) {
+                results.push({ invoice_id: item.invoice.id, status: 'skipped', reason: 'no-email' });
+                continue;
+            }
+            if (dryRun) {
+                results.push({ invoice_id: item.invoice.id, status: 'would-send', level: item.level });
+                continue;
+            }
+
+            try {
+                // Upsert del caso — invoice_id es UNIQUE.
+                const { data: caseRow, error: caseErr } = await supabase
+                    .from('dunning_cases')
+                    .upsert({
+                        invoice_id: item.invoice.id,
+                        invoice_number: item.invoice.invoice_number,
+                        contact_id: item.invoice.contact_id,
+                        contact_name: item.invoice.contact_name,
+                        contact_email: item.invoice.contact_email,
+                        amount: item.invoice.amount,
+                        currency: item.invoice.currency,
+                        invoice_date: item.invoice.invoice_date ? new Date(item.invoice.invoice_date).toISOString() : null,
+                        due_date: item.invoice.due_date ? new Date(item.invoice.due_date).toISOString() : null,
+                        status: 'open',
+                        updated_at: new Date().toISOString(),
+                    }, { onConflict: 'invoice_id' })
+                    .select()
+                    .single();
+                if (caseErr) throw new Error(caseErr.message);
+
+                const vars = invoiceVars(item.invoice, item.days_overdue);
+                const rendered = renderDunningEmail({
+                    blocks: template.blocks || [],
+                    subject: template.subject,
+                    vars,
+                });
+
+                const info = await getTransporter().sendMail({
+                    from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
+                    to: item.invoice.contact_email,
+                    bcc: config.bcc_email || undefined,
+                    subject: rendered.subject,
+                    html: rendered.html,
+                });
+
+                await supabase.from('dunning_reminders').insert({
+                    case_id: caseRow.id,
+                    invoice_id: item.invoice.id,
+                    level: item.level,
+                    template_id: template.id,
+                    days_overdue: item.days_overdue,
+                    sent_to: item.invoice.contact_email,
+                    subject: rendered.subject,
+                    body_html_snapshot: rendered.html,
+                    smtp_message_id: info.messageId || null,
+                    status: 'sent',
+                });
+
+                await supabase.from('dunning_cases').update({
+                    reminders_count: (caseRow.reminders_count || 0) + 1,
+                    last_reminder_at: new Date().toISOString(),
+                    last_reminder_level: item.level,
+                    first_reminder_at: caseRow.first_reminder_at || new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                }).eq('id', caseRow.id);
+
+                results.push({ invoice_id: item.invoice.id, status: 'sent', level: item.level, to: item.invoice.contact_email });
+            } catch (sendErr) {
+                console.error('[dunning] send failed for invoice', item.invoice.id, sendErr);
+                // Registrar el fallo si tenemos el caso.
+                try {
+                    const { data: caseRow } = await supabase
+                        .from('dunning_cases').select('id').eq('invoice_id', item.invoice.id).maybeSingle();
+                    if (caseRow) {
+                        await supabase.from('dunning_reminders').insert({
+                            case_id: caseRow.id,
+                            invoice_id: item.invoice.id,
+                            level: item.level,
+                            template_id: template.id,
+                            days_overdue: item.days_overdue,
+                            sent_to: item.invoice.contact_email || 'unknown',
+                            status: 'failed',
+                            error_message: String(sendErr.message || sendErr).slice(0, 500),
+                        });
+                    }
+                } catch { /* ignore */ }
+                results.push({ invoice_id: item.invoice.id, status: 'failed', error: String(sendErr.message || sendErr) });
+            }
+        }
+
+        res.json({
+            dry_run: dryRun,
+            summary: summarizePlan(plan),
+            executed: results,
+        });
+    } catch (err) {
+        console.error('[dunning] run error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /dunning/sync-paid ───────────────────────────────────────────────────
+// Cruza casos abiertos contra Holded. Si una factura ya está pagada, cierra
+// el caso y calcula days_to_pay (desde primer recordatorio hasta ahora).
+router.post('/sync-paid', async (_req, res) => {
+    try {
+        const { data: openCases, error } = await supabase
+            .from('dunning_cases').select('*').eq('status', 'open');
+        if (error) throw new Error(error.message);
+        if (!openCases?.length) return res.json({ closed: 0, checked: 0 });
+
+        // Traer todas las facturas pagadas de Holded en una sola llamada.
+        const paidRes = await holdedFetch('/documents/invoice?paid=1');
+        const paidIds = new Set((Array.isArray(paidRes) ? paidRes : []).map(inv => inv.id));
+
+        let closed = 0;
+        for (const c of openCases) {
+            if (!paidIds.has(c.invoice_id)) continue;
+            const nowIso = new Date().toISOString();
+            const first = c.first_reminder_at ? new Date(c.first_reminder_at).getTime() : Date.now();
+            const daysToPay = Math.max(0, Math.floor((Date.now() - first) / 86_400_000));
+            await supabase.from('dunning_cases').update({
+                status: 'paid',
+                paid_at: nowIso,
+                days_to_pay: daysToPay,
+                updated_at: nowIso,
+            }).eq('id', c.id);
+            closed++;
+        }
+
+        res.json({ checked: openCases.length, closed });
+    } catch (err) {
+        console.error('[dunning] sync-paid error:', err);
         res.status(500).json({ error: err.message });
     }
 });

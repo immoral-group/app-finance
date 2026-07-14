@@ -111,6 +111,44 @@ export interface DunningStats {
     reminders_by_level: Record<'1' | '2' | '3', number>;
 }
 
+export interface PlanItem {
+    invoice: {
+        id: string;
+        invoice_number: string;
+        contact_id: string;
+        contact_name: string;
+        contact_email: string;
+        amount: number;
+        currency: string;
+        invoice_date: number | null;
+        due_date: number;
+    };
+    days_overdue: number;
+    level: 0 | 1 | 2 | 3;
+    template_id: string | null;
+    template_name: string | null;
+    action: 'send' | 'skip';
+    reason: string;
+    has_email: boolean;
+}
+
+export interface PlanSummary {
+    total: number;
+    will_send: number;
+    will_skip: number;
+    blocked: number;
+    by_level: Record<'1' | '2' | '3', number>;
+}
+
+export interface RunResult {
+    invoice_id: string;
+    status: 'sent' | 'skipped' | 'failed' | 'would-send';
+    level?: number;
+    to?: string;
+    reason?: string;
+    error?: string;
+}
+
 // ── API ───────────────────────────────────────────────────────────────────────
 
 export const dunningApi = {
@@ -151,4 +189,26 @@ export const dunningApi = {
         fetchApi<{ case: DunningCase; reminders: DunningReminder[] }>(`/dunning/cases/${id}`),
 
     getStats: () => fetchApi<DunningStats>('/dunning/stats'),
+
+    previewRun: () =>
+        fetchApi<{ plan: PlanItem[]; summary: PlanSummary; config_enabled: boolean }>('/dunning/preview-run', {
+            method: 'POST',
+        }),
+
+    testSend: (payload: { template_id: string; to_email: string; sample?: Record<string, unknown> }) =>
+        fetchApi<{ success: boolean; message_id: string; to: string }>('/dunning/test-send', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }),
+
+    run: (payload: { dry_run?: boolean; force?: boolean } = {}) =>
+        fetchApi<{ dry_run: boolean; summary: PlanSummary; executed: RunResult[] }>('/dunning/run', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }),
+
+    syncPaid: () =>
+        fetchApi<{ checked: number; closed: number }>('/dunning/sync-paid', {
+            method: 'POST',
+        }),
 };

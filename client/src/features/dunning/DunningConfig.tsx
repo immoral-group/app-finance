@@ -2,25 +2,28 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     dunningApi, DunningBlock, DunningBlockType, DunningConfig as DunningConfigType, DunningTemplate,
+    PlanItem, PlanSummary, RunResult,
 } from '@/lib/api/dunning';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { formatCurrency } from '@/lib/utils';
 import {
-    Save, Settings, Calendar, Mail, Loader2, ArrowUp, ArrowDown, Trash2, Copy, Plus,
-    Eye, GripVertical, Info, Check,
+    Save, Settings, Calendar, Mail, Loader2, ArrowUp, ArrowDown, Trash2, Copy,
+    Eye, GripVertical, Info, Check, Play, Send, RefreshCw, AlertTriangle, X, Zap,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Configuración de Impagos
 // ══════════════════════════════════════════════════════════════════════════════
 
-type Tab = 'rules' | 'schedule' | 'templates';
+type Tab = 'rules' | 'schedule' | 'templates' | 'run';
 
 const TABS: { key: Tab; label: string; icon: any }[] = [
     { key: 'rules', label: 'Reglas', icon: Settings },
     { key: 'schedule', label: 'Programación', icon: Calendar },
     { key: 'templates', label: 'Plantillas', icon: Mail },
+    { key: 'run', label: 'Ejecutar', icon: Zap },
 ];
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -494,6 +497,332 @@ function TemplatesTab() {
     );
 }
 
+// ── Tab: Ejecutar ─────────────────────────────────────────────────────────────
+
+function ActionRow({
+    title, description, action, icon: Icon, danger = false,
+}: {
+    title: string;
+    description: string;
+    action: React.ReactNode;
+    icon: any;
+    danger?: boolean;
+}) {
+    return (
+        <div className={`rounded-lg border p-4 flex items-start gap-4 ${danger ? 'border-red-200 bg-red-50/50 dark:bg-red-950/10 dark:border-red-900/50' : ''}`}>
+            <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${danger ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300' : 'bg-primary/10 text-primary'}`}>
+                <Icon size={18} />
+            </div>
+            <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">{title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+            </div>
+            <div className="shrink-0">{action}</div>
+        </div>
+    );
+}
+
+function PreviewModal({ plan, summary, onClose }: { plan: PlanItem[]; summary: PlanSummary; onClose: () => void }) {
+    const sends = plan.filter(p => p.action === 'send');
+    const skips = plan.filter(p => p.action === 'skip');
+    return (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-card rounded-xl border shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-3 border-b flex items-center justify-between">
+                    <div>
+                        <h3 className="text-base font-bold text-foreground">Preview de envíos</h3>
+                        <p className="text-xs text-muted-foreground">
+                            Se enviarían {summary.will_send} emails ahora mismo · N1 {summary.by_level['1']} · N2 {summary.by_level['2']} · N3 {summary.by_level['3']}
+                        </p>
+                    </div>
+                    <button onClick={onClose} className="p-1 rounded hover:bg-muted"><X size={16} /></button>
+                </div>
+                <div className="overflow-y-auto flex-1 p-4 space-y-4">
+                    {sends.length > 0 && (
+                        <div>
+                            <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider mb-2">
+                                A enviar ({sends.length})
+                            </p>
+                            <table className="w-full text-xs">
+                                <thead className="text-[11px] uppercase text-muted-foreground border-b">
+                                    <tr>
+                                        <th className="text-left py-1.5 px-2">Factura</th>
+                                        <th className="text-left py-1.5 px-2">Cliente</th>
+                                        <th className="text-left py-1.5 px-2">Email</th>
+                                        <th className="text-center py-1.5 px-2">Días</th>
+                                        <th className="text-center py-1.5 px-2">Nivel</th>
+                                        <th className="text-right py-1.5 px-2">Importe</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border/40">
+                                    {sends.map(p => (
+                                        <tr key={p.invoice.id}>
+                                            <td className="py-1.5 px-2 font-mono">{p.invoice.invoice_number || p.invoice.id.slice(0, 6)}</td>
+                                            <td className="py-1.5 px-2">{p.invoice.contact_name}</td>
+                                            <td className="py-1.5 px-2 text-muted-foreground truncate max-w-[180px]">{p.invoice.contact_email || <span className="text-red-500 italic">sin email</span>}</td>
+                                            <td className="py-1.5 px-2 text-center font-semibold">{p.days_overdue}</td>
+                                            <td className="py-1.5 px-2 text-center">
+                                                <span className="inline-flex px-1.5 rounded bg-primary/10 text-primary font-semibold">N{p.level}</span>
+                                            </td>
+                                            <td className="py-1.5 px-2 text-right font-semibold">{formatCurrency(p.invoice.amount, p.invoice.currency)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                    {skips.length > 0 && (
+                        <div>
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                                Se omitirán ({skips.length})
+                            </p>
+                            <table className="w-full text-xs">
+                                <tbody className="divide-y divide-border/40">
+                                    {skips.map(p => (
+                                        <tr key={p.invoice.id}>
+                                            <td className="py-1 px-2 font-mono text-muted-foreground">{p.invoice.invoice_number || p.invoice.id.slice(0, 6)}</td>
+                                            <td className="py-1 px-2 text-muted-foreground">{p.invoice.contact_name}</td>
+                                            <td className="py-1 px-2 text-muted-foreground text-[11px] italic">{p.reason}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                    {plan.length === 0 && (
+                        <p className="text-center text-sm text-muted-foreground py-8">
+                            No hay facturas vencidas que requieran recordatorio ahora mismo.
+                        </p>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function TestSendModal({ onClose }: { onClose: () => void }) {
+    const [templateId, setTemplateId] = useState('');
+    const [email, setEmail] = useState('');
+
+    const { data: templatesData } = useQuery({
+        queryKey: ['dunning', 'templates'],
+        queryFn: () => dunningApi.listTemplates(),
+    });
+
+    const sendMutation = useMutation({
+        mutationFn: () => dunningApi.testSend({ template_id: templateId, to_email: email }),
+    });
+
+    const templates = templatesData?.templates || [];
+
+    return (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-card rounded-xl border shadow-2xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-3 border-b flex items-center justify-between">
+                    <h3 className="text-base font-bold text-foreground">Enviar recordatorio de prueba</h3>
+                    <button onClick={onClose} className="p-1 rounded hover:bg-muted"><X size={16} /></button>
+                </div>
+                <div className="p-5 space-y-3">
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Plantilla</label>
+                        <select
+                            value={templateId}
+                            onChange={e => setTemplateId(e.target.value)}
+                            className="w-full text-sm px-3 py-2 rounded border bg-background"
+                        >
+                            <option value="">Selecciona una plantilla…</option>
+                            {templates.filter(t => t.active).map(t => (
+                                <option key={t.id} value={t.id}>Nivel {t.level} · {t.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Enviar a</label>
+                        <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@email.com" />
+                        <p className="text-[11px] text-muted-foreground mt-1">Se rellenará con datos de ejemplo. El asunto llevará prefijo [PRUEBA].</p>
+                    </div>
+                    {sendMutation.isSuccess && (
+                        <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-3 flex items-start gap-2">
+                            <Check className="text-emerald-600 shrink-0 mt-0.5" size={14} />
+                            <p className="text-xs text-emerald-900 dark:text-emerald-200">Email enviado a {sendMutation.data?.to}</p>
+                        </div>
+                    )}
+                    {sendMutation.isError && (
+                        <div className="rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 p-3 flex items-start gap-2">
+                            <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={14} />
+                            <p className="text-xs text-red-900 dark:text-red-200">{String(sendMutation.error)}</p>
+                        </div>
+                    )}
+                    <div className="flex justify-end gap-2 pt-2">
+                        <Button variant="outline" onClick={onClose}>Cerrar</Button>
+                        <Button
+                            onClick={() => sendMutation.mutate()}
+                            disabled={!templateId || !email || sendMutation.isPending}
+                        >
+                            {sendMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Send size={14} className="mr-2" />}
+                            Enviar prueba
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function RunResultsModal({ results, dryRun, onClose }: { results: RunResult[]; dryRun: boolean; onClose: () => void }) {
+    const sent = results.filter(r => r.status === 'sent').length;
+    const failed = results.filter(r => r.status === 'failed').length;
+    const skipped = results.filter(r => r.status === 'skipped').length;
+    return (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-card rounded-xl border shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-3 border-b flex items-center justify-between">
+                    <div>
+                        <h3 className="text-base font-bold text-foreground">
+                            {dryRun ? 'Resultado del dry-run' : 'Envío completado'}
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                            {dryRun ? `${results.length} envíos simulados` : `${sent} enviados · ${failed} fallidos · ${skipped} omitidos`}
+                        </p>
+                    </div>
+                    <button onClick={onClose} className="p-1 rounded hover:bg-muted"><X size={16} /></button>
+                </div>
+                <div className="overflow-y-auto flex-1 p-4">
+                    {results.length === 0 ? (
+                        <p className="text-center text-sm text-muted-foreground py-8">No había nada que enviar.</p>
+                    ) : (
+                        <div className="space-y-1.5">
+                            {results.map((r, i) => (
+                                <div key={i} className="flex items-center gap-2 text-xs">
+                                    {r.status === 'sent' && <Check size={14} className="text-emerald-500 shrink-0" />}
+                                    {r.status === 'would-send' && <Play size={14} className="text-blue-500 shrink-0" />}
+                                    {r.status === 'failed' && <X size={14} className="text-red-500 shrink-0" />}
+                                    {r.status === 'skipped' && <Info size={14} className="text-muted-foreground shrink-0" />}
+                                    <span className="font-mono">{r.invoice_id.slice(0, 12)}</span>
+                                    <span className="text-muted-foreground">·</span>
+                                    <span className="capitalize">{r.status}</span>
+                                    {r.level && <span className="text-muted-foreground">· N{r.level}</span>}
+                                    {r.to && <span className="text-muted-foreground truncate">→ {r.to}</span>}
+                                    {r.reason && <span className="text-muted-foreground italic">({r.reason})</span>}
+                                    {r.error && <span className="text-red-600 truncate">{r.error}</span>}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function RunTab({ config }: { config: DunningConfigType }) {
+    const [preview, setPreview] = useState<{ plan: PlanItem[]; summary: PlanSummary } | null>(null);
+    const [showTestSend, setShowTestSend] = useState(false);
+    const [runResults, setRunResults] = useState<{ results: RunResult[]; dryRun: boolean } | null>(null);
+
+    const previewMutation = useMutation({
+        mutationFn: () => dunningApi.previewRun(),
+        onSuccess: (data) => setPreview({ plan: data.plan, summary: data.summary }),
+    });
+
+    const runMutation = useMutation({
+        mutationFn: (dryRun: boolean) => dunningApi.run({ dry_run: dryRun, force: !config.enabled }),
+        onSuccess: (data) => setRunResults({ results: data.executed, dryRun: data.dry_run }),
+    });
+
+    const syncMutation = useMutation({
+        mutationFn: () => dunningApi.syncPaid(),
+    });
+
+    return (
+        <>
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-base">Ejecutar bajo demanda</CardTitle>
+                    <p className="text-xs text-muted-foreground">
+                        Herramientas manuales para probar y disparar el flujo sin esperar al cron automático.
+                    </p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    {!config.enabled && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900 p-3 flex items-start gap-2">
+                            <AlertTriangle className="text-amber-600 shrink-0 mt-0.5" size={14} />
+                            <p className="text-xs text-amber-900 dark:text-amber-200">
+                                El sistema está desactivado. Aún así puedes ejecutar envíos manuales desde aquí (se aplica <code>force=true</code>).
+                            </p>
+                        </div>
+                    )}
+
+                    <ActionRow
+                        icon={Eye}
+                        title="Ver qué se enviaría ahora"
+                        description="No envía nada. Solo muestra la lista de facturas que tocarían y en qué nivel."
+                        action={
+                            <Button variant="outline" onClick={() => previewMutation.mutate()} disabled={previewMutation.isPending}>
+                                {previewMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Eye size={14} className="mr-2" />}
+                                Ver preview
+                            </Button>
+                        }
+                    />
+
+                    <ActionRow
+                        icon={Send}
+                        title="Enviar recordatorio de prueba"
+                        description="Envía una plantilla concreta a tu email con datos de ejemplo. No toca la BD."
+                        action={
+                            <Button variant="outline" onClick={() => setShowTestSend(true)}>
+                                <Send size={14} className="mr-2" />
+                                Enviar prueba
+                            </Button>
+                        }
+                    />
+
+                    <ActionRow
+                        icon={RefreshCw}
+                        title="Sincronizar cobros desde Holded"
+                        description="Cruza casos abiertos contra Holded. Cierra los que ya estén pagados y calcula días hasta cobro."
+                        action={
+                            <Button variant="outline" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+                                {syncMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <RefreshCw size={14} className="mr-2" />}
+                                {syncMutation.isSuccess ? `${syncMutation.data.closed} cerrados` : 'Sincronizar'}
+                            </Button>
+                        }
+                    />
+
+                    <ActionRow
+                        danger
+                        icon={Zap}
+                        title="Ejecutar envíos ahora"
+                        description="Envía TODOS los recordatorios que tocan según el plan. Registra cada envío en el histórico."
+                        action={
+                            <div className="flex gap-2">
+                                <Button variant="outline" onClick={() => runMutation.mutate(true)} disabled={runMutation.isPending}>
+                                    Dry-run
+                                </Button>
+                                <Button
+                                    onClick={() => {
+                                        if (confirm('Se enviarán los recordatorios reales a los clientes. ¿Continuar?')) {
+                                            runMutation.mutate(false);
+                                        }
+                                    }}
+                                    disabled={runMutation.isPending}
+                                >
+                                    {runMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Zap size={14} className="mr-2" />}
+                                    Ejecutar ahora
+                                </Button>
+                            </div>
+                        }
+                    />
+                </CardContent>
+            </Card>
+
+            {preview && <PreviewModal plan={preview.plan} summary={preview.summary} onClose={() => setPreview(null)} />}
+            {showTestSend && <TestSendModal onClose={() => setShowTestSend(false)} />}
+            {runResults && <RunResultsModal results={runResults.results} dryRun={runResults.dryRun} onClose={() => setRunResults(null)} />}
+        </>
+    );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DunningConfig() {
@@ -552,6 +881,7 @@ export default function DunningConfig() {
                     {tab === 'rules' && <RulesTab config={config} onSave={p => saveMutation.mutate(p)} saving={saveMutation.isPending} />}
                     {tab === 'schedule' && <ScheduleTab config={config} onSave={p => saveMutation.mutate(p)} saving={saveMutation.isPending} />}
                     {tab === 'templates' && <TemplatesTab />}
+                    {tab === 'run' && <RunTab config={config} />}
                 </>
             )}
         </div>
