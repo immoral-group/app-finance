@@ -5,6 +5,7 @@ import { renderDunningEmail, SAMPLE_VARS } from '../lib/dunningRenderer.js';
 import { renderDunningEmailV2, SAMPLE_INVOICE } from '../lib/dunningEmailV2.js';
 import { buildDunningPlan, summarizePlan, holdedFetch } from '../lib/dunningWorker.js';
 import { createCheckoutSession, isConfigured as isStripeConfigured } from '../lib/stripe.js';
+import { LOGO_BASE64 } from '../lib/dunningLogo.js';
 
 const router = express.Router();
 
@@ -70,6 +71,24 @@ async function requireSuperAdmin(req, res, next) {
 // Vercel Cron llama a estos endpoints con el header
 //   Authorization: Bearer ${CRON_SECRET}
 // El resto de rutas (`/dunning/*`) requieren superadmin (ver más abajo).
+
+// GET /dunning/logo — sirve el PNG del logo. Público (sin auth) para que
+// funcione como <img src> en los emails. Se sirve desde el base64 embebido
+// para no depender del filesystem de Vercel serverless.
+router.get('/logo', (_req, res) => {
+    try {
+        const dataUri = String(LOGO_BASE64);
+        const commaIdx = dataUri.indexOf(',');
+        if (commaIdx < 0) return res.status(500).send('logo-not-available');
+        const b64 = dataUri.slice(commaIdx + 1);
+        const buf = Buffer.from(b64, 'base64');
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.status(200).end(buf);
+    } catch (err) {
+        res.status(500).send('logo-error');
+    }
+});
 
 function requireCronSecret(req, res, next) {
     const secret = process.env.CRON_SECRET;

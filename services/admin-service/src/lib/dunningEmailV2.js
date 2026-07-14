@@ -3,20 +3,19 @@
 // CTA Stripe, botones de bancos configurables, copies estructurados y firma.
 // Compatible con Gmail/Outlook (table-based + inline styles).
 
-import { LOGO_BASE64 } from './dunningLogo.js';
-
-// Detecta URLs de default vacías o que aún no están disponibles (preview branches
-// donde imfinance.immoral.es aún no sirve el logo). En esos casos usamos el
-// logo embebido en base64 para asegurar que siempre se ve.
+// Gmail y muchos clientes de email bloquean `data:` URIs por seguridad. Por eso
+// no podemos incrustar el logo en base64 dentro del email. Servimos el logo
+// desde un endpoint público del propio backend: `GET /api/admin/dunning/logo`.
+// La URL del deploy actual se obtiene de env vars que Vercel expone.
 function resolveLogoSrc(url) {
-    if (!url) return LOGO_BASE64;
-    const trimmed = String(url).trim();
-    if (!trimmed) return LOGO_BASE64;
-    // Si el user pone una URL propia (imgur, cloudinary, etc.), la respetamos.
-    // Si es la URL default de producción, usamos el embed para que funcione
-    // también en previews y localhost.
-    if (trimmed === 'https://imfinance.immoral.es/logo.png') return LOGO_BASE64;
-    return trimmed;
+    const configured = String(url || '').trim();
+    // Si el user configuró una URL propia (que NO sea la default de prod), usarla.
+    if (configured && configured !== 'https://imfinance.immoral.es/logo.png') return configured;
+
+    const base = process.env.APP_URL
+        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+        || 'https://imfinance.immoral.es';
+    return `${base}/api/admin/dunning/logo`;
 }
 
 const escapeHtml = (s) => String(s ?? '')
