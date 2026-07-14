@@ -921,4 +921,32 @@ router.post('/sync-paid', async (_req, res) => {
     }
 });
 
+// ── POST /dunning/reset-test-data ─────────────────────────────────────────────
+// Borra el histórico de recordatorios y casos para poder volver a ejecutar
+// la prueba desde cero. Solo permitido si test_mode está ACTIVO — protección
+// para no borrar histórico real por accidente.
+router.post('/reset-test-data', async (_req, res) => {
+    try {
+        const { data: config } = await supabase.from('dunning_config').select('test_mode').eq('id', 1).single();
+        if (!config?.test_mode) {
+            return res.status(400).json({
+                error: 'not-in-test-mode',
+                hint: 'Activa el modo prueba antes de resetear datos (protección contra borrado accidental).',
+            });
+        }
+        const { count: remindersDeleted } = await supabase
+            .from('dunning_reminders').delete({ count: 'exact' }).not('id', 'is', null);
+        const { count: casesDeleted } = await supabase
+            .from('dunning_cases').delete({ count: 'exact' }).not('id', 'is', null);
+        res.json({
+            success: true,
+            reminders_deleted: remindersDeleted || 0,
+            cases_deleted: casesDeleted || 0,
+        });
+    } catch (err) {
+        console.error('[dunning] reset-test-data error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 export default router;

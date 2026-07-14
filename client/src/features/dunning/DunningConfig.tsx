@@ -237,7 +237,20 @@ function BrandTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                         <Input value={form.brand_logo_url} onChange={e => setForm({ ...form, brand_logo_url: e.target.value })} placeholder="https://imfinance.immoral.es/logo.png" />
                         {form.brand_logo_url && (
                             <div className="mt-2 p-3 rounded-lg bg-slate-800 inline-block">
-                                <img src={form.brand_logo_url} alt="Logo preview" style={{ maxHeight: 34 }} />
+                                <img
+                                    src={form.brand_logo_url}
+                                    alt="Logo preview"
+                                    style={{ maxHeight: 34 }}
+                                    onError={(e) => {
+                                        // Fallback: si la URL configurada da 404 (ej. dominio de prod
+                                        // que aún no sirve el logo), usamos /logo.png del deploy actual.
+                                        const img = e.currentTarget;
+                                        if (!img.dataset.fallback) {
+                                            img.dataset.fallback = '1';
+                                            img.src = '/logo.png';
+                                        }
+                                    }}
+                                />
                             </div>
                         )}
                         <p className="text-[11px] text-muted-foreground mt-1">
@@ -513,6 +526,25 @@ function ActionRow({ title, description, action, icon: Icon, danger = false }: {
     );
 }
 
+function humanizeReason(reason: string): string {
+    if (!reason) return '';
+    if (reason.startsWith('waiting-repeat-')) {
+        const [, num, den] = reason.match(/waiting-repeat-(\d+)\/(\d+)/) || [];
+        return `Nivel 3 enviado hace ${num} días — se repetirá cuando lleguen a ${den}`;
+    }
+    if (reason === 'level-1-already-sent') return 'Nivel 1 ya enviado (no se repite)';
+    if (reason === 'level-2-already-sent') return 'Nivel 2 ya enviado (no se repite)';
+    if (reason === 'level-3-already-sent') return 'Nivel 3 ya enviado';
+    if (reason === 'not-overdue-enough') return 'Aún no lleva suficientes días vencida';
+    if (reason === 'already-paid') return 'Factura ya cobrada';
+    if (reason === 'cancelled') return 'Caso cancelado';
+    if (reason === 'no-email') return 'Sin email destino';
+    if (reason === 'no-template') return 'No hay plantilla activa para este nivel';
+    if (reason === 'first-time') return 'Primer envío';
+    if (reason.startsWith('repeat-after-')) return `Repetición (${reason.replace('repeat-after-', '')})`;
+    return reason;
+}
+
 function PreviewModal({ plan, summary, testMode, testModeEmail, onClose }: {
     plan: PlanItem[]; summary: PlanSummary; testMode: boolean; testModeEmail: string | null; onClose: () => void;
 }) {
@@ -588,7 +620,7 @@ function PreviewModal({ plan, summary, testMode, testModeEmail, onClose }: {
                                         <tr key={p.invoice.id}>
                                             <td className="py-1 px-2 font-mono text-muted-foreground">{p.invoice.invoice_number || p.invoice.id.slice(0, 6)}</td>
                                             <td className="py-1 px-2 text-muted-foreground">{p.invoice.contact_name}</td>
-                                            <td className="py-1 px-2 text-muted-foreground text-[11px] italic">{p.reason}</td>
+                                            <td className="py-1 px-2 text-muted-foreground text-[11px] italic">{humanizeReason(p.reason)}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -728,7 +760,7 @@ function RunResultsModal({ results, dryRun, onClose }: { results: RunResult[]; d
                                             ) : '—'}
                                         </td>
                                         <td className="py-1.5 px-2">
-                                            {r.reason && <span className="text-muted-foreground italic">{r.reason}</span>}
+                                            {r.reason && <span className="text-muted-foreground italic">{humanizeReason(r.reason)}</span>}
                                             {r.error && <span className="text-red-600">{r.error}</span>}
                                             {r.status === 'sent' && !r.error && <span className="text-emerald-600">Enviado</span>}
                                             {r.status === 'would-send' && <span className="text-blue-600">Iría a este destino</span>}
@@ -919,6 +951,7 @@ function RunTab({ config }: { config: DunningConfigType }) {
     });
 
     const syncMutation = useMutation({ mutationFn: () => dunningApi.syncPaid() });
+    const resetMutation = useMutation({ mutationFn: () => dunningApi.resetTestData() });
 
     return (
         <div className="space-y-4">
@@ -969,6 +1002,22 @@ function RunTab({ config }: { config: DunningConfigType }) {
                             </Button>
                         }
                     />
+
+                    {config.test_mode && (
+                        <ActionRow icon={RefreshCw} title="Resetear datos de prueba"
+                            description="Borra TODO el histórico de recordatorios y casos, para poder volver a ejecutar los mismos envíos como si fueran nuevos. Solo funciona en modo prueba."
+                            action={
+                                <Button variant="outline" onClick={() => {
+                                    if (confirm('Se borrarán TODOS los recordatorios y casos registrados. Esto es solo para pruebas — se te permitirá volver a enviar los mismos. ¿Continuar?')) {
+                                        resetMutation.mutate();
+                                    }
+                                }} disabled={resetMutation.isPending}>
+                                    {resetMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <RefreshCw size={14} className="mr-2" />}
+                                    {resetMutation.isSuccess ? `Borrados: ${resetMutation.data.reminders_deleted} rec + ${resetMutation.data.cases_deleted} casos` : 'Resetear'}
+                                </Button>
+                            }
+                        />
+                    )}
 
                     <ActionRow danger icon={Zap} title="Ejecutar envíos ahora"
                         description="Envía TODOS los recordatorios que tocan según el plan. Genera links Stripe y registra cada envío en el histórico."

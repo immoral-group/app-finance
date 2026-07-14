@@ -286,4 +286,9 @@ export const dunningApi = {
         fetchApi<{ success: boolean }>(`/dunning/overrides/${encodeURIComponent(contact_id)}`, {
             method: 'DELETE',
         }),
+
+    resetTestData: () =>
+        fetchApi<{ success: boolean; reminders_deleted: number; cases_deleted: number }>('/dunning/reset-test-data', {
+            method: 'POST',
+        }),
 };
