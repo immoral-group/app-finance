@@ -66,6 +66,339 @@ async function requireSuperAdmin(req, res, next) {
     next();
 }
 
+// ── Cron auth + endpoints ─────────────────────────────────────────────────────
+// Vercel Cron llama a estos endpoints con el header
+//   Authorization: Bearer ${CRON_SECRET}
+// El resto de rutas (`/dunning/*`) requieren superadmin (ver más abajo).
+
+function requireCronSecret(req, res, next) {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(500).json({ error: 'cron-secret-not-set' });
+    const auth = req.headers.authorization || '';
+    const provided = auth.startsWith('Bearer ') ? auth.slice(7) : req.query.secret;
+    if (provided !== secret) return res.status(401).json({ error: 'invalid-cron-secret' });
+    next();
+}
+
+// Detecta si estamos en el día/hora configurados según la timezone de config.
+function isCronScheduledNow(config, now = new Date()) {
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: config.timezone || 'Europe/Madrid',
+            hour: 'numeric',
+            hour12: false,
+            weekday: 'short',
+        }).formatToParts(now);
+        const hour = Number(parts.find(p => p.type === 'hour')?.value || -1);
+        const weekdayShort = parts.find(p => p.type === 'weekday')?.value || '';
+        const DAY_MAP = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        const dow = DAY_MAP[weekdayShort];
+        const hourOk = hour === Number(config.send_hour);
+        const dayOk = (config.send_days || []).includes(dow);
+        return { ok: hourOk && dayOk, local_hour: hour, local_dow: dow };
+    } catch (err) {
+        console.warn('[dunning] isCronScheduledNow error:', err.message);
+        return { ok: false, error: err.message };
+    }
+}
+
+// POST /dunning/cron/run — ejecuta el envío si toca según config.
+// Idempotente: si el cron corre 2 veces en la misma hora, la segunda no repite.
+router.post('/cron/run', requireCronSecret, async (req, res) => {
+    try {
+        const { data: config } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
+        if (!config) return res.status(500).json({ error: 'no-config' });
+
+        if (!config.enabled) {
+            return res.json({ skipped: true, reason: 'system-disabled' });
+        }
+
+        const schedule = isCronScheduledNow(config);
+        if (!schedule.ok) {
+            return res.json({ skipped: true, reason: 'not-scheduled', schedule });
+        }
+
+        // Idempotencia: si ya se ejecutó hace menos de 30 minutos, saltar.
+        if (config.last_cron_run_at) {
+            const lastMs = new Date(config.last_cron_run_at).getTime();
+            if (Date.now() - lastMs < 30 * 60 * 1000) {
+                return res.json({ skipped: true, reason: 'ran-recently', last_cron_run_at: config.last_cron_run_at });
+            }
+        }
+
+        // Reutilizamos la lógica del endpoint superadmin haciendo una petición interna
+        // en el mismo Express app no es directo; en su lugar ejecutamos la misma
+        // secuencia inline. Cambios importantes están en executeSend abajo.
+        const result = await executeSend({ dryRun: false, config });
+
+        // Actualizar timestamps de trazabilidad.
+        await supabase.from('dunning_config').update({
+            last_cron_run_at: new Date().toISOString(),
+            last_cron_status: 'ok',
+            last_cron_summary: {
+                sent: result.executed.filter(r => r.status === 'sent').length,
+                failed: result.executed.filter(r => r.status === 'failed').length,
+                skipped: result.executed.filter(r => r.status === 'skipped').length,
+                summary: result.summary,
+            },
+        }).eq('id', 1);
+
+        res.json({ ok: true, ...result });
+    } catch (err) {
+        console.error('[dunning] cron/run error:', err);
+        await supabase.from('dunning_config').update({
+            last_cron_run_at: new Date().toISOString(),
+            last_cron_status: `error: ${String(err.message || err).slice(0, 200)}`,
+        }).eq('id', 1).then(() => {}, () => {});
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /dunning/cron/sync-paid — sincroniza cobros diariamente.
+router.post('/cron/sync-paid', requireCronSecret, async (_req, res) => {
+    try {
+        const result = await runSyncPaid();
+        await supabase.from('dunning_config').update({
+            last_sync_paid_at: new Date().toISOString(),
+        }).eq('id', 1);
+        res.json({ ok: true, ...result });
+    } catch (err) {
+        console.error('[dunning] cron/sync-paid error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
+// ── Lógica compartida: ejecución de envíos y sync-paid ──────────────────────
+// Se llama desde el endpoint superadmin `/run` y desde `/cron/run`.
+// (Function declarations están hoisted, se pueden usar desde arriba.)
+
+async function executeSend({ dryRun = false, forcedConfig = null }) {
+    const { plan, config, templates } = await buildDunningPlan({ supabase });
+    const activeConfig = forcedConfig || config;
+
+    const tplByLevel = new Map();
+    for (const t of templates) if (t.active && !tplByLevel.has(t.level)) tplByLevel.set(t.level, t);
+
+    const { data: overridesRows } = await supabase
+        .from('dunning_email_overrides').select('contact_id, override_email');
+    const overrideByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_email]));
+
+    const results = [];
+    const toSend = plan.filter(p => p.action === 'send');
+
+    for (const item of toSend) {
+        const template = tplByLevel.get(item.level);
+        if (!template) {
+            results.push({
+                invoice_id: item.invoice.id,
+                invoice_number: item.invoice.invoice_number,
+                contact_name: item.invoice.contact_name,
+                status: 'skipped',
+                reason: 'no-template',
+            });
+            continue;
+        }
+        const originalEmail = item.invoice.contact_email;
+        const overrideEmail = overrideByContact.get(item.invoice.contact_id);
+        let destEmail = originalEmail;
+        let redirect_reason = null;
+        if (activeConfig.test_mode && activeConfig.test_mode_email) {
+            destEmail = activeConfig.test_mode_email;
+            redirect_reason = 'test_mode';
+        } else if (overrideEmail) {
+            destEmail = overrideEmail;
+            redirect_reason = 'override';
+        }
+        if (!destEmail) {
+            results.push({
+                invoice_id: item.invoice.id,
+                invoice_number: item.invoice.invoice_number,
+                contact_name: item.invoice.contact_name,
+                status: 'skipped',
+                reason: 'no-email',
+            });
+            continue;
+        }
+        if (dryRun) {
+            results.push({
+                invoice_id: item.invoice.id,
+                invoice_number: item.invoice.invoice_number,
+                contact_name: item.invoice.contact_name,
+                status: 'would-send',
+                level: item.level,
+                to: destEmail,
+                original_to: originalEmail,
+                redirect_reason,
+            });
+            continue;
+        }
+
+        try {
+            const { data: caseRow, error: caseErr } = await supabase
+                .from('dunning_cases')
+                .upsert({
+                    invoice_id: item.invoice.id,
+                    invoice_number: item.invoice.invoice_number,
+                    contact_id: item.invoice.contact_id,
+                    contact_name: item.invoice.contact_name,
+                    contact_email: item.invoice.contact_email,
+                    amount: item.invoice.amount,
+                    currency: item.invoice.currency,
+                    invoice_date: item.invoice.invoice_date ? new Date(item.invoice.invoice_date).toISOString() : null,
+                    due_date: item.invoice.due_date ? new Date(item.invoice.due_date).toISOString() : null,
+                    status: 'open',
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: 'invoice_id' })
+                .select().single();
+            if (caseErr) throw new Error(caseErr.message);
+
+            let stripe_session_id = null;
+            let stripe_url = null;
+            if (isStripeConfigured() && Number(item.invoice.amount) > 0) {
+                try {
+                    const session = await createCheckoutSession({
+                        amountCents: Math.round(Number(item.invoice.amount) * 100),
+                        currency: (item.invoice.currency || 'EUR').toLowerCase(),
+                        concept: `Factura ${item.invoice.invoice_number || item.invoice.id}`,
+                        customerEmail: item.invoice.contact_email,
+                        metadata: {
+                            source: 'dunning',
+                            dunning_level: String(item.level),
+                            holded_invoice_id: item.invoice.id,
+                            holded_doc_number: item.invoice.invoice_number || '',
+                            days_overdue: String(item.days_overdue),
+                        },
+                    });
+                    stripe_session_id = session.id;
+                    stripe_url = session.url;
+                } catch (stripeErr) {
+                    console.warn('[dunning] Stripe checkout failed:', stripeErr.message);
+                }
+            }
+
+            const rendered = renderDunningEmailV2({
+                config: activeConfig,
+                template,
+                invoice: {
+                    contact_name: item.invoice.contact_name,
+                    invoice_number: item.invoice.invoice_number,
+                    invoice_date: item.invoice.invoice_date ? new Date(item.invoice.invoice_date).toLocaleDateString('es-ES') : '',
+                    due_date: item.invoice.due_date ? new Date(item.invoice.due_date).toLocaleDateString('es-ES') : '',
+                    days_overdue: item.days_overdue,
+                    amount: item.invoice.amount,
+                    currency: item.invoice.currency || 'EUR',
+                },
+                stripe_url,
+                test_context: redirect_reason ? {
+                    original_email: originalEmail,
+                    contact_name: item.invoice.contact_name,
+                } : null,
+            });
+
+            const info = await getTransporter().sendMail({
+                from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
+                to: destEmail,
+                bcc: activeConfig.bcc_email || undefined,
+                subject: redirect_reason ? `[${redirect_reason === 'test_mode' ? 'PRUEBA' : 'REDIRIGIDO'}] ${rendered.subject}` : rendered.subject,
+                html: rendered.html,
+            });
+
+            await supabase.from('dunning_reminders').insert({
+                case_id: caseRow.id,
+                invoice_id: item.invoice.id,
+                level: item.level,
+                template_id: template.id,
+                days_overdue: item.days_overdue,
+                sent_to: destEmail,
+                subject: rendered.subject,
+                body_html_snapshot: rendered.html,
+                smtp_message_id: info.messageId || null,
+                stripe_session_id,
+                stripe_payment_url: stripe_url,
+                status: 'sent',
+            });
+
+            await supabase.from('dunning_cases').update({
+                reminders_count: (caseRow.reminders_count || 0) + 1,
+                last_reminder_at: new Date().toISOString(),
+                last_reminder_level: item.level,
+                first_reminder_at: caseRow.first_reminder_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            }).eq('id', caseRow.id);
+
+            results.push({
+                invoice_id: item.invoice.id,
+                invoice_number: item.invoice.invoice_number,
+                contact_name: item.invoice.contact_name,
+                status: 'sent',
+                level: item.level,
+                to: destEmail,
+                original_to: originalEmail,
+                redirect_reason,
+            });
+        } catch (sendErr) {
+            console.error('[dunning] send failed for invoice', item.invoice.id, sendErr);
+            try {
+                const { data: caseRow } = await supabase
+                    .from('dunning_cases').select('id').eq('invoice_id', item.invoice.id).maybeSingle();
+                if (caseRow) {
+                    await supabase.from('dunning_reminders').insert({
+                        case_id: caseRow.id,
+                        invoice_id: item.invoice.id,
+                        level: item.level,
+                        template_id: template.id,
+                        days_overdue: item.days_overdue,
+                        sent_to: item.invoice.contact_email || 'unknown',
+                        status: 'failed',
+                        error_message: String(sendErr.message || sendErr).slice(0, 500),
+                    });
+                }
+            } catch { /* ignore */ }
+            results.push({
+                invoice_id: item.invoice.id,
+                invoice_number: item.invoice.invoice_number,
+                contact_name: item.invoice.contact_name,
+                status: 'failed',
+                error: String(sendErr.message || sendErr),
+            });
+        }
+    }
+
+    return {
+        dry_run: dryRun,
+        summary: summarizePlan(plan),
+        executed: results,
+    };
+}
+
+async function runSyncPaid() {
+    const { data: openCases, error } = await supabase
+        .from('dunning_cases').select('*').eq('status', 'open');
+    if (error) throw new Error(error.message);
+    if (!openCases?.length) return { closed: 0, checked: 0 };
+
+    const paidRes = await holdedFetch('/documents/invoice?paid=1');
+    const paidIds = new Set((Array.isArray(paidRes) ? paidRes : []).map(inv => inv.id));
+
+    let closed = 0;
+    for (const c of openCases) {
+        if (!paidIds.has(c.invoice_id)) continue;
+        const nowIso = new Date().toISOString();
+        const first = c.first_reminder_at ? new Date(c.first_reminder_at).getTime() : Date.now();
+        const daysToPay = Math.max(0, Math.floor((Date.now() - first) / 86_400_000));
+        await supabase.from('dunning_cases').update({
+            status: 'paid',
+            paid_at: nowIso,
+            days_to_pay: daysToPay,
+            updated_at: nowIso,
+        }).eq('id', c.id);
+        closed++;
+    }
+    return { checked: openCases.length, closed };
+}
+
+
 router.use(requireSuperAdmin);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -557,254 +890,31 @@ router.post('/run', async (req, res) => {
             return res.status(500).json({ error: 'smtp-not-configured' });
         }
 
-        const { plan, config, templates } = await buildDunningPlan({ supabase });
-
-        if (!force && !config.enabled) {
+        const { data: cfg } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
+        if (!force && !cfg?.enabled) {
             return res.status(400).json({
                 error: 'system-disabled',
                 hint: 'Activa el sistema en configuración o usa force=true para una ejecución manual puntual.',
             });
         }
 
-        const tplByLevel = new Map();
-        for (const t of templates) if (t.active && !tplByLevel.has(t.level)) tplByLevel.set(t.level, t);
-
-        // Overrides por contact_id (mapa contact_id → override_email)
-        const { data: overridesRows } = await supabase
-            .from('dunning_email_overrides').select('contact_id, override_email');
-        const overrideByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_email]));
-
-        const results = [];
-        const toSend = plan.filter(p => p.action === 'send');
-
-        for (const item of toSend) {
-            const template = tplByLevel.get(item.level);
-            if (!template) {
-                results.push({
-                    invoice_id: item.invoice.id,
-                    invoice_number: item.invoice.invoice_number,
-                    contact_name: item.invoice.contact_name,
-                    status: 'skipped',
-                    reason: 'no-template',
-                });
-                continue;
-            }
-            // Precedencia de destino: test_mode > override_email > email real del cliente.
-            // Se calcula ANTES del skip por no-email: en test_mode/override el destino es
-            // válido aunque el cliente no tenga email en Holded.
-            const originalEmail = item.invoice.contact_email;
-            const overrideEmail = overrideByContact.get(item.invoice.contact_id);
-            let destEmail = originalEmail;
-            let redirect_reason = null;
-            if (config.test_mode && config.test_mode_email) {
-                destEmail = config.test_mode_email;
-                redirect_reason = 'test_mode';
-            } else if (overrideEmail) {
-                destEmail = overrideEmail;
-                redirect_reason = 'override';
-            }
-
-            if (!destEmail) {
-                results.push({
-                    invoice_id: item.invoice.id,
-                    invoice_number: item.invoice.invoice_number,
-                    contact_name: item.invoice.contact_name,
-                    status: 'skipped',
-                    reason: 'no-email',
-                });
-                continue;
-            }
-
-            if (dryRun) {
-                results.push({
-                    invoice_id: item.invoice.id,
-                    invoice_number: item.invoice.invoice_number,
-                    contact_name: item.invoice.contact_name,
-                    status: 'would-send',
-                    level: item.level,
-                    to: destEmail,
-                    original_to: originalEmail,
-                    redirect_reason,
-                });
-                continue;
-            }
-
-            try {
-                // Upsert del caso — invoice_id es UNIQUE.
-                const { data: caseRow, error: caseErr } = await supabase
-                    .from('dunning_cases')
-                    .upsert({
-                        invoice_id: item.invoice.id,
-                        invoice_number: item.invoice.invoice_number,
-                        contact_id: item.invoice.contact_id,
-                        contact_name: item.invoice.contact_name,
-                        contact_email: item.invoice.contact_email,
-                        amount: item.invoice.amount,
-                        currency: item.invoice.currency,
-                        invoice_date: item.invoice.invoice_date ? new Date(item.invoice.invoice_date).toISOString() : null,
-                        due_date: item.invoice.due_date ? new Date(item.invoice.due_date).toISOString() : null,
-                        status: 'open',
-                        updated_at: new Date().toISOString(),
-                    }, { onConflict: 'invoice_id' })
-                    .select()
-                    .single();
-                if (caseErr) throw new Error(caseErr.message);
-
-                // Generar link Stripe (opcional — si Stripe no está configurado, se envía sin botón).
-                let stripe_session_id = null;
-                let stripe_url = null;
-                if (isStripeConfigured() && Number(item.invoice.amount) > 0) {
-                    try {
-                        const session = await createCheckoutSession({
-                            amountCents: Math.round(Number(item.invoice.amount) * 100),
-                            currency: (item.invoice.currency || 'EUR').toLowerCase(),
-                            concept: `Factura ${item.invoice.invoice_number || item.invoice.id}`,
-                            customerEmail: item.invoice.contact_email,
-                            metadata: {
-                                source: 'dunning',
-                                dunning_level: String(item.level),
-                                holded_invoice_id: item.invoice.id,
-                                holded_doc_number: item.invoice.invoice_number || '',
-                                days_overdue: String(item.days_overdue),
-                            },
-                        });
-                        stripe_session_id = session.id;
-                        stripe_url = session.url;
-                    } catch (stripeErr) {
-                        console.warn('[dunning] Stripe checkout failed, sending without card button:', stripeErr.message);
-                    }
-                }
-
-                const rendered = renderDunningEmailV2({
-                    config,
-                    template,
-                    invoice: {
-                        contact_name: item.invoice.contact_name,
-                        invoice_number: item.invoice.invoice_number,
-                        invoice_date: item.invoice.invoice_date ? new Date(item.invoice.invoice_date).toLocaleDateString('es-ES') : '',
-                        due_date: item.invoice.due_date ? new Date(item.invoice.due_date).toLocaleDateString('es-ES') : '',
-                        days_overdue: item.days_overdue,
-                        amount: item.invoice.amount,
-                        currency: item.invoice.currency || 'EUR',
-                    },
-                    stripe_url,
-                    test_context: redirect_reason ? {
-                        original_email: originalEmail,
-                        contact_name: item.invoice.contact_name,
-                    } : null,
-                });
-
-                const info = await getTransporter().sendMail({
-                    from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
-                    to: destEmail,
-                    bcc: config.bcc_email || undefined,
-                    subject: redirect_reason ? `[${redirect_reason === 'test_mode' ? 'PRUEBA' : 'REDIRIGIDO'}] ${rendered.subject}` : rendered.subject,
-                    html: rendered.html,
-                });
-
-                await supabase.from('dunning_reminders').insert({
-                    case_id: caseRow.id,
-                    invoice_id: item.invoice.id,
-                    level: item.level,
-                    template_id: template.id,
-                    days_overdue: item.days_overdue,
-                    sent_to: destEmail,
-                    subject: rendered.subject,
-                    body_html_snapshot: rendered.html,
-                    smtp_message_id: info.messageId || null,
-                    stripe_session_id,
-                    stripe_payment_url: stripe_url,
-                    status: 'sent',
-                });
-
-                await supabase.from('dunning_cases').update({
-                    reminders_count: (caseRow.reminders_count || 0) + 1,
-                    last_reminder_at: new Date().toISOString(),
-                    last_reminder_level: item.level,
-                    first_reminder_at: caseRow.first_reminder_at || new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
-                }).eq('id', caseRow.id);
-
-                results.push({
-                    invoice_id: item.invoice.id,
-                    invoice_number: item.invoice.invoice_number,
-                    contact_name: item.invoice.contact_name,
-                    status: 'sent',
-                    level: item.level,
-                    to: destEmail,
-                    original_to: originalEmail,
-                    redirect_reason,
-                });
-            } catch (sendErr) {
-                console.error('[dunning] send failed for invoice', item.invoice.id, sendErr);
-                // Registrar el fallo si tenemos el caso.
-                try {
-                    const { data: caseRow } = await supabase
-                        .from('dunning_cases').select('id').eq('invoice_id', item.invoice.id).maybeSingle();
-                    if (caseRow) {
-                        await supabase.from('dunning_reminders').insert({
-                            case_id: caseRow.id,
-                            invoice_id: item.invoice.id,
-                            level: item.level,
-                            template_id: template.id,
-                            days_overdue: item.days_overdue,
-                            sent_to: item.invoice.contact_email || 'unknown',
-                            status: 'failed',
-                            error_message: String(sendErr.message || sendErr).slice(0, 500),
-                        });
-                    }
-                } catch { /* ignore */ }
-                results.push({
-                    invoice_id: item.invoice.id,
-                    invoice_number: item.invoice.invoice_number,
-                    contact_name: item.invoice.contact_name,
-                    status: 'failed',
-                    error: String(sendErr.message || sendErr),
-                });
-            }
-        }
-
-        res.json({
-            dry_run: dryRun,
-            summary: summarizePlan(plan),
-            executed: results,
-        });
+        const result = await executeSend({ dryRun });
+        return res.json(result);
     } catch (err) {
         console.error('[dunning] run error:', err);
-        res.status(500).json({ error: err.message });
+        return res.status(500).json({ error: err.message });
     }
 });
+
+// (bloque legacy — eliminado, se sustituye por executeSend arriba)
 
 // ── POST /dunning/sync-paid ───────────────────────────────────────────────────
 // Cruza casos abiertos contra Holded. Si una factura ya está pagada, cierra
 // el caso y calcula days_to_pay (desde primer recordatorio hasta ahora).
 router.post('/sync-paid', async (_req, res) => {
     try {
-        const { data: openCases, error } = await supabase
-            .from('dunning_cases').select('*').eq('status', 'open');
-        if (error) throw new Error(error.message);
-        if (!openCases?.length) return res.json({ closed: 0, checked: 0 });
-
-        // Traer todas las facturas pagadas de Holded en una sola llamada.
-        const paidRes = await holdedFetch('/documents/invoice?paid=1');
-        const paidIds = new Set((Array.isArray(paidRes) ? paidRes : []).map(inv => inv.id));
-
-        let closed = 0;
-        for (const c of openCases) {
-            if (!paidIds.has(c.invoice_id)) continue;
-            const nowIso = new Date().toISOString();
-            const first = c.first_reminder_at ? new Date(c.first_reminder_at).getTime() : Date.now();
-            const daysToPay = Math.max(0, Math.floor((Date.now() - first) / 86_400_000));
-            await supabase.from('dunning_cases').update({
-                status: 'paid',
-                paid_at: nowIso,
-                days_to_pay: daysToPay,
-                updated_at: nowIso,
-            }).eq('id', c.id);
-            closed++;
-        }
-
-        res.json({ checked: openCases.length, closed });
+        const result = await runSyncPaid();
+        res.json(result);
     } catch (err) {
         console.error('[dunning] sync-paid error:', err);
         res.status(500).json({ error: err.message });

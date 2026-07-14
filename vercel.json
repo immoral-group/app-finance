@@ -22,5 +22,15 @@
             "source": "/(.*)",
             "destination": "/index.html"
         }
+    ],
+    "crons": [
+        {
+            "path": "/api/admin/dunning/cron/run",
+            "schedule": "0 * * * *"
+        },
+        {
+            "path": "/api/admin/dunning/cron/sync-paid",
+            "schedule": "0 6 * * *"
+        }
     ]
 }

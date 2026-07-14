@@ -177,11 +177,26 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
                     </div>
                 </div>
 
-                <div className="rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 p-3 flex items-start gap-2">
-                    <Info className="text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" size={16} />
-                    <p className="text-xs text-blue-900 dark:text-blue-200">
-                        El scheduler real (cron) se conecta en Fase 2b. Por ahora esta configuración queda guardada y puedes disparar los envíos manualmente desde la tab <em>Ejecutar</em>.
-                    </p>
+                <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-3 flex items-start gap-2">
+                    <Check className="text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" size={16} />
+                    <div className="text-xs text-emerald-900 dark:text-emerald-200">
+                        <p className="font-semibold mb-0.5">Cron activo</p>
+                        <p>
+                            Vercel Cron chequea cada hora si toca enviar. Si el <em>Sistema activo</em> está ON y hoy es uno de los días configurados a la hora indicada, se dispara el envío automáticamente.
+                            La sincronización de cobros con Holded corre a las 6:00 UTC cada día.
+                        </p>
+                        {config.last_cron_run_at && (
+                            <p className="mt-1.5 text-[11px]">
+                                Última ejecución: <strong>{new Date(config.last_cron_run_at).toLocaleString('es-ES')}</strong>
+                                {config.last_cron_status && ` · ${config.last_cron_status}`}
+                            </p>
+                        )}
+                        {config.last_sync_paid_at && (
+                            <p className="text-[11px]">
+                                Último sync-paid: <strong>{new Date(config.last_sync_paid_at).toLocaleString('es-ES')}</strong>
+                            </p>
+                        )}
+                    </div>
                 </div>
 
                 <div className="flex justify-end pt-2 border-t">

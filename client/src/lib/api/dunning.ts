@@ -52,6 +52,11 @@ export interface DunningConfig {
     brand_logo_url: string;
     test_mode: boolean;
     test_mode_email: string | null;
+    // Fase 2b: metadatos del cron
+    last_cron_run_at: string | null;
+    last_cron_status: string | null;
+    last_cron_summary: Record<string, unknown> | null;
+    last_sync_paid_at: string | null;
 }
 
 export interface DunningEmailOverride {
