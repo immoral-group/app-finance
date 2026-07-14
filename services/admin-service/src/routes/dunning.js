@@ -73,8 +73,7 @@ async function requireSuperAdmin(req, res, next) {
 // El resto de rutas (`/dunning/*`) requieren superadmin (ver más abajo).
 
 // GET /dunning/logo — sirve el PNG del logo. Público (sin auth) para que
-// funcione como <img src> en los emails. Se sirve desde el base64 embebido
-// para no depender del filesystem de Vercel serverless.
+// funcione como <img src> en los emails.
 router.get('/logo', (_req, res) => {
     try {
         const dataUri = String(LOGO_BASE64);
@@ -84,10 +83,29 @@ router.get('/logo', (_req, res) => {
         const buf = Buffer.from(b64, 'base64');
         res.setHeader('Content-Type', 'image/png');
         res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('Access-Control-Allow-Origin', '*');
         res.status(200).end(buf);
     } catch (err) {
         res.status(500).send('logo-error');
     }
+});
+
+// GET /dunning/logo-debug — endpoint diagnóstico para ver qué URL se usa en emails.
+router.get('/logo-debug', (req, res) => {
+    const host = req.get('host');
+    const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const computed = process.env.APP_URL
+        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+        || `${proto}://${host}`;
+    res.json({
+        env_APP_URL: process.env.APP_URL || null,
+        env_VERCEL_URL: process.env.VERCEL_URL || null,
+        request_host: host,
+        request_proto: proto,
+        computed_base: computed,
+        logo_full_url: `${computed}/api/admin/dunning/logo`,
+        logo_endpoint_direct: `${proto}://${host}/api/admin/dunning/logo`,
+    });
 });
 
 function requireCronSecret(req, res, next) {
@@ -148,7 +166,7 @@ router.post('/cron/run', requireCronSecret, async (req, res) => {
         // Reutilizamos la lógica del endpoint superadmin haciendo una petición interna
         // en el mismo Express app no es directo; en su lugar ejecutamos la misma
         // secuencia inline. Cambios importantes están en executeSend abajo.
-        const result = await executeSend({ dryRun: false, config });
+        const result = await executeSend({ dryRun: false, forcedConfig: config, baseUrl: computeBaseUrl(req) });
 
         // Actualizar timestamps de trazabilidad.
         await supabase.from('dunning_config').update({
@@ -192,7 +210,15 @@ router.post('/cron/sync-paid', requireCronSecret, async (_req, res) => {
 // Se llama desde el endpoint superadmin `/run` y desde `/cron/run`.
 // (Function declarations están hoisted, se pueden usar desde arriba.)
 
-async function executeSend({ dryRun = false, forcedConfig = null }) {
+function computeBaseUrl(req) {
+    if (!req) return null;
+    const host = req.get?.('host');
+    if (!host) return null;
+    const proto = req.get?.('x-forwarded-proto') || req.protocol || 'https';
+    return `${proto}://${host}`;
+}
+
+async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null }) {
     const { plan, config, templates } = await buildDunningPlan({ supabase });
     const activeConfig = forcedConfig || config;
 
@@ -300,6 +326,7 @@ async function executeSend({ dryRun = false, forcedConfig = null }) {
 
             const rendered = renderDunningEmailV2({
                 config: activeConfig,
+                base_url: baseUrl,
                 template,
                 invoice: {
                     contact_name: item.invoice.contact_name,
@@ -582,7 +609,7 @@ router.post('/preview-v2', async (req, res) => {
         // Preview usa una URL simulada. En envío real se genera Stripe live.
         const stripe_url = req.body?.stripe_url || 'https://checkout.stripe.com/preview';
 
-        const rendered = renderDunningEmailV2({ config, template, invoice, stripe_url });
+        const rendered = renderDunningEmailV2({ config, template, invoice, stripe_url, base_url: computeBaseUrl(req) });
         res.json({ ...rendered, sample_invoice: SAMPLE_INVOICE });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -832,7 +859,7 @@ router.post('/test-send', async (req, res) => {
             }
         }
 
-        const rendered = renderDunningEmailV2({ config, template, invoice, stripe_url });
+        const rendered = renderDunningEmailV2({ config, template, invoice, stripe_url, base_url: computeBaseUrl(req) });
 
         const info = await getTransporter().sendMail({
             from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
@@ -922,7 +949,7 @@ router.post('/run', async (req, res) => {
             });
         }
 
-        const result = await executeSend({ dryRun });
+        const result = await executeSend({ dryRun, baseUrl: computeBaseUrl(req) });
         return res.json(result);
     } catch (err) {
         console.error('[dunning] run error:', err);

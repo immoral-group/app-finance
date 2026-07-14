@@ -6,13 +6,15 @@
 // Gmail y muchos clientes de email bloquean `data:` URIs por seguridad. Por eso
 // no podemos incrustar el logo en base64 dentro del email. Servimos el logo
 // desde un endpoint público del propio backend: `GET /api/admin/dunning/logo`.
-// La URL del deploy actual se obtiene de env vars que Vercel expone.
-function resolveLogoSrc(url) {
+// La URL base se resuelve por orden: parámetro explícito → APP_URL → VERCEL_URL
+// → default de producción.
+function resolveLogoSrc(url, baseUrl) {
     const configured = String(url || '').trim();
     // Si el user configuró una URL propia (que NO sea la default de prod), usarla.
     if (configured && configured !== 'https://imfinance.immoral.es/logo.png') return configured;
 
-    const base = process.env.APP_URL
+    const base = baseUrl
+        || process.env.APP_URL
         || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
         || 'https://imfinance.immoral.es';
     return `${base}/api/admin/dunning/logo`;
@@ -71,7 +73,7 @@ function renderBank(bank) {
  * @param {Object} [p.test_context] Si se pasa, añade banner "MODO PRUEBA" al inicio.
  *                                  { original_email: string, contact_name?: string }
  */
-export function renderDunningEmailV2({ config, template, invoice, stripe_url, test_context }) {
+export function renderDunningEmailV2({ config, template, invoice, stripe_url, test_context, base_url }) {
     const primary = config.brand_primary_color || '#0ea5e9';
     const secondary = config.brand_secondary_color || '#1e40af';
     const gradient = `linear-gradient(135deg, ${primary} 0%, ${secondary} 100%)`;
@@ -126,7 +128,7 @@ export function renderDunningEmailV2({ config, template, invoice, stripe_url, te
       <!-- Hero -->
       <tr><td style="background:${gradient};padding:26px 28px 24px 28px;color:#ffffff;">
         <div style="margin-bottom:10px;">
-          <img src="${resolveLogoSrc(config.brand_logo_url)}" alt="${escapeHtml(config.brand_logo_text || 'Logo')}" style="max-height:34px;width:auto;display:block;" />
+          <img src="${resolveLogoSrc(config.brand_logo_url, base_url)}" alt="${escapeHtml(config.brand_logo_text || 'Logo')}" style="max-height:34px;width:auto;display:block;" />
         </div>
         <h1 style="margin:0 0 6px 0;font-size:22px;font-weight:800;line-height:1.25;color:#ffffff;">
           ${escapeHtml(heroTitle)}
