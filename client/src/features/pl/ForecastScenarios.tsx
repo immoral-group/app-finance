@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { X, Sparkles, RotateCcw, Check, Trash2, Bookmark, Users, Pencil, Wand2, CalendarRange, SlidersHorizontal, Save as SaveIcon, UserMinus, UserPlus, Plus, Coins } from 'lucide-react';
+import { X, Sparkles, RotateCcw, Check, Trash2, Bookmark, Users, Pencil, Wand2, CalendarRange, SlidersHorizontal, Save as SaveIcon, UserMinus, UserPlus, Plus, Coins, Mail, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
 // ============================================================
@@ -466,18 +466,22 @@ interface ModalProps {
     onApply: (s: ForecastScenario, fromSavedId?: string) => void;
     onUpdate: (id: string, patch: { name?: string; scenario?: ForecastScenario; shared_with_depts?: string[] }) => void;
     onDelete: (id: string, name: string) => void;
+    onShare?: (id: string, emails: string[], message: string) => Promise<void> | void;
     onClose: () => void;
 }
 
 export const ForecastScenariosModal = ({
     initial, revenueDepts, expenseDepts, revenueItems, expenseItems, targetLabel,
     savedList, canEdit, shareableDepts,
-    onApply, onUpdate, onDelete, onClose
+    onApply, onUpdate, onDelete, onShare, onClose
 }: ModalProps) => {
     const [draft, setDraft] = useState<ForecastScenario>(() => initial ? structuredClone(initial) : structuredClone(EMPTY_SCENARIO));
     const [leaving, setLeaving] = useState(false);
     const [loadedFromId, setLoadedFromId] = useState<string | null>(null);
     const [editing, setEditing] = useState<{ id: string; name: string; depts: string[] } | null>(null);
+    // Form de "compartir por email" — id del escenario, lista de correos y mensaje opcional.
+    const [sharing, setSharing] = useState<{ id: string; emails: string; message: string } | null>(null);
+    const [sharingBusy, setSharingBusy] = useState(false);
     const [showGuide, setShowGuide] = useState(() => localStorage.getItem('scenarios_guide_seen') !== '1');
     // Buscador para "quitar fila"
     const [removeSearch, setRemoveSearch] = useState('');
@@ -528,6 +532,26 @@ export const ForecastScenariosModal = ({
         if (!editing) return;
         onUpdate(editing.id, { name: editing.name.trim() || 'Sin nombre', shared_with_depts: editing.depts });
         setEditing(null);
+    };
+
+    const startShare = (s: SavedScenario) => {
+        setSharing({ id: s.id, emails: '', message: '' });
+    };
+
+    const submitShare = async () => {
+        if (!sharing || !onShare) return;
+        const emails = sharing.emails
+            .split(/[,\s;]+/)
+            .map(e => e.trim())
+            .filter(Boolean);
+        if (emails.length === 0) return;
+        setSharingBusy(true);
+        try {
+            await onShare(sharing.id, emails, sharing.message.trim());
+            setSharing(null);
+        } finally {
+            setSharingBusy(false);
+        }
     };
 
     const dismiss = () => {
@@ -849,6 +873,47 @@ export const ForecastScenariosModal = ({
                                             </div>
                                         );
                                     }
+                                    if (sharing?.id === s.id && canEdit && onShare) {
+                                        const emailList = sharing.emails.split(/[,\s;]+/).map(e => e.trim()).filter(Boolean);
+                                        const validCount = emailList.filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)).length;
+                                        return (
+                                            <div key={s.id} className="rounded-lg border border-amber-300 bg-amber-50/40 px-2.5 py-2 space-y-2">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Mail size={12} className="text-amber-600" />
+                                                    <span className="text-[11px] font-semibold text-amber-900">Compartir "{s.name}" por correo</span>
+                                                </div>
+                                                <input
+                                                    value={sharing.emails}
+                                                    onChange={e => setSharing(prev => prev ? { ...prev, emails: e.target.value } : prev)}
+                                                    placeholder="correo1@ejemplo.com, correo2@ejemplo.com"
+                                                    className="w-full h-7 px-2 text-xs rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                                                    autoFocus
+                                                />
+                                                <textarea
+                                                    value={sharing.message}
+                                                    onChange={e => setSharing(prev => prev ? { ...prev, message: e.target.value } : prev)}
+                                                    placeholder="Mensaje opcional (contexto para quien lo reciba)"
+                                                    rows={2}
+                                                    className="w-full px-2 py-1 text-[11px] rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
+                                                />
+                                                <div className="text-[10px] text-gray-500 leading-tight">
+                                                    Enviaremos un link que abrirá esta app con el escenario aplicado y un aviso claro de que es una <span className="font-semibold text-amber-700">vista simulada</span>, no los datos reales.
+                                                </div>
+                                                <div className="flex items-center justify-between gap-1.5">
+                                                    <span className="text-[10px] text-gray-500">
+                                                        {validCount > 0 ? `${validCount} destinatario${validCount === 1 ? '' : 's'}` : 'Añade al menos un correo válido'}
+                                                    </span>
+                                                    <div className="flex gap-1.5">
+                                                        <Button variant="outline" size="sm" onClick={() => setSharing(null)} disabled={sharingBusy} className="text-[11px] h-6">Cancelar</Button>
+                                                        <Button size="sm" onClick={submitShare} disabled={validCount === 0 || sharingBusy} className="text-[11px] h-6 gap-1 bg-amber-600 hover:bg-amber-700 focus:ring-amber-500">
+                                                            {sharingBusy ? <Loader2 size={10} className="animate-spin" /> : <Mail size={10} />}
+                                                            {sharingBusy ? 'Enviando…' : 'Enviar'}
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
                                     return (
                                         <div
                                             key={s.id}
@@ -876,10 +941,19 @@ export const ForecastScenariosModal = ({
                                             </button>
                                             {canEdit && (
                                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    {onShare && (
+                                                        <button
+                                                            onClick={() => startShare(s)}
+                                                            className="p-1 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50"
+                                                            title="Compartir por correo"
+                                                        >
+                                                            <Mail size={12} />
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => startEdit(s)}
                                                         className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
-                                                        title="Renombrar y compartir"
+                                                        title="Renombrar y compartir con hubs"
                                                     >
                                                         <Pencil size={12} />
                                                     </button>
@@ -1257,8 +1331,14 @@ export const ForecastScenariosModal = ({
                                                         {items.map(it => {
                                                             const ov = findItemOverride('revenue', d, it);
                                                             return (
-                                                                <div key={it} className="flex items-center justify-between gap-2">
-                                                                    <span className="text-[11px] text-gray-700 truncate">{it}</span>
+                                                                <div
+                                                                    key={it}
+                                                                    className={`flex items-center justify-between gap-2 rounded px-1.5 py-0.5 -mx-1 ${ov ? 'bg-amber-100/70 ring-1 ring-amber-200' : ''}`}
+                                                                >
+                                                                    <div className="flex items-center gap-1 min-w-0">
+                                                                        {ov && <Coins size={10} className="flex-shrink-0 text-amber-600" />}
+                                                                        <span className={`text-[11px] truncate ${ov ? 'text-amber-900 font-semibold' : 'text-gray-700'}`}>{it}</span>
+                                                                    </div>
                                                                     <AmountInput
                                                                         value={ov?.amount || 0}
                                                                         onChange={(v) => setItemAmount('revenue', d, it, v)}
@@ -1309,8 +1389,14 @@ export const ForecastScenariosModal = ({
                                                                         {items.map(it => {
                                                                             const ov = findItemOverride(k, d, it);
                                                                             return (
-                                                                                <div key={it} className="flex items-center justify-between gap-2">
-                                                                                    <span className="text-[10.5px] text-gray-700 truncate">{it}</span>
+                                                                                <div
+                                                                                    key={it}
+                                                                                    className={`flex items-center justify-between gap-2 rounded px-1.5 py-0.5 -mx-1 ${ov ? 'bg-amber-100/70 ring-1 ring-amber-200' : ''}`}
+                                                                                >
+                                                                                    <div className="flex items-center gap-1 min-w-0">
+                                                                                        {ov && <Coins size={10} className="flex-shrink-0 text-amber-600" />}
+                                                                                        <span className={`text-[10.5px] truncate ${ov ? 'text-amber-900 font-semibold' : 'text-gray-700'}`}>{it}</span>
+                                                                                    </div>
                                                                                     <AmountInput
                                                                                         value={ov?.amount || 0}
                                                                                         onChange={(v) => setItemAmount(k, d, it, v)}

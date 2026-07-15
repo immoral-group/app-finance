@@ -676,6 +676,10 @@ const CellInput = ({
 export default function PLMatrix() {
     const [year, setYear] = useUrlState('year', new Date().getFullYear(), (v) => Number(v));
     const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Real');
+    // ?scenario=<id> — activa un escenario guardado al cargar la página (para compartir por email)
+    const [urlScenarioId, setUrlScenarioId] = useUrlState<string>('scenario', '');
+    // Marca visual "estás viendo un escenario compartido" cuando la fuente es el URL param
+    const [scenarioFromLink, setScenarioFromLink] = useState(false);
     const [cellValues, setCellValues] = useState<Record<string, CellData>>({});
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen_v2') === '1');
@@ -696,6 +700,13 @@ export default function PLMatrix() {
         } else if (activeTab === 'Presupuesto') {
             setBudgetScenario(s);
             setBudgetFromId(s ? (fromId || null) : null);
+        }
+        // Sincronizamos el URL param: al desactivar o cambiar a un no-guardado limpiamos el link
+        if (!s || !fromId) {
+            setUrlScenarioId('');
+            setScenarioFromLink(false);
+        } else {
+            setUrlScenarioId(fromId);
         }
     };
     // Popover de guardar (desde el chip)
@@ -724,6 +735,18 @@ export default function PLMatrix() {
     });
     const savedScenarios: SavedScenario[] = scenariosData?.scenarios || [];
     const savedScenariosCount = savedScenarios.length;
+
+    // Al llegar por link con ?scenario=<id> — buscarlo en la lista, activarlo y marcar la fuente
+    useEffect(() => {
+        if (!urlScenarioId) return;
+        if (activeTab !== 'Forecast' && activeTab !== 'Presupuesto') return;
+        if (activeFromId === urlScenarioId) return; // ya está aplicado
+        const found = savedScenarios.find(s => s.id === urlScenarioId);
+        if (!found) return;
+        setActiveScenario(structuredClone(found.scenario), found.id);
+        setScenarioFromLink(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [urlScenarioId, savedScenarios, activeTab]);
 
     const saveScenarioMutation = useMutation({
         mutationFn: (payload: { name: string; scenario: ForecastScenario; shared_with_depts: string[] }) =>
@@ -1996,6 +2019,41 @@ export default function PLMatrix() {
                 </div>
             </div>
 
+            {/* Banner "Estás viendo un escenario" — se muestra en Forecast/Presupuesto con escenario aplicado.
+                Cuando el usuario llega por link compartido, el banner enfatiza que NO son datos reales. */}
+            {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && activeScenario && !isScenarioEmpty(activeScenario) && (
+                <div
+                    className="mx-6 mt-3 rounded-lg overflow-hidden shadow-sm border border-amber-300"
+                    style={{
+                        backgroundImage: 'repeating-linear-gradient(45deg, rgba(251,191,36,0.10) 0px, rgba(251,191,36,0.10) 12px, rgba(251,191,36,0.20) 12px, rgba(251,191,36,0.20) 24px)',
+                    }}
+                >
+                    <div className="flex items-start gap-3 px-4 py-2.5 bg-amber-50/70">
+                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-sm">
+                            <Sparkles size={14} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <div className="text-[11px] font-extrabold tracking-widest text-amber-800 uppercase">
+                                {scenarioFromLink ? 'Escenario compartido contigo' : 'Vista simulada'}
+                            </div>
+                            <div className="text-sm font-bold text-gray-900 truncate">
+                                {activeScenario.name || 'Escenario sin nombre'}
+                            </div>
+                            <div className="text-[11px] text-gray-700 truncate">
+                                Los valores mostrados NO son los datos reales — es una simulación sobre el {activeTab}. {scenarioSummary(activeScenario)}
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setActiveScenario(null)}
+                            className="flex-shrink-0 text-[11px] font-semibold px-3 py-1.5 rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors"
+                            title="Salir del escenario y volver a la vista base"
+                        >
+                            Volver a {activeTab === 'Forecast' ? 'Forecast base' : 'Presupuesto base'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Modal Forecast — info */}
             {forecastInfoOpen && (
                 <ForecastInfoModal onClose={() => setForecastInfoOpen(false)} />
@@ -2041,6 +2099,18 @@ export default function PLMatrix() {
                         onDelete={(id, name) => {
                             if (!confirm(`¿Eliminar "${name}"?`)) return;
                             deleteScenarioMutation.mutate(id);
+                        }}
+                        onShare={async (id, emails, message) => {
+                            try {
+                                const res = await adminApi.shareForecastScenario(id, { emails, message });
+                                if (res.sent > 0) {
+                                    toast.success(`Escenario enviado a ${res.sent} destinatario${res.sent === 1 ? '' : 's'}`);
+                                } else {
+                                    toast.error('No se pudo enviar. Revisa la config SMTP.');
+                                }
+                            } catch (err) {
+                                toast.error((err as Error)?.message || 'Error al enviar el correo');
+                            }
                         }}
                         onClose={() => setScenarioOpen(false)}
                     />

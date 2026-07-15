@@ -274,6 +274,15 @@ export const adminApi = {
             method: 'DELETE',
         });
     },
+    shareForecastScenario: (id: string, data: { emails: string[]; message?: string }) => {
+        return fetchApi<{ sent: number; total: number; invalid: number; link: string }>(
+            `/pl/scenarios/${id}/share`,
+            {
+                method: 'POST',
+                body: JSON.stringify(data),
+            },
+        );
+    },
 
     // Chat IA
     sendChatMessage: (data: {

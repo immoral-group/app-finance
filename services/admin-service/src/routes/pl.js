@@ -1,9 +1,45 @@
 import express from 'express';
+import nodemailer from 'nodemailer';
 import supabase from '../config/supabase.js';
 import { createNotifications } from './notifications.js';
 import { logChange, extractUser } from '../utils/changeLogger.js';
 
 const router = express.Router();
+
+const APP_URL = process.env.APP_URL || 'https://imfinance.immoral.es';
+
+// ── Email helper (compartir escenarios) ─────────────────────────────────────
+let _scenarioTransporter = null;
+function getScenarioTransporter() {
+    if (!_scenarioTransporter) {
+        _scenarioTransporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST || 'smtp.gmail.com',
+            port: parseInt(process.env.SMTP_PORT || '587'),
+            secure: false,
+            auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+            pool: true,
+            maxConnections: 3,
+        });
+    }
+    return _scenarioTransporter;
+}
+
+async function sendScenarioEmail({ to, subject, html }) {
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        console.warn('[SCENARIO EMAIL] SMTP not configured, skipping');
+        return false;
+    }
+    try {
+        const t = getScenarioTransporter();
+        await t.sendMail({ from: `"App Finance" <${process.env.SMTP_USER}>`, to, subject, html });
+        return true;
+    } catch (err) {
+        console.error('[SCENARIO EMAIL] Error:', err.message);
+        return false;
+    }
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // ================================================
 // P&L NOTES — Universal note storage per cell
@@ -1660,6 +1696,107 @@ router.delete('/scenarios/:id', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         console.error('Error deleting scenario:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /pl/scenarios/:id/share
+ * Envía por correo el link para ver un escenario.
+ * body: { emails: string[], message?: string }
+ */
+router.post('/scenarios/:id/share', async (req, res) => {
+    const { emails, message } = req.body || {};
+    const list = Array.isArray(emails)
+        ? emails.map(e => String(e || '').trim()).filter(Boolean)
+        : String(emails || '')
+            .split(/[,\s;]+/)
+            .map(e => e.trim())
+            .filter(Boolean);
+    const valid = list.filter(e => EMAIL_RE.test(e));
+    if (valid.length === 0) return res.status(400).json({ error: 'No se han indicado correos válidos.' });
+
+    try {
+        const { data: scenario, error } = await supabase
+            .from('forecast_scenarios')
+            .select('id, name, scope, scenario, created_by_email, updated_at')
+            .eq('id', req.params.id)
+            .single();
+        if (error || !scenario) return res.status(404).json({ error: 'Escenario no encontrado' });
+
+        const { userEmail } = extractUser(req);
+        const senderLabel = userEmail || scenario.created_by_email || 'Alguien de tu equipo';
+        const tab = scenario.scope === 'budget' ? 'Presupuesto' : 'Forecast';
+        const link = `${APP_URL}/pl-matrix?tab=${encodeURIComponent(tab)}&scenario=${encodeURIComponent(scenario.id)}`;
+
+        const summaryChips = [];
+        try {
+            const s = scenario.scenario || {};
+            if (s.revenue?.globalPct) summaryChips.push(`${s.revenue.globalPct > 0 ? '+' : ''}${s.revenue.globalPct}% ingresos`);
+            if (s.expenses?.globalPct) summaryChips.push(`${s.expenses.globalPct > 0 ? '+' : ''}${s.expenses.globalPct}% gastos`);
+            const ov = Array.isArray(s.amountOverrides) ? s.amountOverrides.length : 0;
+            if (ov) summaryChips.push(`${ov} monto${ov === 1 ? '' : 's'} fijos`);
+            const add = Array.isArray(s.addedRows) ? s.addedRows.length : 0;
+            if (add) summaryChips.push(`${add} fila${add === 1 ? '' : 's'} añadida${add === 1 ? '' : 's'}`);
+            const rem = Array.isArray(s.removedItems) ? s.removedItems.length : 0;
+            if (rem) summaryChips.push(`${rem} fila${rem === 1 ? '' : 's'} eliminada${rem === 1 ? '' : 's'}`);
+        } catch { /* summary opcional */ }
+
+        const chipsHtml = summaryChips.length
+            ? `<div style="margin:16px 0;display:flex;flex-wrap:wrap;gap:6px;">
+                ${summaryChips.map(c => `<span style="background:#eef2ff;color:#4338ca;font-size:12px;padding:4px 10px;border-radius:9999px;font-weight:500;">${c}</span>`).join('')}
+              </div>`
+            : '';
+
+        const escapedName = String(scenario.name || 'Sin nombre').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] || c));
+        const escapedMessage = message
+            ? String(message).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] || c)).replace(/\n/g, '<br />')
+            : '';
+
+        const html = `
+            <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827;max-width:560px;margin:0 auto;background:#ffffff;">
+                <div style="background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#06b6d4 100%);padding:24px;border-radius:12px 12px 0 0;color:#ffffff;">
+                    <div style="font-size:11px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;opacity:0.8;">Escenario ${tab}</div>
+                    <div style="font-size:22px;font-weight:700;margin-top:4px;">${escapedName}</div>
+                </div>
+                <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:22px;">
+                    <p style="margin:0 0 12px;font-size:14px;line-height:1.55;color:#374151;">
+                        <strong>${senderLabel}</strong> te ha compartido un escenario hipotético del P&amp;L.
+                        Al abrirlo verás claramente que estás en una <strong>vista simulada</strong>, no en los datos reales — con botón para volver al Real.
+                    </p>
+                    ${chipsHtml}
+                    ${escapedMessage ? `
+                        <div style="background:#f9fafb;border-left:3px solid #6366f1;padding:12px 14px;border-radius:6px;margin:16px 0;font-size:13px;color:#374151;line-height:1.5;">
+                            ${escapedMessage}
+                        </div>
+                    ` : ''}
+                    <div style="text-align:center;margin:24px 0 12px;">
+                        <a href="${link}" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 24px;border-radius:8px;font-size:14px;">
+                            Ver escenario en la app →
+                        </a>
+                    </div>
+                    <p style="margin:12px 0 0;font-size:11px;color:#6b7280;text-align:center;">
+                        O copia este link: <a href="${link}" style="color:#6366f1;">${link}</a>
+                    </p>
+                    <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
+                    <p style="margin:0;font-size:11px;color:#9ca3af;text-align:center;">
+                        Este es un escenario <em>simulado</em>. No modifica los datos reales del negocio.
+                    </p>
+                </div>
+            </div>
+        `;
+
+        const subject = `Escenario compartido: ${scenario.name || 'Sin nombre'}`;
+        const results = await Promise.all(valid.map(to => sendScenarioEmail({ to, subject, html })));
+        const sent = results.filter(Boolean).length;
+
+        if (sent === 0 && (!process.env.SMTP_USER || !process.env.SMTP_PASS)) {
+            return res.status(503).json({ error: 'SMTP no configurado. Configura SMTP_USER / SMTP_PASS.' });
+        }
+
+        res.json({ sent, total: valid.length, invalid: list.length - valid.length, link });
+    } catch (err) {
+        console.error('Error sharing scenario:', err);
         res.status(500).json({ error: err.message });
     }
 });
