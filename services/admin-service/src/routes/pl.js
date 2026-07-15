@@ -6,7 +6,22 @@ import { logChange, extractUser } from '../utils/changeLogger.js';
 
 const router = express.Router();
 
-const APP_URL = process.env.APP_URL || 'https://imfinance.immoral.es';
+// Base URL para links en correos. Se resuelve por orden:
+//   1) host del request actual (así el link apunta al preview de Vercel cuando estamos en un preview,
+//      o al dominio de producción cuando estamos en producción)
+//   2) VERCEL_URL (autogenerada por Vercel)
+//   3) APP_URL (env manual)
+//   4) fallback hardcoded a producción
+function resolveBaseUrl(req) {
+    const host = req?.get?.('host');
+    const proto = req?.get?.('x-forwarded-proto') || req?.protocol || 'https';
+    if (host) return `${proto}://${host}`;
+    const cleanVercelUrl = String(process.env.VERCEL_URL || '').trim();
+    if (cleanVercelUrl) return `https://${cleanVercelUrl}`;
+    const cleanAppUrl = String(process.env.APP_URL || '').trim();
+    if (cleanAppUrl) return cleanAppUrl;
+    return 'https://imfinance.immoral.es';
+}
 
 // ── Email helper (compartir escenarios) ─────────────────────────────────────
 let _scenarioTransporter = null;
@@ -1727,7 +1742,8 @@ router.post('/scenarios/:id/share', async (req, res) => {
         const { userEmail } = extractUser(req);
         const senderLabel = userEmail || scenario.created_by_email || 'Alguien de tu equipo';
         const tab = scenario.scope === 'budget' ? 'Presupuesto' : 'Forecast';
-        const link = `${APP_URL}/pl-matrix?tab=${encodeURIComponent(tab)}&scenario=${encodeURIComponent(scenario.id)}`;
+        const baseUrl = resolveBaseUrl(req);
+        const link = `${baseUrl}/pl-matrix?tab=${encodeURIComponent(tab)}&scenario=${encodeURIComponent(scenario.id)}`;
 
         const summaryChips = [];
         try {
