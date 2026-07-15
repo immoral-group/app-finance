@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { X, Sparkles, RotateCcw, Check, Trash2, Bookmark, Users, Pencil, Wand2, CalendarRange, SlidersHorizontal, Save as SaveIcon, UserMinus, UserPlus, Plus } from 'lucide-react';
+import { X, Sparkles, RotateCcw, Check, Trash2, Bookmark, Users, Pencil, Wand2, CalendarRange, SlidersHorizontal, Save as SaveIcon, UserMinus, UserPlus, Plus, Coins } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
 // ============================================================
@@ -116,6 +116,20 @@ export interface ScenarioAddedRow {
     extraByMonth?: Record<number, number>;
 }
 
+// Override de monto para una fila existente en un rango de meses.
+// Reemplaza el valor base de la fila para esos meses (no suma, no aplica %).
+// Ejemplo: "en julio, ingresos por Paid General = 12.000 €".
+// Si se activa junto a un ajuste por %, este override gana.
+export interface ScenarioAmountOverride {
+    id: string;
+    section: string;  // 'revenue' o clave de sección de gasto
+    dept: string;
+    item: string;
+    fromMonth: number; // 1-12
+    toMonth: number;   // 1-12
+    amount: number;    // Valor fijo en €
+}
+
 export interface ForecastScenario {
     name: string;
     // Rango temporal (meses 1-12, inclusivo) donde aplica el escenario.
@@ -140,6 +154,9 @@ export interface ForecastScenario {
     removedItems?: ScenarioRemovedItem[];
     // Filas nuevas del escenario (opcional — retrocompatible con escenarios antiguos)
     addedRows?: ScenarioAddedRow[];
+    // Overrides de monto por fila y rango de meses (opcional — retrocompatible).
+    // Cuando existe uno para una celda, reemplaza el valor base ignorando el % del escenario.
+    amountOverrides?: ScenarioAmountOverride[];
 }
 
 // Secciones disponibles para añadir/eliminar filas en el escenario.
@@ -238,7 +255,8 @@ export function isScenarioEmpty(s: ForecastScenario | null): boolean {
         ...Object.values(s.expenses.byItem || {}),
     ];
     const hasRowChanges = (s.removedItems && s.removedItems.length > 0) || (s.addedRows && s.addedRows.length > 0);
-    return allPcts.every(v => !v) && !hasRowChanges;
+    const hasOverrides = s.amountOverrides && s.amountOverrides.length > 0;
+    return allPcts.every(v => !v) && !hasRowChanges && !hasOverrides;
 }
 
 // ¿Está la fila eliminada por el escenario para ese mes concreto?
@@ -271,6 +289,23 @@ export function addedRowsBySection(scenario: ForecastScenario | null, section: s
     return scenario.addedRows.filter(r => r.section === section);
 }
 
+// Busca un override de monto activo para una celda concreta.
+// Devuelve el override (que incluye el amount) o undefined si no hay ninguno.
+export function getAmountOverride(
+    scenario: ForecastScenario | null,
+    section: string,
+    dept: string,
+    item: string,
+    monthIdx: number,
+): ScenarioAmountOverride | undefined {
+    if (!scenario?.amountOverrides?.length) return undefined;
+    const month = monthIdx + 1;
+    return scenario.amountOverrides.find(o =>
+        o.section === section && o.dept === dept && o.item === item &&
+        month >= o.fromMonth && month <= o.toMonth,
+    );
+}
+
 // Resumen corto del escenario para mostrar en el chip
 export function scenarioSummary(s: ForecastScenario): string {
     const parts: string[] = [];
@@ -290,6 +325,7 @@ export function scenarioSummary(s: ForecastScenario): string {
     });
     (s.removedItems || []).forEach(r => parts.push(`− ${r.item}`));
     (s.addedRows || []).forEach(r => parts.push(`+ ${r.name}`));
+    (s.amountOverrides || []).forEach(o => parts.push(`= ${o.item}: ${Math.round(o.amount).toLocaleString('de-DE')} €`));
     const head = parts.slice(0, 2).join(' · ') + (parts.length > 2 ? ` · +${parts.length - 2}` : '');
     return `${head} · ${rangeLabel(s.range)}`;
 }
@@ -428,9 +464,24 @@ export const ForecastScenariosModal = ({
     const [showGuide, setShowGuide] = useState(() => localStorage.getItem('scenarios_guide_seen') !== '1');
     // Buscador para "quitar fila"
     const [removeSearch, setRemoveSearch] = useState('');
-    // Controlled open/close de los dos bloques (para poder cerrarlos con la X)
+    // Controlled open/close de los tres bloques (para poder cerrarlos con la X)
     const [removeOpen, setRemoveOpen] = useState(false);
     const [addOpen, setAddOpen] = useState(false);
+    const [overrideOpen, setOverrideOpen] = useState(false);
+    // Buscador para el picker de "fijar monto"
+    const [overrideSearch, setOverrideSearch] = useState('');
+    // Formulario de nuevo override — la fila se selecciona del picker (section+dept+item)
+    const [newOverride, setNewOverride] = useState<{
+        section: string; dept: string; item: string;
+        amount: string; fromMonth: number; toMonth: number;
+    }>({
+        section: '',
+        dept: '',
+        item: '',
+        amount: '',
+        fromMonth: (initial?.range.from) || defaultRange().from,
+        toMonth: 12,
+    });
     // Qué secciones están expandidas en el árbol de "eliminar fila"
     const [removeExpandedSections, setRemoveExpandedSections] = useState<Record<string, boolean>>({});
     // Formulario de nueva fila (con paga doble/extra opcionales para personal)
@@ -537,6 +588,28 @@ export const ForecastScenariosModal = ({
         }));
     };
 
+    // ── Amount overrides ─────────────────────────────────────────────────────
+    const addAmountOverride = (o: Omit<ScenarioAmountOverride, 'id'>) => {
+        setDraft(d => ({
+            ...d,
+            amountOverrides: [...(d.amountOverrides || []), { ...o, id: rid() }],
+        }));
+    };
+
+    const updateAmountOverride = (id: string, patch: Partial<ScenarioAmountOverride>) => {
+        setDraft(d => ({
+            ...d,
+            amountOverrides: (d.amountOverrides || []).map(o => o.id === id ? { ...o, ...patch } : o),
+        }));
+    };
+
+    const removeAmountOverride = (id: string) => {
+        setDraft(d => ({
+            ...d,
+            amountOverrides: (d.amountOverrides || []).filter(o => o.id !== id),
+        }));
+    };
+
     // Agrupaciones derivadas para drill-down
     const revenueByDeptItems = useMemo(() => {
         const m: Record<string, string[]> = {};
@@ -576,6 +649,16 @@ export const ForecastScenariosModal = ({
         (expenseItems || []).forEach(it => rows.push({ section: it.section, dept: it.dept, item: it.name, label: EXPENSE_SECTION_LABELS[it.section] || it.section }));
         return rows;
     }, [revenueItems, expenseItems]);
+
+    const filteredOverrideRows = useMemo(() => {
+        const q = overrideSearch.trim().toLowerCase();
+        if (!q) return allRows;
+        return allRows.filter(r =>
+            r.item.toLowerCase().includes(q) ||
+            r.dept.toLowerCase().includes(q) ||
+            r.label.toLowerCase().includes(q),
+        );
+    }, [allRows, overrideSearch]);
 
     const filteredRemoveRows = useMemo(() => {
         const q = removeSearch.trim().toLowerCase();
@@ -1056,7 +1139,7 @@ export const ForecastScenariosModal = ({
                         </h3>
                         <div className="space-y-3 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
                             <p className="text-[11px] text-gray-600 leading-snug">
-                                Simula altas y bajas: elimina una fila existente a partir de un mes (p. ej. un trabajador que se va) o añade una fila nueva con su coste mensual (nuevo trabajador, nuevo software, etc.).
+                                Simula altas y bajas: elimina una fila existente a partir de un mes (p. ej. un trabajador que se va) o añade una fila nueva con su coste mensual (nuevo trabajador, nuevo software, etc.). También puedes <span className="font-semibold text-amber-700">fijar un monto</span> para una fila existente en un rango de meses (p. ej. ingresos de un servicio = 12.000 € en julio).
                             </p>
 
                             {/* Filas eliminadas — chips actuales */}
@@ -1450,6 +1533,207 @@ export const ForecastScenariosModal = ({
                                     </div>
                                 )}
                             </div>
+
+                            {/* Overrides de monto — lista y editor */}
+                            {(draft.amountOverrides || []).length > 0 && (
+                                <div>
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700 mb-1 flex items-center gap-1">
+                                        <Coins size={10} /> Montos fijos ({(draft.amountOverrides || []).length})
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        {(draft.amountOverrides || []).map(o => {
+                                            const sectionLabel = o.section === 'revenue' ? 'Facturación' : (EXPENSE_SECTION_LABELS[o.section] || o.section);
+                                            return (
+                                                <div key={o.id} className="rounded-md bg-white border border-amber-200 px-2 py-1.5">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-[11px] font-semibold text-gray-800 truncate">{o.item}</div>
+                                                            <div className="text-[10px] text-gray-500 truncate">{sectionLabel} · {o.dept}</div>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => removeAmountOverride(o.id)}
+                                                            className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+                                                            title="Quitar override"
+                                                        >
+                                                            <Trash2 size={11} />
+                                                        </button>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                                                        <div className="col-span-2 flex items-center gap-1">
+                                                            <span className="text-gray-500">€ mes</span>
+                                                            <input
+                                                                type="number"
+                                                                value={o.amount}
+                                                                onChange={e => updateAmountOverride(o.id, { amount: Number(e.target.value) || 0 })}
+                                                                className="flex-1 h-6 px-1.5 tabular-nums rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-amber-300"
+                                                            />
+                                                        </div>
+                                                        <div className="col-span-2 flex items-center gap-1">
+                                                            <span className="text-gray-500">De</span>
+                                                            <select
+                                                                value={o.fromMonth}
+                                                                onChange={e => {
+                                                                    const from = Number(e.target.value);
+                                                                    updateAmountOverride(o.id, { fromMonth: from, toMonth: Math.max(o.toMonth, from) });
+                                                                }}
+                                                                className="h-6 px-1 rounded border border-gray-200 bg-white"
+                                                            >
+                                                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                                    <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                                ))}
+                                                            </select>
+                                                            <span className="text-gray-500">a</span>
+                                                            <select
+                                                                value={o.toMonth}
+                                                                onChange={e => {
+                                                                    const to = Number(e.target.value);
+                                                                    updateAmountOverride(o.id, { toMonth: to, fromMonth: Math.min(o.fromMonth, to) });
+                                                                }}
+                                                                className="h-6 px-1 rounded border border-gray-200 bg-white"
+                                                            >
+                                                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                                    <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Bloque "Fijar monto" — controlado (X para cerrar) */}
+                            {allRows.length > 0 && (
+                                <div className="rounded-md bg-white/60 border border-amber-100">
+                                    <div className="flex items-center justify-between px-2 py-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => setOverrideOpen(v => !v)}
+                                            className="flex-1 text-left text-[11px] font-semibold text-amber-700 hover:text-amber-900 flex items-center gap-1"
+                                        >
+                                            <Coins size={11} /> Fijar monto para fila existente
+                                            <span className="ml-auto text-[10px] text-gray-400">{overrideOpen ? 'Ocultar' : 'Mostrar'}</span>
+                                        </button>
+                                        {overrideOpen && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setOverrideOpen(false)}
+                                                className="ml-1 p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                                                title="Cerrar"
+                                            >
+                                                <X size={11} />
+                                            </button>
+                                        )}
+                                    </div>
+                                    {overrideOpen && (
+                                        <div className="border-t border-amber-100 p-2 space-y-1.5">
+                                            <p className="text-[10px] text-gray-500 leading-snug">
+                                                Reemplaza el valor base de la fila por un monto fijo en el rango de meses que elijas. Ignora el ajuste por %.
+                                            </p>
+                                            {/* Picker de fila */}
+                                            <input
+                                                value={overrideSearch}
+                                                onChange={e => setOverrideSearch(e.target.value)}
+                                                placeholder="Buscar fila (nombre, hub o categoría)..."
+                                                className="w-full h-7 px-2 text-[11px] rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                                            />
+                                            <div className="max-h-40 overflow-y-auto rounded-md border border-gray-100 bg-white">
+                                                {filteredOverrideRows.length === 0 && (
+                                                    <div className="text-[11px] text-gray-400 px-2 py-3 text-center">Sin resultados</div>
+                                                )}
+                                                {filteredOverrideRows.slice(0, 60).map(r => {
+                                                    const selected = newOverride.section === r.section && newOverride.dept === r.dept && newOverride.item === r.item;
+                                                    return (
+                                                        <button
+                                                            key={`${r.section}-${r.dept}-${r.item}`}
+                                                            onClick={() => setNewOverride(o => ({ ...o, section: r.section, dept: r.dept, item: r.item }))}
+                                                            className={`w-full flex items-center gap-2 px-2 py-1 text-left transition-colors ${selected ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'}`}
+                                                        >
+                                                            <span className={`flex-shrink-0 h-4 w-4 rounded-full border ${selected ? 'bg-amber-600 border-amber-600 text-white' : 'border-gray-300 bg-white'} flex items-center justify-center`}>
+                                                                {selected && <Check size={9} />}
+                                                            </span>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-[11px] font-medium text-gray-800 truncate">{r.item}</div>
+                                                                <div className="text-[10px] text-gray-500 truncate">{r.label} · {r.dept}</div>
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                                {filteredOverrideRows.length > 60 && (
+                                                    <div className="text-[10px] text-gray-400 px-2 py-1 text-center italic">
+                                                        Mostrando 60 de {filteredOverrideRows.length} — refina la búsqueda
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {/* Datos del override */}
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                                <div className="col-span-2 flex items-center gap-1 text-[11px]">
+                                                    <span className="text-gray-500">€ mes</span>
+                                                    <input
+                                                        type="number"
+                                                        value={newOverride.amount}
+                                                        onChange={e => setNewOverride(o => ({ ...o, amount: e.target.value }))}
+                                                        placeholder="Ej. 12000"
+                                                        className="flex-1 h-7 px-2 tabular-nums rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-amber-300"
+                                                    />
+                                                </div>
+                                                <div className="col-span-2 flex items-center gap-1 text-[11px]">
+                                                    <span className="text-gray-500">De</span>
+                                                    <select
+                                                        value={newOverride.fromMonth}
+                                                        onChange={e => {
+                                                            const from = Number(e.target.value);
+                                                            setNewOverride(o => ({ ...o, fromMonth: from, toMonth: Math.max(o.toMonth, from) }));
+                                                        }}
+                                                        className="h-7 px-1 rounded border border-gray-200 bg-white"
+                                                    >
+                                                        {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                            <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                        ))}
+                                                    </select>
+                                                    <span className="text-gray-500">a</span>
+                                                    <select
+                                                        value={newOverride.toMonth}
+                                                        onChange={e => {
+                                                            const to = Number(e.target.value);
+                                                            setNewOverride(o => ({ ...o, toMonth: to, fromMonth: Math.min(o.fromMonth, to) }));
+                                                        }}
+                                                        className="h-7 px-1 rounded border border-gray-200 bg-white"
+                                                    >
+                                                        {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                            <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        const amt = Number(newOverride.amount) || 0;
+                                                        if (!newOverride.item || !newOverride.section || !newOverride.dept) return;
+                                                        addAmountOverride({
+                                                            section: newOverride.section,
+                                                            dept: newOverride.dept,
+                                                            item: newOverride.item,
+                                                            amount: amt,
+                                                            fromMonth: newOverride.fromMonth,
+                                                            toMonth: newOverride.toMonth,
+                                                        });
+                                                        setNewOverride(o => ({ ...o, item: '', section: '', dept: '', amount: '' }));
+                                                        setOverrideSearch('');
+                                                    }}
+                                                    disabled={!newOverride.item || !newOverride.amount}
+                                                    className="col-span-2 h-7 text-[11px] gap-1 bg-amber-600 hover:bg-amber-700 focus:ring-amber-500"
+                                                >
+                                                    <Plus size={11} /> Fijar monto
+                                                </Button>
+                                            </div>
+                                            <p className="text-[10px] text-gray-500 italic">Se aplica solo a la fila seleccionada; el resto del forecast se mantiene igual.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </section>
 

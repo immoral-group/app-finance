@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
-import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowValue, scenarioSummary, HUBS, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from './ForecastScenarios';
+import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowValue, getAmountOverride, scenarioSummary, HUBS, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from './ForecastScenarios';
 
 const TABS = ['Real', 'Presupuesto', 'Comparación', 'Forecast'] as const;
 type TabType = typeof TABS[number];
@@ -1096,6 +1096,11 @@ export default function PLMatrix() {
         if (isItemRemoved(activeScenario, section, dept, item, monthIdx)) {
             return { ...base, value: 0 };
         }
+        // Override de monto por fila+mes — reemplaza el valor base, ignora el %
+        const override = getAmountOverride(activeScenario, section, dept, item, monthIdx);
+        if (override) {
+            return { ...base, value: override.amount };
+        }
         const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
         if (mult === 1) return base;
         return { ...base, value: Math.round(base.value * mult * 100) / 100 };
@@ -1446,7 +1451,8 @@ export default function PLMatrix() {
             const baseVal = (cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 }).value;
             const removed = isItemRemoved(activeScenario, section, dept, item, monthIdx);
             const addedRow = (activeScenario.addedRows || []).find(r => r.section === section && r.dept === dept && r.name === item);
-            const tinted = mult !== 1 && baseVal !== 0;
+            const override = getAmountOverride(activeScenario, section, dept, item, monthIdx);
+            const tinted = !override && mult !== 1 && baseVal !== 0;
             const deltaPct = Math.round((mult - 1) * 100);
             const isUp = deltaPct > 0;
             // Fila añadida por el escenario — celda destacada en violeta
@@ -1472,6 +1478,22 @@ export default function PLMatrix() {
                     >
                         <div className="font-semibold tabular-nums line-through opacity-70">{baseVal ? Math.round(baseVal).toLocaleString('de-DE') : '0'}</div>
                         <div className="text-[9px] font-bold text-rose-700">−100%</div>
+                    </td>
+                );
+            }
+            // Monto fijado por override — celda en ámbar con base tachada
+            if (override) {
+                return (
+                    <td
+                        key={monthIdx}
+                        className="border border-amber-200 px-1 py-1 text-right text-xs relative bg-amber-100/70 text-amber-900"
+                        title={`Monto fijado por el escenario: ${Math.round(override.amount).toLocaleString('de-DE')} € (${MONTHS[override.fromMonth - 1]}–${MONTHS[override.toMonth - 1]})${baseVal ? ` · Base: ${Math.round(baseVal).toLocaleString('de-DE')} €` : ''}`}
+                    >
+                        <div className="font-semibold tabular-nums">{currentVal ? fmtDisplay(currentVal) : <span className="text-amber-300">0</span>}</div>
+                        {baseVal !== 0 && baseVal !== currentVal && (
+                            <div className="text-[9px] line-through opacity-60 tabular-nums">{Math.round(baseVal).toLocaleString('de-DE')}</div>
+                        )}
+                        <div className="text-[9px] font-bold text-amber-700">FIJO</div>
                     </td>
                 );
             }

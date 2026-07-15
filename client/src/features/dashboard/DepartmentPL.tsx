@@ -20,7 +20,7 @@ import {
     ReferenceLine
 } from 'recharts';
 import { CommentModal, ForecastInfoModal } from '@/features/pl/PLMatrix';
-import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowValue, scenarioSummary, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from '@/features/pl/ForecastScenarios';
+import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowValue, getAmountOverride, scenarioSummary, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from '@/features/pl/ForecastScenarios';
 import { Sparkles } from 'lucide-react';
 import { useUrlState } from '@/hooks/useUrlState';
 import NutfruitBudget from './NutfruitBudget';
@@ -799,6 +799,9 @@ export default function DepartmentPL() {
         if (added) return addedRowValue(added, monthIdx);
         // Fila eliminada por el escenario — vale 0 desde su fromMonth
         if (isItemRemoved(activeScenario, section, dept, item, monthIdx)) return 0;
+        // Override de monto por fila+mes — reemplaza el valor base
+        const override = getAmountOverride(activeScenario, section, dept, item, monthIdx);
+        if (override) return override.amount;
         const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
         if (mult === 1) return base;
         return Math.round(base * mult * 100) / 100;
@@ -858,6 +861,8 @@ export default function DepartmentPL() {
         const added = (activeScenario.addedRows || []).find(r => r.section === section && r.dept === dept && r.name === item);
         if (added) return addedRowValue(added, monthIdx);
         if (isItemRemoved(activeScenario, section, dept, item, monthIdx)) return 0;
+        const override = getAmountOverride(activeScenario, section, dept, item, monthIdx);
+        if (override) return override.amount;
         const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
         return base * mult;
     };
@@ -939,11 +944,12 @@ export default function DepartmentPL() {
         const scenarioActive = (activeTab === 'Forecast' || activeTab === 'Presupuesto') && !!activeScenario && !isScenarioEmpty(activeScenario);
         const addedRow = scenarioActive ? (activeScenario!.addedRows || []).find(r => r.section === section && r.dept === dept && r.name === item) : undefined;
         const removed = scenarioActive && isItemRemoved(activeScenario, section, dept, item, monthIdx);
+        const override = scenarioActive ? getAmountOverride(activeScenario, section, dept, item, monthIdx) : undefined;
         const mult = scenarioActive ? resolveMultiplier(activeScenario, section, dept, item, monthIdx) : 1;
-        const tinted = scenarioActive && !addedRow && !removed && mult !== 1 && baseVal !== 0;
+        const tinted = scenarioActive && !addedRow && !removed && !override && mult !== 1 && baseVal !== 0;
         const deltaPct = Math.round((mult - 1) * 100);
         const isUp = deltaPct > 0;
-        const isRevenueRealClickable = activeTab === 'Real' && section === 'revenue' && value > 0 && !addedRow;
+        const isRevenueRealClickable = activeTab === 'Real' && section === 'revenue' && value > 0 && !addedRow && !override;
 
         if (addedRow) {
             return (
@@ -967,6 +973,21 @@ export default function DepartmentPL() {
                 >
                     <div className="font-semibold line-through opacity-70">{baseVal ? Math.round(baseVal).toLocaleString('de-DE') : '0'}</div>
                     <div className="text-[9px] font-bold text-rose-700">−100%</div>
+                </td>
+            );
+        }
+        if (override) {
+            return (
+                <td
+                    key={monthIdx}
+                    className="border border-amber-200 px-1 py-1 text-right text-xs tabular-nums relative bg-amber-100/70 text-amber-900"
+                    title={`Monto fijado por el escenario: ${Math.round(override.amount).toLocaleString('de-DE')} € (${MONTHS[override.fromMonth - 1]}–${MONTHS[override.toMonth - 1]})${baseVal ? ` · Base: ${Math.round(baseVal).toLocaleString('de-DE')} €` : ''}`}
+                >
+                    <div className="font-semibold">{value ? fmtDisplay(value) : <span className="text-amber-300">0</span>}</div>
+                    {baseVal !== 0 && baseVal !== value && (
+                        <div className="text-[9px] line-through opacity-60">{Math.round(baseVal).toLocaleString('de-DE')}</div>
+                    )}
+                    <div className="text-[9px] font-bold text-amber-700">FIJO</div>
                 </td>
             );
         }
