@@ -409,6 +409,23 @@ export const PRESETS: { id: string; emoji: string; label: string; description: s
 ];
 
 // ============================================================
+// AmountInput — input compacto para overrides de monto (€) por fila
+// ============================================================
+
+const AmountInput = ({ value, onChange }: { value: number; onChange: (v: number) => void }) => {
+    const active = value > 0;
+    return (
+        <input
+            type="number"
+            value={value || ''}
+            onChange={e => onChange(Number(e.target.value) || 0)}
+            placeholder="€ /mes"
+            className={`w-24 text-xs h-7 px-2 rounded-md border bg-white text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-300 ${active ? 'border-amber-400 text-amber-800 font-semibold' : 'border-gray-200 text-gray-500'}`}
+        />
+    );
+};
+
+// ============================================================
 // PctSelector — dropdown con saltos de 5% de −30 a +30
 // ============================================================
 
@@ -464,24 +481,11 @@ export const ForecastScenariosModal = ({
     const [showGuide, setShowGuide] = useState(() => localStorage.getItem('scenarios_guide_seen') !== '1');
     // Buscador para "quitar fila"
     const [removeSearch, setRemoveSearch] = useState('');
-    // Controlled open/close de los tres bloques (para poder cerrarlos con la X)
+    // Controlled open/close de los dos bloques (para poder cerrarlos con la X)
     const [removeOpen, setRemoveOpen] = useState(false);
     const [addOpen, setAddOpen] = useState(false);
-    const [overrideOpen, setOverrideOpen] = useState(false);
-    // Buscador para el picker de "fijar monto"
-    const [overrideSearch, setOverrideSearch] = useState('');
-    // Formulario de nuevo override — la fila se selecciona del picker (section+dept+item)
-    const [newOverride, setNewOverride] = useState<{
-        section: string; dept: string; item: string;
-        amount: string; fromMonth: number; toMonth: number;
-    }>({
-        section: '',
-        dept: '',
-        item: '',
-        amount: '',
-        fromMonth: (initial?.range.from) || defaultRange().from,
-        toMonth: 12,
-    });
+    // Qué overrides tienen el editor de rango expandido (por id)
+    const [expandedOverrideRanges, setExpandedOverrideRanges] = useState<Record<string, boolean>>({});
     // Qué secciones están expandidas en el árbol de "eliminar fila"
     const [removeExpandedSections, setRemoveExpandedSections] = useState<Record<string, boolean>>({});
     // Formulario de nueva fila (con paga doble/extra opcionales para personal)
@@ -589,13 +593,6 @@ export const ForecastScenariosModal = ({
     };
 
     // ── Amount overrides ─────────────────────────────────────────────────────
-    const addAmountOverride = (o: Omit<ScenarioAmountOverride, 'id'>) => {
-        setDraft(d => ({
-            ...d,
-            amountOverrides: [...(d.amountOverrides || []), { ...o, id: rid() }],
-        }));
-    };
-
     const updateAmountOverride = (id: string, patch: Partial<ScenarioAmountOverride>) => {
         setDraft(d => ({
             ...d,
@@ -608,6 +605,31 @@ export const ForecastScenariosModal = ({
             ...d,
             amountOverrides: (d.amountOverrides || []).filter(o => o.id !== id),
         }));
+    };
+
+    const findItemOverride = (section: string, dept: string, item: string) =>
+        (draft.amountOverrides || []).find(o => o.section === section && o.dept === dept && o.item === item);
+
+    // Setter combinado: si amount es 0 / vacío, elimina el override.
+    // Si existe uno, actualiza el amount. Si no, crea uno nuevo usando el rango del escenario como default.
+    const setItemAmount = (section: string, dept: string, item: string, amount: number) => {
+        setDraft(d => {
+            const list = d.amountOverrides || [];
+            const existing = list.find(o => o.section === section && o.dept === dept && o.item === item);
+            if (!amount) {
+                return { ...d, amountOverrides: list.filter(o => o.id !== existing?.id) };
+            }
+            if (existing) {
+                return { ...d, amountOverrides: list.map(o => o.id === existing.id ? { ...o, amount } : o) };
+            }
+            return {
+                ...d,
+                amountOverrides: [
+                    ...list,
+                    { id: rid(), section, dept, item, amount, fromMonth: d.range.from, toMonth: d.range.to },
+                ],
+            };
+        });
     };
 
     // Agrupaciones derivadas para drill-down
@@ -649,16 +671,6 @@ export const ForecastScenariosModal = ({
         (expenseItems || []).forEach(it => rows.push({ section: it.section, dept: it.dept, item: it.name, label: EXPENSE_SECTION_LABELS[it.section] || it.section }));
         return rows;
     }, [revenueItems, expenseItems]);
-
-    const filteredOverrideRows = useMemo(() => {
-        const q = overrideSearch.trim().toLowerCase();
-        if (!q) return allRows;
-        return allRows.filter(r =>
-            r.item.toLowerCase().includes(q) ||
-            r.dept.toLowerCase().includes(q) ||
-            r.label.toLowerCase().includes(q),
-        );
-    }, [allRows, overrideSearch]);
 
     const filteredRemoveRows = useMemo(() => {
         const q = removeSearch.trim().toLowerCase();
@@ -1131,6 +1143,197 @@ export const ForecastScenariosModal = ({
                         </div>
                     </section>
 
+                    {/* MONTOS FIJOS POR FILA */}
+                    <section>
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2 flex items-center gap-1.5">
+                            <Coins size={12} /> Montos fijos por fila
+                            <span className="text-[9px] font-extrabold tracking-widest text-white bg-gradient-to-r from-amber-500 to-orange-500 px-1.5 py-0.5 rounded shadow-sm">NUEVO</span>
+                        </h3>
+                        <div className="space-y-2 rounded-lg border border-amber-100 bg-amber-50/40 p-3">
+                            <p className="text-[11px] text-gray-600 leading-snug">
+                                Sustituye el valor base de una fila por un monto exacto en €. Ignora el ajuste por %. Ejemplo: fijar los ingresos de un servicio en 12.000 € para julio.
+                            </p>
+
+                            {/* Overrides activos — muestra el rango de meses de cada uno y permite editarlo */}
+                            {(draft.amountOverrides || []).length > 0 && (
+                                <div className="space-y-1">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700 flex items-center gap-1">
+                                        Activos ({(draft.amountOverrides || []).length})
+                                    </div>
+                                    <div className="space-y-1">
+                                        {(draft.amountOverrides || []).map(o => {
+                                            const sectionLabel = o.section === 'revenue' ? 'Facturación' : (EXPENSE_SECTION_LABELS[o.section] || o.section);
+                                            const rangeMatchesScenario = o.fromMonth === draft.range.from && o.toMonth === draft.range.to;
+                                            const isRangeOpen = !!expandedOverrideRanges[o.id];
+                                            return (
+                                                <div key={o.id} className="rounded-md bg-white border border-amber-200 px-2 py-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-[11px] font-semibold text-gray-800 truncate">{o.item}</div>
+                                                            <div className="text-[10px] text-gray-500 truncate">{sectionLabel} · {o.dept}</div>
+                                                        </div>
+                                                        <span className="text-[11px] font-bold text-amber-800 tabular-nums whitespace-nowrap">
+                                                            {Math.round(o.amount).toLocaleString('de-DE')} €
+                                                        </span>
+                                                        <button
+                                                            onClick={() => setExpandedOverrideRanges(s => ({ ...s, [o.id]: !s[o.id] }))}
+                                                            className={`text-[10px] px-1.5 py-0.5 rounded border ${rangeMatchesScenario ? 'border-gray-200 text-gray-500' : 'border-amber-300 text-amber-700 bg-amber-50'} hover:bg-amber-100`}
+                                                            title="Editar rango de meses"
+                                                        >
+                                                            {o.fromMonth === o.toMonth ? MONTHS_SHORT[o.fromMonth - 1] : `${MONTHS_SHORT[o.fromMonth - 1]}–${MONTHS_SHORT[o.toMonth - 1]}`}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => removeAmountOverride(o.id)}
+                                                            className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+                                                            title="Quitar override"
+                                                        >
+                                                            <Trash2 size={11} />
+                                                        </button>
+                                                    </div>
+                                                    {isRangeOpen && (
+                                                        <div className="mt-1.5 flex items-center gap-1 text-[11px] border-t border-amber-100 pt-1.5">
+                                                            <span className="text-gray-500">De</span>
+                                                            <select
+                                                                value={o.fromMonth}
+                                                                onChange={e => {
+                                                                    const from = Number(e.target.value);
+                                                                    updateAmountOverride(o.id, { fromMonth: from, toMonth: Math.max(o.toMonth, from) });
+                                                                }}
+                                                                className="h-6 px-1 rounded border border-gray-200 bg-white"
+                                                            >
+                                                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                                    <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                                ))}
+                                                            </select>
+                                                            <span className="text-gray-500">a</span>
+                                                            <select
+                                                                value={o.toMonth}
+                                                                onChange={e => {
+                                                                    const to = Number(e.target.value);
+                                                                    updateAmountOverride(o.id, { toMonth: to, fromMonth: Math.min(o.fromMonth, to) });
+                                                                }}
+                                                                className="h-6 px-1 rounded border border-gray-200 bg-white"
+                                                            >
+                                                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                                    <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                                ))}
+                                                            </select>
+                                                            {!rangeMatchesScenario && (
+                                                                <button
+                                                                    onClick={() => updateAmountOverride(o.id, { fromMonth: draft.range.from, toMonth: draft.range.to })}
+                                                                    className="ml-auto text-[10px] text-gray-500 hover:text-amber-700 underline"
+                                                                >
+                                                                    Usar rango del escenario
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Drill-down INGRESOS — hub → servicio */}
+                            {(revenueItems || []).length > 0 && (
+                                <details className="text-xs">
+                                    <summary className="cursor-pointer text-emerald-700 hover:text-emerald-900 font-semibold select-none">Ingresos por hub y servicio</summary>
+                                    <div className="mt-2 space-y-1.5 pl-2">
+                                        {revenueDepts.map(d => {
+                                            const items = revenueByDeptItems[d] || [];
+                                            if (items.length === 0) return null;
+                                            const activeCount = items.reduce((n, it) => n + (findItemOverride('revenue', d, it) ? 1 : 0), 0);
+                                            return (
+                                                <details key={d} className="rounded-md bg-white/60 px-2 py-1" open={activeCount > 0}>
+                                                    <summary className="cursor-pointer flex items-center justify-between text-gray-700 font-medium select-none">
+                                                        <span>{d}</span>
+                                                        <span className="text-[10px] text-gray-500">
+                                                            {activeCount > 0 ? <span className="text-amber-700 font-bold mr-1">{activeCount} fijos</span> : null}
+                                                            ({items.length})
+                                                        </span>
+                                                    </summary>
+                                                    <div className="mt-1.5 space-y-1 pl-3 border-l-2 border-emerald-100">
+                                                        {items.map(it => {
+                                                            const ov = findItemOverride('revenue', d, it);
+                                                            return (
+                                                                <div key={it} className="flex items-center justify-between gap-2">
+                                                                    <span className="text-[11px] text-gray-700 truncate">{it}</span>
+                                                                    <AmountInput
+                                                                        value={ov?.amount || 0}
+                                                                        onChange={(v) => setItemAmount('revenue', d, it, v)}
+                                                                    />
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </details>
+                                            );
+                                        })}
+                                    </div>
+                                </details>
+                            )}
+
+                            {/* Drill-down GASTOS — categoría → hub → item */}
+                            {(expenseItems || []).length > 0 && (
+                                <details className="text-xs">
+                                    <summary className="cursor-pointer text-rose-700 hover:text-rose-900 font-semibold select-none">Gastos por categoría, hub e item</summary>
+                                    <div className="mt-2 space-y-1.5 pl-2">
+                                        {EXPENSE_SECTION_KEYS.map(k => {
+                                            const depts = Object.keys(expenseBySectionDeptItems[k] || {});
+                                            if (depts.length === 0) return null;
+                                            const catActive = depts.reduce((n, d) => n + (expenseBySectionDeptItems[k][d] || []).reduce((m, it) => m + (findItemOverride(k, d, it) ? 1 : 0), 0), 0);
+                                            return (
+                                                <details key={k} className="rounded-md bg-white/60 px-2 py-1" open={catActive > 0}>
+                                                    <summary className="cursor-pointer flex items-center justify-between text-gray-700 font-medium select-none">
+                                                        <span>{EXPENSE_SECTION_LABELS[k]}</span>
+                                                        <span className="text-[10px] text-gray-500">
+                                                            {catActive > 0 ? <span className="text-amber-700 font-bold mr-1">{catActive} fijos</span> : null}
+                                                            ({depts.length})
+                                                        </span>
+                                                    </summary>
+                                                    <div className="mt-1.5 space-y-1.5 pl-3 border-l-2 border-rose-100">
+                                                        {depts.map(d => {
+                                                            const items = expenseBySectionDeptItems[k][d] || [];
+                                                            const deptActive = items.reduce((n, it) => n + (findItemOverride(k, d, it) ? 1 : 0), 0);
+                                                            return (
+                                                                <details key={d} className="rounded bg-white/70 px-1.5 py-1" open={deptActive > 0}>
+                                                                    <summary className="cursor-pointer flex items-center justify-between text-[11px] text-gray-700 select-none">
+                                                                        <span>{d}</span>
+                                                                        <span className="text-[10px] text-gray-500">
+                                                                            {deptActive > 0 ? <span className="text-amber-700 font-bold mr-1">{deptActive} fijos</span> : null}
+                                                                            ({items.length})
+                                                                        </span>
+                                                                    </summary>
+                                                                    <div className="mt-1 space-y-0.5 pl-2.5 border-l border-gray-200">
+                                                                        {items.map(it => {
+                                                                            const ov = findItemOverride(k, d, it);
+                                                                            return (
+                                                                                <div key={it} className="flex items-center justify-between gap-2">
+                                                                                    <span className="text-[10.5px] text-gray-700 truncate">{it}</span>
+                                                                                    <AmountInput
+                                                                                        value={ov?.amount || 0}
+                                                                                        onChange={(v) => setItemAmount(k, d, it, v)}
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </details>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </details>
+                                            );
+                                        })}
+                                    </div>
+                                </details>
+                            )}
+
+                            <p className="text-[10px] text-gray-500 italic">Por defecto se aplica al rango del escenario ({rangeLabel(draft.range)}). Toca el chip de meses para personalizarlo por fila.</p>
+                        </div>
+                    </section>
+
                     {/* FILAS — Añadir / Eliminar */}
                     <section>
                         <h3 className="text-xs font-bold uppercase tracking-wider text-violet-700 mb-2 flex items-center gap-1.5">
@@ -1139,7 +1342,7 @@ export const ForecastScenariosModal = ({
                         </h3>
                         <div className="space-y-3 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
                             <p className="text-[11px] text-gray-600 leading-snug">
-                                Simula altas y bajas: elimina una fila existente a partir de un mes (p. ej. un trabajador que se va) o añade una fila nueva con su coste mensual (nuevo trabajador, nuevo software, etc.). También puedes <span className="font-semibold text-amber-700">fijar un monto</span> para una fila existente en un rango de meses (p. ej. ingresos de un servicio = 12.000 € en julio).
+                                Simula altas y bajas: elimina una fila existente a partir de un mes (p. ej. un trabajador que se va) o añade una fila nueva con su coste mensual (nuevo trabajador, nuevo software, etc.).
                             </p>
 
                             {/* Filas eliminadas — chips actuales */}
@@ -1534,206 +1737,6 @@ export const ForecastScenariosModal = ({
                                 )}
                             </div>
 
-                            {/* Overrides de monto — lista y editor */}
-                            {(draft.amountOverrides || []).length > 0 && (
-                                <div>
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700 mb-1 flex items-center gap-1">
-                                        <Coins size={10} /> Montos fijos ({(draft.amountOverrides || []).length})
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        {(draft.amountOverrides || []).map(o => {
-                                            const sectionLabel = o.section === 'revenue' ? 'Facturación' : (EXPENSE_SECTION_LABELS[o.section] || o.section);
-                                            return (
-                                                <div key={o.id} className="rounded-md bg-white border border-amber-200 px-2 py-1.5">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="text-[11px] font-semibold text-gray-800 truncate">{o.item}</div>
-                                                            <div className="text-[10px] text-gray-500 truncate">{sectionLabel} · {o.dept}</div>
-                                                        </div>
-                                                        <button
-                                                            onClick={() => removeAmountOverride(o.id)}
-                                                            className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
-                                                            title="Quitar override"
-                                                        >
-                                                            <Trash2 size={11} />
-                                                        </button>
-                                                    </div>
-                                                    <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-                                                        <div className="col-span-2 flex items-center gap-1">
-                                                            <span className="text-gray-500">€ mes</span>
-                                                            <input
-                                                                type="number"
-                                                                value={o.amount}
-                                                                onChange={e => updateAmountOverride(o.id, { amount: Number(e.target.value) || 0 })}
-                                                                className="flex-1 h-6 px-1.5 tabular-nums rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-amber-300"
-                                                            />
-                                                        </div>
-                                                        <div className="col-span-2 flex items-center gap-1">
-                                                            <span className="text-gray-500">De</span>
-                                                            <select
-                                                                value={o.fromMonth}
-                                                                onChange={e => {
-                                                                    const from = Number(e.target.value);
-                                                                    updateAmountOverride(o.id, { fromMonth: from, toMonth: Math.max(o.toMonth, from) });
-                                                                }}
-                                                                className="h-6 px-1 rounded border border-gray-200 bg-white"
-                                                            >
-                                                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                                                                    <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
-                                                                ))}
-                                                            </select>
-                                                            <span className="text-gray-500">a</span>
-                                                            <select
-                                                                value={o.toMonth}
-                                                                onChange={e => {
-                                                                    const to = Number(e.target.value);
-                                                                    updateAmountOverride(o.id, { toMonth: to, fromMonth: Math.min(o.fromMonth, to) });
-                                                                }}
-                                                                className="h-6 px-1 rounded border border-gray-200 bg-white"
-                                                            >
-                                                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                                                                    <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
-                                                                ))}
-                                                            </select>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Bloque "Fijar monto" — controlado (X para cerrar) */}
-                            {allRows.length > 0 && (
-                                <div className="rounded-md bg-white/60 border border-amber-100">
-                                    <div className="flex items-center justify-between px-2 py-1.5">
-                                        <button
-                                            type="button"
-                                            onClick={() => setOverrideOpen(v => !v)}
-                                            className="flex-1 text-left text-[11px] font-semibold text-amber-700 hover:text-amber-900 flex items-center gap-1"
-                                        >
-                                            <Coins size={11} /> Fijar monto para fila existente
-                                            <span className="ml-auto text-[10px] text-gray-400">{overrideOpen ? 'Ocultar' : 'Mostrar'}</span>
-                                        </button>
-                                        {overrideOpen && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setOverrideOpen(false)}
-                                                className="ml-1 p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100"
-                                                title="Cerrar"
-                                            >
-                                                <X size={11} />
-                                            </button>
-                                        )}
-                                    </div>
-                                    {overrideOpen && (
-                                        <div className="border-t border-amber-100 p-2 space-y-1.5">
-                                            <p className="text-[10px] text-gray-500 leading-snug">
-                                                Reemplaza el valor base de la fila por un monto fijo en el rango de meses que elijas. Ignora el ajuste por %.
-                                            </p>
-                                            {/* Picker de fila */}
-                                            <input
-                                                value={overrideSearch}
-                                                onChange={e => setOverrideSearch(e.target.value)}
-                                                placeholder="Buscar fila (nombre, hub o categoría)..."
-                                                className="w-full h-7 px-2 text-[11px] rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                                            />
-                                            <div className="max-h-40 overflow-y-auto rounded-md border border-gray-100 bg-white">
-                                                {filteredOverrideRows.length === 0 && (
-                                                    <div className="text-[11px] text-gray-400 px-2 py-3 text-center">Sin resultados</div>
-                                                )}
-                                                {filteredOverrideRows.slice(0, 60).map(r => {
-                                                    const selected = newOverride.section === r.section && newOverride.dept === r.dept && newOverride.item === r.item;
-                                                    return (
-                                                        <button
-                                                            key={`${r.section}-${r.dept}-${r.item}`}
-                                                            onClick={() => setNewOverride(o => ({ ...o, section: r.section, dept: r.dept, item: r.item }))}
-                                                            className={`w-full flex items-center gap-2 px-2 py-1 text-left transition-colors ${selected ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'}`}
-                                                        >
-                                                            <span className={`flex-shrink-0 h-4 w-4 rounded-full border ${selected ? 'bg-amber-600 border-amber-600 text-white' : 'border-gray-300 bg-white'} flex items-center justify-center`}>
-                                                                {selected && <Check size={9} />}
-                                                            </span>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="text-[11px] font-medium text-gray-800 truncate">{r.item}</div>
-                                                                <div className="text-[10px] text-gray-500 truncate">{r.label} · {r.dept}</div>
-                                                            </div>
-                                                        </button>
-                                                    );
-                                                })}
-                                                {filteredOverrideRows.length > 60 && (
-                                                    <div className="text-[10px] text-gray-400 px-2 py-1 text-center italic">
-                                                        Mostrando 60 de {filteredOverrideRows.length} — refina la búsqueda
-                                                    </div>
-                                                )}
-                                            </div>
-                                            {/* Datos del override */}
-                                            <div className="grid grid-cols-2 gap-1.5">
-                                                <div className="col-span-2 flex items-center gap-1 text-[11px]">
-                                                    <span className="text-gray-500">€ mes</span>
-                                                    <input
-                                                        type="number"
-                                                        value={newOverride.amount}
-                                                        onChange={e => setNewOverride(o => ({ ...o, amount: e.target.value }))}
-                                                        placeholder="Ej. 12000"
-                                                        className="flex-1 h-7 px-2 tabular-nums rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-amber-300"
-                                                    />
-                                                </div>
-                                                <div className="col-span-2 flex items-center gap-1 text-[11px]">
-                                                    <span className="text-gray-500">De</span>
-                                                    <select
-                                                        value={newOverride.fromMonth}
-                                                        onChange={e => {
-                                                            const from = Number(e.target.value);
-                                                            setNewOverride(o => ({ ...o, fromMonth: from, toMonth: Math.max(o.toMonth, from) }));
-                                                        }}
-                                                        className="h-7 px-1 rounded border border-gray-200 bg-white"
-                                                    >
-                                                        {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                                                            <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
-                                                        ))}
-                                                    </select>
-                                                    <span className="text-gray-500">a</span>
-                                                    <select
-                                                        value={newOverride.toMonth}
-                                                        onChange={e => {
-                                                            const to = Number(e.target.value);
-                                                            setNewOverride(o => ({ ...o, toMonth: to, fromMonth: Math.min(o.fromMonth, to) }));
-                                                        }}
-                                                        className="h-7 px-1 rounded border border-gray-200 bg-white"
-                                                    >
-                                                        {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                                                            <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <Button
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        const amt = Number(newOverride.amount) || 0;
-                                                        if (!newOverride.item || !newOverride.section || !newOverride.dept) return;
-                                                        addAmountOverride({
-                                                            section: newOverride.section,
-                                                            dept: newOverride.dept,
-                                                            item: newOverride.item,
-                                                            amount: amt,
-                                                            fromMonth: newOverride.fromMonth,
-                                                            toMonth: newOverride.toMonth,
-                                                        });
-                                                        setNewOverride(o => ({ ...o, item: '', section: '', dept: '', amount: '' }));
-                                                        setOverrideSearch('');
-                                                    }}
-                                                    disabled={!newOverride.item || !newOverride.amount}
-                                                    className="col-span-2 h-7 text-[11px] gap-1 bg-amber-600 hover:bg-amber-700 focus:ring-amber-500"
-                                                >
-                                                    <Plus size={11} /> Fijar monto
-                                                </Button>
-                                            </div>
-                                            <p className="text-[10px] text-gray-500 italic">Se aplica solo a la fila seleccionada; el resto del forecast se mantiene igual.</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                         </div>
                     </section>
 
