@@ -1294,6 +1294,38 @@ export default function PLMatrix() {
     const ebitdaTotals = ingresosTotals.map((v, i) => v - gastosTotals[i]);
     const ebitdaAnual = ingresosAnual - gastosAnual;
 
+    // Totales BASE (sin escenario) — solo útil cuando hay escenario activo, para el resumen "antes → después".
+    // Suma directa de cellValues ignorando resolveMultiplier, addedRows, removedItems y overrides.
+    const baseTotalsAnnual = useMemo(() => {
+        const scenarioTabsAllowed = activeTab === 'Forecast' || activeTab === 'Presupuesto';
+        if (!scenarioTabsAllowed || !activeScenario || isScenarioEmpty(activeScenario)) {
+            return null;
+        }
+        const sumSection = (
+            section: string,
+            structure: { dept: string; items?: string[]; services?: string[] }[],
+        ): number => {
+            let total = 0;
+            structure.forEach(group => {
+                (group.items || group.services || []).forEach(item => {
+                    for (let m = 0; m < 12; m++) {
+                        const key = getCellKey(section, group.dept, item, m);
+                        total += cellValues[key]?.value || 0;
+                    }
+                });
+            });
+            return total;
+        };
+        const revenue = sumSection('revenue', mergedRevenueStructure);
+        let expenses = 0;
+        EXPENSE_KEYS_LIST.forEach(k => {
+            const items = mergedExpenseStructure[`${k}Items` as keyof typeof EXPENSE_STRUCTURE];
+            expenses += sumSection(k, items);
+        });
+        return { revenue, expenses, ebitda: revenue - expenses };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, activeScenario, cellValues, mergedRevenueStructure, mergedExpenseStructure]);
+
     // Comparison Calculations
     const calcAllExpenses = (valuesMap: Record<string, CellData>, type: 'real' | 'budget') => {
         const totals = Array(12).fill(0);
@@ -1606,7 +1638,7 @@ export default function PLMatrix() {
                                 )}
                             </div>
                         </td>
-                        {isRevenueEditable
+                        {(isRevenueEditable || scenarioActive)
                             ? MONTHS_FULL.map((_, monthIdx) => renderEditableCell('revenue', group.dept, service, monthIdx))
                             : MONTHS_FULL.map((_, monthIdx) => {
                                 const val = getCellValue('revenue', group.dept, service, monthIdx).value;
@@ -2040,7 +2072,7 @@ export default function PLMatrix() {
                                 {activeScenario.name || 'Escenario sin nombre'}
                             </div>
                             <div className="text-[11px] text-gray-700 truncate">
-                                Los valores mostrados NO son los datos reales — es una simulación sobre el {activeTab}. {scenarioSummary(activeScenario)}
+                                Se aplicaron cambios sobre el {activeTab}. Este es un escenario simulado — {scenarioSummary(activeScenario)}
                             </div>
                         </div>
                         <button
@@ -2051,6 +2083,51 @@ export default function PLMatrix() {
                             Volver a {activeTab === 'Forecast' ? 'Forecast base' : 'Presupuesto base'}
                         </button>
                     </div>
+
+                    {/* Comparativa BASE → ESCENARIO (impacto anual) */}
+                    {baseTotalsAnnual && (() => {
+                        const rows: { label: string; before: number; after: number; kind: 'money' | 'pct'; positiveIsGood: boolean }[] = [
+                            { label: 'Ingresos', before: baseTotalsAnnual.revenue, after: ingresosAnual, kind: 'money', positiveIsGood: true },
+                            { label: 'Gastos', before: baseTotalsAnnual.expenses, after: gastosAnual, kind: 'money', positiveIsGood: false },
+                            { label: 'EBITDA', before: baseTotalsAnnual.ebitda, after: ebitdaAnual, kind: 'money', positiveIsGood: true },
+                            {
+                                label: 'Rentabilidad',
+                                before: baseTotalsAnnual.revenue > 0 ? (baseTotalsAnnual.ebitda / baseTotalsAnnual.revenue) * 100 : 0,
+                                after: ingresosAnual > 0 ? (ebitdaAnual / ingresosAnual) * 100 : 0,
+                                kind: 'pct',
+                                positiveIsGood: true,
+                            },
+                        ];
+                        const fmt = (v: number, kind: 'money' | 'pct') => kind === 'money'
+                            ? Math.round(v).toLocaleString('de-DE') + ' €'
+                            : `${v.toFixed(1)}%`;
+                        return (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 px-4 py-2 bg-white/70 border-t border-amber-200">
+                                {rows.map(r => {
+                                    const delta = r.after - r.before;
+                                    const isImprovement = r.positiveIsGood ? delta >= 0 : delta <= 0;
+                                    const deltaAbs = Math.abs(delta);
+                                    const deltaColor = deltaAbs < 0.005 ? 'text-gray-500' : (isImprovement ? 'text-emerald-700' : 'text-rose-700');
+                                    const arrow = deltaAbs < 0.005 ? '=' : (delta > 0 ? '▲' : '▼');
+                                    return (
+                                        <div key={r.label} className="rounded-md bg-white border border-amber-100 px-2.5 py-1.5">
+                                            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">{r.label} · anual</div>
+                                            <div className="flex items-baseline gap-1.5 mt-0.5 flex-wrap">
+                                                <span className="text-[11px] text-gray-500 tabular-nums line-through opacity-70">{fmt(r.before, r.kind)}</span>
+                                                <span className="text-[10px] text-gray-400">→</span>
+                                                <span className="text-sm font-bold text-gray-900 tabular-nums">{fmt(r.after, r.kind)}</span>
+                                            </div>
+                                            <div className={`text-[10.5px] font-bold ${deltaColor}`}>
+                                                {arrow} {r.kind === 'money'
+                                                    ? `${delta > 0 ? '+' : ''}${Math.round(delta).toLocaleString('de-DE')} €`
+                                                    : `${delta > 0 ? '+' : ''}${delta.toFixed(1)} pp`}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })()}
                 </div>
             )}
 
