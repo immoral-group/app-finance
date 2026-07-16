@@ -68,12 +68,48 @@ function resolveAppUrl(explicit?: string): string {
     return '';
 }
 
+// Mapa moduleKey → ruta interna del módulo. Debe mantenerse alineado con
+// NAV_ITEMS en client/src/lib/constants.ts. Si un moduleKey no está aquí,
+// el CTA cae a la raíz de la app.
+const MODULE_ROUTES: Record<string, string> = {
+    dashboard: '/',
+    billing: '/billing',
+    media_investment: '/media-investment',
+    payrolls: '/payroll',
+    payments: '/payments',
+    payment_links: '/payments/generate-link',
+    dunning: '/payments/dunning',
+    commissions: '/commissions',
+    pl_matrix: '/pl-matrix',
+    departamentos: '/departamentos',
+    clients: '/clients',
+    client_billing: '/client-billing',
+    settings: '/settings',
+    user_management: '/users',
+    imsales_billing: '/imsales-billing',
+    developers: '/developers',
+    profitability: '/profitability',
+    release_notifications: '/release-notifications',
+};
+
+function routeFor(entry: ChangelogEntry): string {
+    if (!entry.moduleKey) return '';
+    return MODULE_ROUTES[entry.moduleKey] || '';
+}
+
+function ctaUrlFor(entry: ChangelogEntry, appUrl: string): string {
+    const route = routeFor(entry);
+    if (!route || route === '/') return appUrl;
+    return `${appUrl}${route}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Builder por defecto — usa el tipo, título, descripción y fecha del entry
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildDefault(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
     const appUrl = resolveAppUrl(opts.appUrl);
+    const ctaUrl = ctaUrlFor(entry, appUrl);
     const ctaLabel = opts.ctaLabel || 'Abrir en la app';
     const meta = TYPE_META[entry.type];
     const subject = `✨ ${entry.title}`;
@@ -85,7 +121,7 @@ function buildDefault(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
         '',
         entry.description,
         '',
-        `Abre la app: ${appUrl}`,
+        `Abre la app: ${ctaUrl}`,
         `— ${prettyDate(entry.date)}`,
     ].join('\n');
 
@@ -116,7 +152,7 @@ function buildDefault(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
       <td align="center" style="padding:28px 32px 8px 32px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
           <td style="background:${meta.heroGradient};border-radius:12px;">
-            <a href="${appUrl}" target="_blank" style="display:inline-block;padding:14px 30px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;">${esc(ctaLabel)} →</a>
+            <a href="${ctaUrl}" target="_blank" style="display:inline-block;padding:14px 30px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;">${esc(ctaLabel)} →</a>
           </td>
         </tr></table>
       </td>
@@ -132,7 +168,7 @@ function buildDefault(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
       <td style="background:#f9fafb;padding:18px 32px;border-top:1px solid #e5e7eb;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
           <td style="font-size:11px;color:#9ca3af;">Immoral Finance · Notificación de novedad</td>
-          <td align="right" style="font-size:11px;"><a href="${appUrl}" target="_blank" style="color:${meta.accent};text-decoration:none;">Ir a la app</a></td>
+          <td align="right" style="font-size:11px;"><a href="${ctaUrl}" target="_blank" style="color:${meta.accent};text-decoration:none;">Ir a la app</a></td>
         </tr></table>
       </td>
     </tr>
@@ -149,6 +185,7 @@ function buildDefault(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
 
 function buildScenariosRows(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
     const appUrl = resolveAppUrl(opts.appUrl);
+    const ctaUrl = ctaUrlFor(entry, appUrl);
     const subject = '✨ Nuevo en Escenarios: añade y quita filas para simular altas, bajas y pagas dobles';
     const text = [
         'Novedad en Immoral Finance — Escenarios',
@@ -159,7 +196,7 @@ function buildScenariosRows(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltE
         '  • Altas: añade una fila nueva con su coste mensual y rango de meses.',
         '  • Paga doble o extra en diciembre para nuevos trabajadores (14 pagas).',
         '',
-        `Abre la app: ${appUrl}`,
+        `Abre la app: ${ctaUrl}`,
         '— Immoral Finance',
     ].join('\n');
 
@@ -258,7 +295,7 @@ function buildScenariosRows(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltE
         <td align="center" style="padding:28px 32px 8px 32px;">
           <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
             <td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:12px;">
-              <a href="${appUrl}" target="_blank" style="display:inline-block;padding:14px 30px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">Abrir Escenarios en la app →</a>
+              <a href="${ctaUrl}" target="_blank" style="display:inline-block;padding:14px 30px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">Abrir Escenarios en la app →</a>
             </td>
           </tr></table>
           <div style="margin-top:10px;font-size:11px;color:#9ca3af;">Encuéntralo dentro de <strong>Presupuesto</strong> o <strong>Forecast</strong> → botón <span style="color:#6366f1;">✨ Escenarios</span> → sección <em>Filas del escenario</em>.</div>
@@ -277,7 +314,7 @@ function buildScenariosRows(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltE
         <td style="background:#f9fafb;padding:18px 32px;border-top:1px solid #e5e7eb;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
             <td style="font-size:11px;color:#9ca3af;">Immoral Finance · Notificación de nueva funcionalidad</td>
-            <td align="right" style="font-size:11px;"><a href="${appUrl}" target="_blank" style="color:#6366f1;text-decoration:none;">Ir a la app</a></td>
+            <td align="right" style="font-size:11px;"><a href="${ctaUrl}" target="_blank" style="color:#6366f1;text-decoration:none;">Ir a la app</a></td>
           </tr></table>
         </td>
       </tr>
@@ -286,8 +323,6 @@ function buildScenariosRows(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltE
   </td></tr>
 </table>
 </body></html>`;
-    // entry marker just to satisfy TS in case unused
-    void entry;
     return { subject, html, text };
 }
 
@@ -301,6 +336,7 @@ function buildScenariosRows(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltE
 
 function buildEnviarNovedadesEmail(entry: ChangelogEntry, opts: BuildOpts = {}): BuiltEmail {
     const appUrl = resolveAppUrl(opts.appUrl);
+    const ctaUrl = ctaUrlFor(entry, appUrl);
     const subject = '📬 Nuevo en Immoral Finance: envía novedades por email desde la app';
     const text = [
         'Novedad en Immoral Finance — Enviar novedades',
@@ -311,7 +347,7 @@ function buildEnviarNovedadesEmail(entry: ChangelogEntry, opts: BuildOpts = {}):
         '  • Previsualiza el correo antes de enviar.',
         '  • Cada destinatario recibe un correo dedicado, no ve al resto.',
         '',
-        `Abre la app: ${appUrl}/release-notifications`,
+        `Abre la app: ${ctaUrl}`,
         '— Immoral Finance',
     ].join('\n');
 
@@ -394,7 +430,7 @@ function buildEnviarNovedadesEmail(entry: ChangelogEntry, opts: BuildOpts = {}):
         <td align="center" style="padding:28px 32px 8px 32px;">
           <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
             <td style="background:linear-gradient(135deg,#10b981,#06b6d4);border-radius:12px;">
-              <a href="${appUrl}/release-notifications" target="_blank" style="display:inline-block;padding:14px 30px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">Abrir Enviar novedades →</a>
+              <a href="${ctaUrl}" target="_blank" style="display:inline-block;padding:14px 30px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.2px;">Abrir Enviar novedades →</a>
             </td>
           </tr></table>
           <div style="margin-top:10px;font-size:11px;color:#9ca3af;">Disponible solo para <strong>superadmins</strong> · en el sidebar bajo <span style="color:#10b981;">✉️ Enviar novedades</span></div>
@@ -413,7 +449,7 @@ function buildEnviarNovedadesEmail(entry: ChangelogEntry, opts: BuildOpts = {}):
         <td style="background:#f9fafb;padding:18px 32px;border-top:1px solid #e5e7eb;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
             <td style="font-size:11px;color:#9ca3af;">Immoral Finance · Notificación de nueva funcionalidad</td>
-            <td align="right" style="font-size:11px;"><a href="${appUrl}" target="_blank" style="color:#10b981;text-decoration:none;">Ir a la app</a></td>
+            <td align="right" style="font-size:11px;"><a href="${ctaUrl}" target="_blank" style="color:#10b981;text-decoration:none;">Ir a la app</a></td>
           </tr></table>
         </td>
       </tr>
@@ -422,7 +458,6 @@ function buildEnviarNovedadesEmail(entry: ChangelogEntry, opts: BuildOpts = {}):
   </td></tr>
 </table>
 </body></html>`;
-    void entry;
     return { subject, html, text };
 }
 
