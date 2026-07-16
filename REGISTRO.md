@@ -1584,3 +1584,33 @@ Después:
 
 - `fe79c98` fix(envionovedades): CTA del email lleva al módulo, no al home
 - `438823e` merge a `main`
+
+---
+
+### 2026-07-16 — Fix: Cron automático de Impagos no ejecutaba (POST vs GET)
+
+**Rama:** `fix/impagos2`
+
+**Problema reportado:**
+El sistema de impagos aparecía como "Activado" en la configuración, el cron horario estaba dado de alta en `vercel.json`, pero no llegaba ningún recordatorio automático a nadie. Los envíos manuales desde el botón "Ejecutar ahora" y desde `POST /dunning/run` sí funcionaban.
+
+**Causa raíz:**
+Vercel Cron Jobs llaman al endpoint configurado usando el método **GET**. Nuestros endpoints estaban registrados solo como `router.post('/cron/run', ...)` y `router.post('/cron/sync-paid', ...)`. Cuando Vercel pegaba con GET no había handler para ese método → Express caía en el siguiente middleware (`router.use(requireSuperAdmin)`), que devolvía `401 no-auth` porque el header `Authorization: Bearer CRON_SECRET` no es un token de Supabase. Resultado: el cron pegaba una vez por hora contra el servidor, cobraba 401 y se descartaba, sin dejar rastro en `dunning_config`.
+
+**Solución (`services/admin-service/src/routes/dunning.js`):**
+
+- Extraídos los handlers de `/cron/run` y `/cron/sync-paid` a funciones `cronRunHandler` / `cronSyncPaidHandler`.
+- Registrados en `router.get(...)` (para Vercel Cron) **y** `router.post(...)` (para disparo manual con `curl`). Los dos pasan por el mismo middleware `requireCronSecret`, así que la protección con `Authorization: Bearer CRON_SECRET` no cambia.
+- Añadida trazabilidad de "skip": cada vez que el cron llega pero no envía (sistema deshabilitado, día/hora que no toca), se actualiza `last_cron_run_at` + `last_cron_status = "skipped: <motivo>"` + `last_cron_summary`. Así en la UI se ve que Vercel sí está pegando aunque no toque enviar. La rama de `ran-recently` (idempotencia de 30 min) no reescribe el timestamp para no romper la propia protección.
+
+**Cambios**
+
+- `services/admin-service/src/routes/dunning.js` — GET+POST en los dos endpoints del cron + stamp de skip.
+- `client/src/lib/changelog.ts` — entrada `v1.47-impagos-cron-metodo-http`.
+
+**Cómo verificar en producción**
+
+1. Esperar a que Vercel Cron ejecute (cada hora en punto).
+2. En Impagos → Configuración → Programación, mirar "Última ejecución": debe actualizarse aunque no toque enviar (por defecto solo lunes 9:00 Madrid).
+3. Cuando toque día/hora configurados, revisar en la BD `dunning_reminders` para ver los envíos.
+4. Manual: `curl -H "Authorization: Bearer $CRON_SECRET" https://app-finance.vercel.app/api/admin/dunning/cron/run` (GET) debe responder JSON.
