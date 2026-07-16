@@ -1526,3 +1526,61 @@ Todos los paneles son **ocultables** y el estado se persiste en `localStorage` c
 #### Commit
 
 - `fix/impagos1` — feat(dunning): pantallitas guía integradas en Impagos y su configuración + registro en REGISTRO y changelog.
+
+---
+
+### 2026-07-16 — Fix: URL del correo de novedades apunta al módulo, no al home
+
+**Rama:** `fix/envionovedades` (mergeada a `main` en commit `438823e`)
+
+**Motivo:**
+Cuando un superadmin usaba **Enviar novedades** para notificar una novedad por correo, todos los enlaces del email (botón CTA principal y link "Ir a la app" del footer) apuntaban al `appUrl` base (el home). El destinatario aterrizaba en el Dashboard y tenía que buscar manualmente el módulo donde estaba la funcionalidad nueva. Cada `ChangelogEntry` ya llevaba un `moduleKey`, pero no se estaba usando para construir el link.
+
+#### Cambio
+
+`client/src/lib/releaseEmailBuilder.ts`:
+
+- Nuevo mapa `MODULE_ROUTES: Record<string, string>` que traduce cada `moduleKey` a su ruta interna (alineado con `NAV_ITEMS` de `client/src/lib/constants.ts`).
+- Nuevo helper `ctaUrlFor(entry, appUrl)` que devuelve `appUrl + ruta del módulo`. Si la entrada no tiene `moduleKey` o mapea a la raíz (`dashboard`), devuelve `appUrl` tal cual — comportamiento anterior preservado.
+- Los tres builders (`buildDefault`, `buildScenariosRows`, `buildEnviarNovedadesEmail`) sustituyen su uso de `${appUrl}` en los enlaces (`<a href>`, subject de texto plano) por `${ctaUrl}`.
+
+#### Mapeo `moduleKey → ruta`
+
+| moduleKey | ruta |
+|---|---|
+| `dashboard` | `/` (usa la raíz, no se anexa) |
+| `billing` | `/billing` |
+| `media_investment` | `/media-investment` |
+| `payrolls` | `/payroll` |
+| `payments` | `/payments` |
+| `payment_links` | `/payments/generate-link` |
+| `dunning` | `/payments/dunning` |
+| `commissions` | `/commissions` |
+| `pl_matrix` | `/pl-matrix` |
+| `departamentos` | `/departamentos` |
+| `clients` | `/clients` |
+| `client_billing` | `/client-billing` |
+| `settings` | `/settings` |
+| `user_management` | `/users` |
+| `imsales_billing` | `/imsales-billing` |
+| `developers` | `/developers` |
+| `profitability` | `/profitability` |
+| `release_notifications` | `/release-notifications` |
+
+#### Ejemplo
+
+Antes:
+- Novedad `v1.43-impagos` (moduleKey `dunning`) → botón "Abrir en la app" → `https://app-finance.vercel.app` (home).
+
+Después:
+- Novedad `v1.43-impagos` → botón "Abrir en la app" → `https://app-finance.vercel.app/payments/dunning` (el módulo real).
+
+#### Nota sobre versionado
+
+- Se registra como `v1.46-envionovedades-url-modulo` en `changelog.ts`.
+- `v1.44-impagos-guia` y `v1.45-escenarios-montos-y-compartir` ya estaban ocupadas en `main` cuando se documentó este fix, así que se cogió la siguiente libre (`v1.46`).
+
+#### Commit
+
+- `fe79c98` fix(envionovedades): CTA del email lleva al módulo, no al home
+- `438823e` merge a `main`

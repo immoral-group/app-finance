@@ -23,6 +23,17 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.46-envionovedades-url-modulo',
+        date: '2026-07-16',
+        title: 'Enviar novedades: el link del correo abre el módulo concreto',
+        description: 'El botón CTA y los enlaces del pie del correo de novedades ya no llevan al home de la app: ahora abren directamente el espacio donde vive esa funcionalidad (p. ej. Impagos → /payments/dunning, Rentabilidad → /profitability, P&L Matrix → /pl-matrix, etc.). El destino se calcula a partir del moduleKey de cada novedad usando el mismo mapeo que el sidebar. Si la novedad es transversal y no tiene moduleKey, sigue yendo a la raíz.',
+        type: 'fix',
+        moduleKey: 'release_notifications',
+        superadminOnly: true,
+        icon: 'Mail',
+        highlight: true,
+    },
+    {
         id: 'v1.45-escenarios-montos-y-compartir',
         date: '2026-07-16',
         title: 'Escenarios: definir montos por fila y compartir por correo',
