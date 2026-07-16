@@ -1217,22 +1217,22 @@ export const ForecastScenariosModal = ({
                         </div>
                     </section>
 
-                    {/* MONTOS FIJOS POR FILA */}
+                    {/* DEFINIR MONTO POR FILA */}
                     <section>
                         <h3 className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2 flex items-center gap-1.5">
-                            <Coins size={12} /> Montos fijos por fila
+                            <Coins size={12} /> Definir monto por fila
                             <span className="text-[9px] font-extrabold tracking-widest text-white bg-gradient-to-r from-amber-500 to-orange-500 px-1.5 py-0.5 rounded shadow-sm">NUEVO</span>
                         </h3>
                         <div className="space-y-2 rounded-lg border border-amber-100 bg-amber-50/40 p-3">
                             <p className="text-[11px] text-gray-600 leading-snug">
-                                Sustituye el valor base de una fila por un monto exacto en €. Ignora el ajuste por %. Ejemplo: fijar los ingresos de un servicio en 12.000 € para julio.
+                                Escribe un objetivo o monto exacto en € para una fila en el rango de meses que elijas. Sustituye el valor base y prevalece sobre el ajuste por %. Ejemplo: los ingresos de un servicio serán 12.000 € en julio.
                             </p>
 
                             {/* Overrides activos — muestra el rango de meses de cada uno y permite editarlo */}
                             {(draft.amountOverrides || []).length > 0 && (
                                 <div className="space-y-1">
                                     <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700 flex items-center gap-1">
-                                        Activos ({(draft.amountOverrides || []).length})
+                                        Definidos ({(draft.amountOverrides || []).length})
                                     </div>
                                     <div className="space-y-1">
                                         {(draft.amountOverrides || []).map(o => {
@@ -1323,7 +1323,7 @@ export const ForecastScenariosModal = ({
                                                     <summary className="cursor-pointer flex items-center justify-between text-gray-700 font-medium select-none">
                                                         <span>{d}</span>
                                                         <span className="text-[10px] text-gray-500">
-                                                            {activeCount > 0 ? <span className="text-amber-700 font-bold mr-1">{activeCount} fijos</span> : null}
+                                                            {activeCount > 0 ? <span className="text-amber-700 font-bold mr-1">{activeCount} definidos</span> : null}
                                                             ({items.length})
                                                         </span>
                                                     </summary>
@@ -1368,7 +1368,7 @@ export const ForecastScenariosModal = ({
                                                     <summary className="cursor-pointer flex items-center justify-between text-gray-700 font-medium select-none">
                                                         <span>{EXPENSE_SECTION_LABELS[k]}</span>
                                                         <span className="text-[10px] text-gray-500">
-                                                            {catActive > 0 ? <span className="text-amber-700 font-bold mr-1">{catActive} fijos</span> : null}
+                                                            {catActive > 0 ? <span className="text-amber-700 font-bold mr-1">{catActive} definidos</span> : null}
                                                             ({depts.length})
                                                         </span>
                                                     </summary>
@@ -1381,7 +1381,7 @@ export const ForecastScenariosModal = ({
                                                                     <summary className="cursor-pointer flex items-center justify-between text-[11px] text-gray-700 select-none">
                                                                         <span>{d}</span>
                                                                         <span className="text-[10px] text-gray-500">
-                                                                            {deptActive > 0 ? <span className="text-amber-700 font-bold mr-1">{deptActive} fijos</span> : null}
+                                                                            {deptActive > 0 ? <span className="text-amber-700 font-bold mr-1">{deptActive} definidos</span> : null}
                                                                             ({items.length})
                                                                         </span>
                                                                     </summary>

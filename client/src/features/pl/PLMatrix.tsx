@@ -1536,19 +1536,18 @@ export default function PLMatrix() {
                     </td>
                 );
             }
-            // Monto fijado por override — celda en ámbar con base tachada
+            // Monto definido por el escenario — celda en ámbar con base tachada como referencia
             if (override) {
                 return (
                     <td
                         key={monthIdx}
                         className="border border-amber-200 px-1 py-1 text-right text-xs relative bg-amber-100/70 text-amber-900"
-                        title={`Monto fijado por el escenario: ${Math.round(override.amount).toLocaleString('de-DE')} € (${MONTHS[override.fromMonth - 1]}–${MONTHS[override.toMonth - 1]})${baseVal ? ` · Base: ${Math.round(baseVal).toLocaleString('de-DE')} €` : ''}`}
+                        title={`Escenario: ${Math.round(override.amount).toLocaleString('de-DE')} € (${MONTHS[override.fromMonth - 1]}–${MONTHS[override.toMonth - 1]})${baseVal ? ` · Base: ${Math.round(baseVal).toLocaleString('de-DE')} €` : ''}`}
                     >
                         <div className="font-semibold tabular-nums">{currentVal ? fmtDisplay(currentVal) : <span className="text-amber-300">0</span>}</div>
                         {baseVal !== 0 && baseVal !== currentVal && (
                             <div className="text-[9px] line-through opacity-60 tabular-nums">{Math.round(baseVal).toLocaleString('de-DE')}</div>
                         )}
-                        <div className="text-[9px] font-bold text-amber-700">FIJO</div>
                     </td>
                 );
             }
