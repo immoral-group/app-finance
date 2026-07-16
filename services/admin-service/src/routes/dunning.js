@@ -145,19 +145,35 @@ function isCronScheduledNow(config, now = new Date()) {
     }
 }
 
-// POST /dunning/cron/run — ejecuta el envío si toca según config.
+// GET/POST /dunning/cron/run — ejecuta el envío si toca según config.
+// IMPORTANTE: Vercel Cron llama con método GET, así que el handler debe estar
+// registrado en GET. Aceptamos también POST para poder disparar manualmente
+// desde curl u otra herramienta si hace falta.
 // Idempotente: si el cron corre 2 veces en la misma hora, la segunda no repite.
-router.post('/cron/run', requireCronSecret, async (req, res) => {
+async function cronRunHandler(req, res) {
     try {
         const { data: config } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
         if (!config) return res.status(500).json({ error: 'no-config' });
 
+        // Trazabilidad: dejar constancia de cada llamada del cron aunque acabe
+        // siendo un skip, así en la UI se puede ver que Vercel sí está pegando.
+        const nowIso = new Date().toISOString();
+        const stampSkip = async (reason, extra = {}) => {
+            await supabase.from('dunning_config').update({
+                last_cron_run_at: nowIso,
+                last_cron_status: `skipped: ${reason}`,
+                last_cron_summary: { skipped: true, reason, ...extra },
+            }).eq('id', 1).then(() => {}, () => {});
+        };
+
         if (!config.enabled) {
+            await stampSkip('system-disabled');
             return res.json({ skipped: true, reason: 'system-disabled' });
         }
 
         const schedule = isCronScheduledNow(config);
         if (!schedule.ok) {
+            await stampSkip('not-scheduled', { schedule });
             return res.json({ skipped: true, reason: 'not-scheduled', schedule });
         }
 
@@ -195,10 +211,12 @@ router.post('/cron/run', requireCronSecret, async (req, res) => {
         }).eq('id', 1).then(() => {}, () => {});
         res.status(500).json({ error: err.message });
     }
-});
+}
+router.get('/cron/run', requireCronSecret, cronRunHandler);
+router.post('/cron/run', requireCronSecret, cronRunHandler);
 
-// POST /dunning/cron/sync-paid — sincroniza cobros diariamente.
-router.post('/cron/sync-paid', requireCronSecret, async (_req, res) => {
+// GET/POST /dunning/cron/sync-paid — sincroniza cobros diariamente.
+async function cronSyncPaidHandler(_req, res) {
     try {
         const result = await runSyncPaid();
         await supabase.from('dunning_config').update({
@@ -209,7 +227,9 @@ router.post('/cron/sync-paid', requireCronSecret, async (_req, res) => {
         console.error('[dunning] cron/sync-paid error:', err);
         res.status(500).json({ error: err.message });
     }
-});
+}
+router.get('/cron/sync-paid', requireCronSecret, cronSyncPaidHandler);
+router.post('/cron/sync-paid', requireCronSecret, cronSyncPaidHandler);
 
 
 // ── Lógica compartida: ejecución de envíos y sync-paid ──────────────────────

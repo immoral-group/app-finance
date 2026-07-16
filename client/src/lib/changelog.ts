@@ -23,6 +23,17 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.47-impagos-cron-metodo-http',
+        date: '2026-07-16',
+        title: 'Impagos: los recordatorios automáticos ya se envían de verdad',
+        description: 'El cron horario de Vercel llegaba al servidor pero no ejecutaba nada: los endpoints /dunning/cron/run y /dunning/cron/sync-paid estaban registrados solo como POST y Vercel Cron los llama con GET, así que respondíamos 404/401 y se saltaba el envío. Ahora ambos endpoints aceptan GET (Vercel) y POST (disparo manual desde curl), con la misma lógica y protegidos por el header Authorization: Bearer CRON_SECRET. Además, cuando el cron llega pero se salta la ejecución (sistema deshabilitado, día/hora que no toca) se actualiza last_cron_run_at + last_cron_status con el motivo, para poder ver en la config que Vercel sí está pegando y por qué no envió.',
+        type: 'fix',
+        moduleKey: 'dunning',
+        superadminOnly: true,
+        icon: 'Zap',
+        highlight: true,
+    },
+    {
         id: 'v1.46-envionovedades-url-modulo',
         date: '2026-07-16',
         title: 'Enviar novedades: el link del correo abre el módulo concreto',
