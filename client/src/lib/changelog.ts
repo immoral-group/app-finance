@@ -23,6 +23,16 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.45-escenarios-montos-y-compartir',
+        date: '2026-07-16',
+        title: 'Escenarios: definir montos por fila y compartir por correo',
+        description: 'Los escenarios de Forecast y Presupuesto ahora aceptan un objetivo o monto exacto en € para cualquier fila y rango de meses (además del ajuste por %). El drill-down "Definir monto por fila" está organizado como el resto del modal: Ingresos por hub → servicio, Gastos por categoría → hub → item. Las celdas con monto asignado se resaltan en ámbar mostrando el valor base tachado como referencia. Nuevo botón para compartir un escenario por correo (a usuarios de la app o direcciones externas): el destinatario recibe un mensaje con el resumen del cambio y un link que abre la app con el escenario ya aplicado. Al entrar aparece un banner destacado "Escenario compartido contigo" con la comparativa anual base → escenario (Ingresos, Gastos, EBITDA y Rentabilidad %) y un botón claro para volver al Forecast/Presupuesto base.',
+        type: 'improvement',
+        moduleKey: 'pl_matrix',
+        icon: 'Sparkles',
+        highlight: true,
+    },
+    {
         id: 'v1.44-impagos-guia',
         date: '2026-07-16',
         title: 'Impagos: pantallitas de ayuda integradas',

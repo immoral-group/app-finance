@@ -1409,6 +1409,73 @@ En orden:
 
 **Commits añadidos tras el registro inicial:**
 - `ffe6302` docs: registrar módulo en REGISTRO y changelog
+
+---
+
+### 2026-07-16 — Feature: Escenarios · definir monto por fila + compartir por correo (rama `fix/escenarios3`, mergeada a `main`)
+
+**Motivo:**
+Los escenarios sólo permitían ajustes por porcentaje. Faltaba poder decir "en julio para Automation vamos a facturar 12.000 €" (un objetivo concreto por fila y mes) manteniendo el resto del forecast/presupuesto intacto. Además, no había forma de avisar a alguien de que había un escenario disponible: sólo se podía compartir con hubs y quien no supiera que existía nunca lo veía.
+
+#### Cambios funcionales
+
+1. **Definir monto por fila (además del ajuste por %)**
+   - Nueva sección en el modal de escenarios: **"Definir monto por fila"**, con la misma jerarquía visual que las secciones de % ya existentes (Ingresos: hub → servicio; Gastos: categoría → hub → item).
+   - Cada leaf muestra el nombre + un input de €/mes. Escribir un monto crea el override con el rango del escenario por defecto; borrarlo (0) lo elimina.
+   - Los grupos con overrides activos se auto-expanden y muestran "N definidos".
+   - Encima del árbol, lista de overrides activos con **chip de rango de meses editable** (con enlace para volver al rango del escenario).
+   - Prioridad de resolución por celda: `addedRow` → `removed` → `amountOverride` → ajuste por %.
+
+2. **Marca visual en la P&L**
+   - Celdas con monto definido se muestran con fondo ámbar y el valor base tachado debajo como referencia.
+   - Se arregló un bug donde las filas de **Ingresos** (revenue) tomaban una rama read-only en Forecast que se saltaba la marca de escenario; ahora usan el mismo renderer que gastos.
+
+3. **Banner "estás en un escenario" en la P&L**
+   - Debajo del header aparece un banner con rayas ámbar cuando hay un escenario aplicado en Forecast/Presupuesto.
+   - Cuando el usuario llega por link compartido, el título cambia a "ESCENARIO COMPARTIDO CONTIGO".
+   - Incluye una fila con **4 tarjetas comparativas anuales**: Ingresos, Gastos, EBITDA y Rentabilidad %, cada una mostrando `base → escenario` con la variación en € o puntos porcentuales, y flecha ▲/▼ verde/rojo según mejora o empeora el resultado.
+   - Botón "Volver a Forecast/Presupuesto base" para salir del escenario.
+
+4. **Compartir escenarios por correo**
+   - Nuevo icono de sobre junto al lápiz/papelera de cada escenario guardado.
+   - Mini-formulario dentro del modal: uno o varios emails (separables por coma/espacio) + mensaje opcional.
+   - Endpoint `POST /pl/scenarios/:id/share` con `{ emails, message }` que envía un correo HTML con hero, chips de resumen, mensaje opcional del emisor y CTA para abrir el escenario.
+   - El link es `/pl-matrix?tab=Forecast|Presupuesto&scenario=<id>`. La URL base se resuelve dinámicamente desde el request (preview de Vercel o dominio de producción) — mismo patrón que `dunningEmailV2` para el logo.
+   - Alias de remitente: si el correo de la sesión es `admin@immoral.com`, se muestra **"Daniel"** como remitente. Regla puntual sólo para ese correo compartido; el resto de usuarios se muestra tal cual.
+
+5. **Activación por URL param**
+   - `PLMatrix` lee `?scenario=<id>` y lo aplica automáticamente si coincide con un escenario guardado.
+   - Sincroniza el param al activar/desactivar escenarios manualmente, así los enlaces preservan el estado y el back del browser funciona bien.
+
+#### Archivos modificados
+
+| Archivo | Cambio |
+|---|---|
+| `client/src/features/pl/ForecastScenarios.tsx` | Tipo `ScenarioAmountOverride`, campo `amountOverrides?`, helper `getAmountOverride()`, componente `AmountInput`, sección "Definir monto por fila" con drill-down, mini-formulario de compartir, prop `onShare` |
+| `client/src/features/pl/PLMatrix.tsx` | `getCellValue()` honra overrides antes que %, `renderEditableCell()` pinta celda ámbar, banner con comparativa anual base↔escenario, hook `useUrlState('scenario')`, `useMemo` de `baseTotalsAnnual`, wiring de `onShare` con `toast` |
+| `client/src/features/dashboard/DepartmentPL.tsx` | Aplica overrides en `getCellValue()`, `getScenarioValue()` y `renderReadOnlyCell()` |
+| `client/src/lib/api/admin.ts` | Método `shareForecastScenario(id, { emails, message })` |
+| `services/admin-service/src/routes/pl.js` | Endpoint `POST /pl/scenarios/:id/share`, helper `resolveBaseUrl(req)`, tabla `SENDER_ALIASES` con `admin@immoral.com → Daniel`, template HTML del email |
+
+Retrocompatible con escenarios guardados: `amountOverrides` es opcional en `ForecastScenario`.
+
+#### Copy del correo (final)
+
+- Subject: `Escenario compartido: <nombre>`
+- Cuerpo: *"<Sender> ha preparado un escenario sobre el Forecast y quiere que lo revises. Al abrirlo verás el impacto de los ajustes propuestos mes a mes, por hub y por categoría — con la variación en ingresos, gastos, EBITDA y rentabilidad respecto a la línea base."*
+- Pie: *"El escenario vive dentro de la app: puedes explorarlo con toda la información, y el Forecast base queda intacto hasta que decidáis aplicarlo."*
+- CTA: **Abrir escenario en la app →**
+
+#### Commits principales de la rama
+
+- `5a88595` feat — permitir fijar monto por fila y mes (base)
+- `585aa81` feat — rediseñar UI con drill-down por hub/categoría/item
+- `06ba785` feat — marcar overrides en modal, compartir por correo y banner de vista simulada
+- `316f961` fix — derivar URL base del link del email desde el request (para previews)
+- `9a01ae8` fix — marca visual en ingresos + comparativa antes/después con rentabilidad
+- `b726235` polish — quitar etiqueta FIJO y renombrar como "definir monto"
+- `1bfe1e2` polish — copy del correo con más aplomo + alias Daniel para admin@immoral.com
+- `d9e7d36` merge a `main`
 - `8381bae` UX: resumen del estado + feedback guardado en Programación
 
 ---
