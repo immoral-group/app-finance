@@ -56,6 +56,20 @@ async function sendScenarioEmail({ to, subject, html }) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Alias fijos para correos genéricos. El correo admin@immoral.com es
+// una cuenta compartida que en realidad pertenece a Daniel — mostrar
+// "Daniel" en los envíos evita explicaciones cada vez que aparece.
+// Solo aplica a este caso puntual; el resto de usuarios se muestran con
+// su nombre/email de la sesión como siempre.
+const SENDER_ALIASES = {
+    'admin@immoral.com': 'Daniel',
+};
+function friendlySender(email, fallback) {
+    const normalized = String(email || '').toLowerCase().trim();
+    if (SENDER_ALIASES[normalized]) return SENDER_ALIASES[normalized];
+    return email || fallback || 'Alguien de tu equipo';
+}
+
 // ================================================
 // P&L NOTES — Universal note storage per cell
 // ================================================
@@ -1740,7 +1754,7 @@ router.post('/scenarios/:id/share', async (req, res) => {
         if (error || !scenario) return res.status(404).json({ error: 'Escenario no encontrado' });
 
         const { userEmail } = extractUser(req);
-        const senderLabel = userEmail || scenario.created_by_email || 'Alguien de tu equipo';
+        const senderLabel = friendlySender(userEmail, friendlySender(scenario.created_by_email));
         const tab = scenario.scope === 'budget' ? 'Presupuesto' : 'Forecast';
         const baseUrl = resolveBaseUrl(req);
         const link = `${baseUrl}/pl-matrix?tab=${encodeURIComponent(tab)}&scenario=${encodeURIComponent(scenario.id)}`;
@@ -1751,7 +1765,7 @@ router.post('/scenarios/:id/share', async (req, res) => {
             if (s.revenue?.globalPct) summaryChips.push(`${s.revenue.globalPct > 0 ? '+' : ''}${s.revenue.globalPct}% ingresos`);
             if (s.expenses?.globalPct) summaryChips.push(`${s.expenses.globalPct > 0 ? '+' : ''}${s.expenses.globalPct}% gastos`);
             const ov = Array.isArray(s.amountOverrides) ? s.amountOverrides.length : 0;
-            if (ov) summaryChips.push(`${ov} monto${ov === 1 ? '' : 's'} fijos`);
+            if (ov) summaryChips.push(`${ov} monto${ov === 1 ? '' : 's'} definido${ov === 1 ? '' : 's'}`);
             const add = Array.isArray(s.addedRows) ? s.addedRows.length : 0;
             if (add) summaryChips.push(`${add} fila${add === 1 ? '' : 's'} añadida${add === 1 ? '' : 's'}`);
             const rem = Array.isArray(s.removedItems) ? s.removedItems.length : 0;
@@ -1777,8 +1791,9 @@ router.post('/scenarios/:id/share', async (req, res) => {
                 </div>
                 <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:22px;">
                     <p style="margin:0 0 12px;font-size:14px;line-height:1.55;color:#374151;">
-                        <strong>${senderLabel}</strong> te ha compartido un escenario hipotético del P&amp;L.
-                        Al abrirlo verás claramente que estás en una <strong>vista simulada</strong>, no en los datos reales — con botón para volver al Real.
+                        <strong>${senderLabel}</strong> ha preparado un escenario sobre el ${tab} y quiere que lo revises.
+                        Al abrirlo verás el impacto de los ajustes propuestos mes a mes, por hub y por categoría —
+                        con la variación en ingresos, gastos, EBITDA y rentabilidad respecto a la línea base.
                     </p>
                     ${chipsHtml}
                     ${escapedMessage ? `
@@ -1788,7 +1803,7 @@ router.post('/scenarios/:id/share', async (req, res) => {
                     ` : ''}
                     <div style="text-align:center;margin:24px 0 12px;">
                         <a href="${link}" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 24px;border-radius:8px;font-size:14px;">
-                            Ver escenario en la app →
+                            Abrir escenario en la app →
                         </a>
                     </div>
                     <p style="margin:12px 0 0;font-size:11px;color:#6b7280;text-align:center;">
@@ -1796,7 +1811,7 @@ router.post('/scenarios/:id/share', async (req, res) => {
                     </p>
                     <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;" />
                     <p style="margin:0;font-size:11px;color:#9ca3af;text-align:center;">
-                        Este es un escenario <em>simulado</em>. No modifica los datos reales del negocio.
+                        El escenario vive dentro de la app: puedes explorarlo con toda la información, y el ${tab} base queda intacto hasta que decidáis aplicarlo.
                     </p>
                 </div>
             </div>

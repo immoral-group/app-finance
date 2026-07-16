@@ -897,7 +897,7 @@ export const ForecastScenariosModal = ({
                                                     className="w-full px-2 py-1 text-[11px] rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
                                                 />
                                                 <div className="text-[10px] text-gray-500 leading-tight">
-                                                    Enviaremos un link que abrirá esta app con el escenario aplicado y un aviso claro de que es una <span className="font-semibold text-amber-700">vista simulada</span>, no los datos reales.
+                                                    Enviaremos un link que abrirá la app con el escenario ya aplicado. El destinatario podrá revisar el impacto sin tocar el {targetLabel} base.
                                                 </div>
                                                 <div className="flex items-center justify-between gap-1.5">
                                                     <span className="text-[10px] text-gray-500">
