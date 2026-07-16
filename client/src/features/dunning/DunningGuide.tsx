@@ -215,7 +215,7 @@ function LevelChip({
 export function TabGuide({
     tab, title, desc, tips, storageKey,
 }: {
-    tab: 'rules' | 'schedule' | 'brand' | 'templates' | 'run';
+    tab: 'rules' | 'schedule' | 'brand' | 'templates' | 'run' | 'history';
     title: string;
     desc: ReactNode;
     tips: ReactNode[];

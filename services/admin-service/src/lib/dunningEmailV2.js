@@ -79,7 +79,7 @@ function renderBank(bank) {
  * @param {Object} [p.test_context] Si se pasa, añade banner "MODO PRUEBA" al inicio.
  *                                  { original_email: string, contact_name?: string }
  */
-export function renderDunningEmailV2({ config, template, invoice, stripe_url, test_context, base_url }) {
+export function renderDunningEmailV2({ config, template, invoice, stripe_url, test_context, base_url, tracking_pixel_url }) {
     const primary = config.brand_primary_color || '#0ea5e9';
     const secondary = config.brand_secondary_color || '#1e40af';
     const gradient = `linear-gradient(135deg, ${primary} 0%, ${secondary} 100%)`;
@@ -249,6 +249,7 @@ export function renderDunningEmailV2({ config, template, invoice, stripe_url, te
 
   </td></tr>
 </table>
+${tracking_pixel_url ? `<img src="${tracking_pixel_url}" width="1" height="1" alt="" style="display:block;border:0;outline:none;text-decoration:none;width:1px;height:1px;" />` : ''}
 </body></html>`;
 
     return { subject, html };

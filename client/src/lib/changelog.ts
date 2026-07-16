@@ -23,6 +23,17 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.48-impagos-historial-y-tracking',
+        date: '2026-07-16',
+        title: 'Impagos: historial detallado de envíos y saber si el cliente abrió el correo',
+        description: 'Nueva pestaña "Historial" en Configuración de impagos con dos vistas: (1) Ejecuciones del cron — cada vez que Vercel Cron o un disparo manual pega contra el endpoint, con estado (ok/skipped/error), motivo del skip (system-disabled, not-scheduled, ran-recently) y JSON de detalle plegable con las facturas planeadas y su resultado individual; (2) Historial de envíos — lista global de todos los recordatorios que han salido, con fecha, factura, cliente, nivel, destinatario, estado (sent/failed) y mensaje de error si hubo. Además, cada correo lleva un pixel invisible que registra si el destinatario lo abrió: nueva columna "Abierto" con la primera apertura y el contador. Funciona bien en Gmail y Outlook web; Apple Mail lo pre-carga siempre, así que ahí puede dar falsos positivos.',
+        type: 'improvement',
+        moduleKey: 'dunning',
+        superadminOnly: true,
+        icon: 'Clock',
+        highlight: true,
+    },
+    {
         id: 'v1.47-impagos-cron-metodo-http',
         date: '2026-07-16',
         title: 'Impagos: los recordatorios automáticos ya se envían de verdad',

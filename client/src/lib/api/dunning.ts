@@ -140,6 +140,35 @@ export interface DunningReminder {
     status: 'sent' | 'failed' | 'skipped';
     error_message: string | null;
     created_at: string;
+    // Open tracking (v7)
+    first_opened_at?: string | null;
+    last_opened_at?: string | null;
+    open_count?: number;
+    is_test?: boolean;
+    stripe_payment_url?: string | null;
+}
+
+// Ejecución del cron (Vercel Cron o disparo manual). Se persiste una fila
+// por cada llamada, aunque sea skip.
+export interface DunningCronRun {
+    id: string;
+    ran_at: string;
+    source: 'vercel-cron' | 'manual';
+    endpoint: 'run' | 'sync-paid';
+    status: 'ok' | 'skipped' | 'error';
+    reason: string | null;
+    summary: Record<string, unknown>;
+    is_test: boolean;
+    duration_ms: number | null;
+}
+
+// Fila del historial global de recordatorios (enriquecida con datos del caso).
+export interface DunningReminderRow extends DunningReminder {
+    invoice_number: string | null;
+    contact_name: string | null;
+    contact_email: string | null;
+    amount: number | null;
+    currency: string;
 }
 
 export interface DunningStats {
@@ -292,4 +321,23 @@ export const dunningApi = {
         fetchApi<{ success: boolean; reminders_deleted: number; cases_deleted: number }>('/dunning/reset-test-data', {
             method: 'POST',
         }),
+
+    // ── Historial (v7) ────────────────────────────────────────────────
+    listCronRuns: (opts: { limit?: number; status?: 'ok' | 'skipped' | 'error'; endpoint?: 'run' | 'sync-paid' } = {}) => {
+        const qs = new URLSearchParams();
+        if (opts.limit) qs.set('limit', String(opts.limit));
+        if (opts.status) qs.set('status', opts.status);
+        if (opts.endpoint) qs.set('endpoint', opts.endpoint);
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return fetchApi<{ runs: DunningCronRun[] }>(`/dunning/cron-runs${suffix}`);
+    },
+
+    listReminders: (opts: { limit?: number; status?: 'sent' | 'failed' | 'skipped'; include_test?: boolean } = {}) => {
+        const qs = new URLSearchParams();
+        if (opts.limit) qs.set('limit', String(opts.limit));
+        if (opts.status) qs.set('status', opts.status);
+        if (opts.include_test) qs.set('include_test', '1');
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return fetchApi<{ reminders: DunningReminderRow[] }>(`/dunning/reminders${suffix}`);
+    },
 };
