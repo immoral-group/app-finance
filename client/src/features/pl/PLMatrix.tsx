@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { useUrlState } from '@/hooks/useUrlState';
 import { ChangeLogPanel } from '@/components/ui/ChangeLogPanel';
-import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowValue, scenarioSummary, HUBS, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from './ForecastScenarios';
+import { ForecastScenariosModal, NewFeatureBubble, resolveMultiplier, isScenarioEmpty, isItemRemoved, addedRowValue, getAmountOverride, scenarioSummary, HUBS, type ForecastScenario, type SavedScenario, type ScenarioAddedRow } from './ForecastScenarios';
 
 const TABS = ['Real', 'Presupuesto', 'Comparación', 'Forecast'] as const;
 type TabType = typeof TABS[number];
@@ -676,6 +676,10 @@ const CellInput = ({
 export default function PLMatrix() {
     const [year, setYear] = useUrlState('year', new Date().getFullYear(), (v) => Number(v));
     const [activeTab, setActiveTab] = useUrlState<TabType>('tab', 'Real');
+    // ?scenario=<id> — activa un escenario guardado al cargar la página (para compartir por email)
+    const [urlScenarioId, setUrlScenarioId] = useUrlState<string>('scenario', '');
+    // Marca visual "estás viendo un escenario compartido" cuando la fuente es el URL param
+    const [scenarioFromLink, setScenarioFromLink] = useState(false);
     const [cellValues, setCellValues] = useState<Record<string, CellData>>({});
     const [forecastInfoOpen, setForecastInfoOpen] = useState(false);
     const [forecastInfoSeen, setForecastInfoSeen] = useState(() => localStorage.getItem('forecast_info_seen_v2') === '1');
@@ -696,6 +700,13 @@ export default function PLMatrix() {
         } else if (activeTab === 'Presupuesto') {
             setBudgetScenario(s);
             setBudgetFromId(s ? (fromId || null) : null);
+        }
+        // Sincronizamos el URL param: al desactivar o cambiar a un no-guardado limpiamos el link
+        if (!s || !fromId) {
+            setUrlScenarioId('');
+            setScenarioFromLink(false);
+        } else {
+            setUrlScenarioId(fromId);
         }
     };
     // Popover de guardar (desde el chip)
@@ -724,6 +735,18 @@ export default function PLMatrix() {
     });
     const savedScenarios: SavedScenario[] = scenariosData?.scenarios || [];
     const savedScenariosCount = savedScenarios.length;
+
+    // Al llegar por link con ?scenario=<id> — buscarlo en la lista, activarlo y marcar la fuente
+    useEffect(() => {
+        if (!urlScenarioId) return;
+        if (activeTab !== 'Forecast' && activeTab !== 'Presupuesto') return;
+        if (activeFromId === urlScenarioId) return; // ya está aplicado
+        const found = savedScenarios.find(s => s.id === urlScenarioId);
+        if (!found) return;
+        setActiveScenario(structuredClone(found.scenario), found.id);
+        setScenarioFromLink(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [urlScenarioId, savedScenarios, activeTab]);
 
     const saveScenarioMutation = useMutation({
         mutationFn: (payload: { name: string; scenario: ForecastScenario; shared_with_depts: string[] }) =>
@@ -1096,6 +1119,11 @@ export default function PLMatrix() {
         if (isItemRemoved(activeScenario, section, dept, item, monthIdx)) {
             return { ...base, value: 0 };
         }
+        // Override de monto por fila+mes — reemplaza el valor base, ignora el %
+        const override = getAmountOverride(activeScenario, section, dept, item, monthIdx);
+        if (override) {
+            return { ...base, value: override.amount };
+        }
         const mult = resolveMultiplier(activeScenario, section, dept, item, monthIdx);
         if (mult === 1) return base;
         return { ...base, value: Math.round(base.value * mult * 100) / 100 };
@@ -1265,6 +1293,38 @@ export default function PLMatrix() {
 
     const ebitdaTotals = ingresosTotals.map((v, i) => v - gastosTotals[i]);
     const ebitdaAnual = ingresosAnual - gastosAnual;
+
+    // Totales BASE (sin escenario) — solo útil cuando hay escenario activo, para el resumen "antes → después".
+    // Suma directa de cellValues ignorando resolveMultiplier, addedRows, removedItems y overrides.
+    const baseTotalsAnnual = useMemo(() => {
+        const scenarioTabsAllowed = activeTab === 'Forecast' || activeTab === 'Presupuesto';
+        if (!scenarioTabsAllowed || !activeScenario || isScenarioEmpty(activeScenario)) {
+            return null;
+        }
+        const sumSection = (
+            section: string,
+            structure: { dept: string; items?: string[]; services?: string[] }[],
+        ): number => {
+            let total = 0;
+            structure.forEach(group => {
+                (group.items || group.services || []).forEach(item => {
+                    for (let m = 0; m < 12; m++) {
+                        const key = getCellKey(section, group.dept, item, m);
+                        total += cellValues[key]?.value || 0;
+                    }
+                });
+            });
+            return total;
+        };
+        const revenue = sumSection('revenue', mergedRevenueStructure);
+        let expenses = 0;
+        EXPENSE_KEYS_LIST.forEach(k => {
+            const items = mergedExpenseStructure[`${k}Items` as keyof typeof EXPENSE_STRUCTURE];
+            expenses += sumSection(k, items);
+        });
+        return { revenue, expenses, ebitda: revenue - expenses };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, activeScenario, cellValues, mergedRevenueStructure, mergedExpenseStructure]);
 
     // Comparison Calculations
     const calcAllExpenses = (valuesMap: Record<string, CellData>, type: 'real' | 'budget') => {
@@ -1446,7 +1506,8 @@ export default function PLMatrix() {
             const baseVal = (cellValues[getCellKey(section, dept, item, monthIdx)] || { value: 0 }).value;
             const removed = isItemRemoved(activeScenario, section, dept, item, monthIdx);
             const addedRow = (activeScenario.addedRows || []).find(r => r.section === section && r.dept === dept && r.name === item);
-            const tinted = mult !== 1 && baseVal !== 0;
+            const override = getAmountOverride(activeScenario, section, dept, item, monthIdx);
+            const tinted = !override && mult !== 1 && baseVal !== 0;
             const deltaPct = Math.round((mult - 1) * 100);
             const isUp = deltaPct > 0;
             // Fila añadida por el escenario — celda destacada en violeta
@@ -1472,6 +1533,21 @@ export default function PLMatrix() {
                     >
                         <div className="font-semibold tabular-nums line-through opacity-70">{baseVal ? Math.round(baseVal).toLocaleString('de-DE') : '0'}</div>
                         <div className="text-[9px] font-bold text-rose-700">−100%</div>
+                    </td>
+                );
+            }
+            // Monto definido por el escenario — celda en ámbar con base tachada como referencia
+            if (override) {
+                return (
+                    <td
+                        key={monthIdx}
+                        className="border border-amber-200 px-1 py-1 text-right text-xs relative bg-amber-100/70 text-amber-900"
+                        title={`Escenario: ${Math.round(override.amount).toLocaleString('de-DE')} € (${MONTHS[override.fromMonth - 1]}–${MONTHS[override.toMonth - 1]})${baseVal ? ` · Base: ${Math.round(baseVal).toLocaleString('de-DE')} €` : ''}`}
+                    >
+                        <div className="font-semibold tabular-nums">{currentVal ? fmtDisplay(currentVal) : <span className="text-amber-300">0</span>}</div>
+                        {baseVal !== 0 && baseVal !== currentVal && (
+                            <div className="text-[9px] line-through opacity-60 tabular-nums">{Math.round(baseVal).toLocaleString('de-DE')}</div>
+                        )}
                     </td>
                 );
             }
@@ -1561,7 +1637,7 @@ export default function PLMatrix() {
                                 )}
                             </div>
                         </td>
-                        {isRevenueEditable
+                        {(isRevenueEditable || scenarioActive)
                             ? MONTHS_FULL.map((_, monthIdx) => renderEditableCell('revenue', group.dept, service, monthIdx))
                             : MONTHS_FULL.map((_, monthIdx) => {
                                 const val = getCellValue('revenue', group.dept, service, monthIdx).value;
@@ -1974,6 +2050,86 @@ export default function PLMatrix() {
                 </div>
             </div>
 
+            {/* Banner "Estás viendo un escenario" — se muestra en Forecast/Presupuesto con escenario aplicado.
+                Cuando el usuario llega por link compartido, el banner enfatiza que NO son datos reales. */}
+            {(activeTab === 'Forecast' || activeTab === 'Presupuesto') && activeScenario && !isScenarioEmpty(activeScenario) && (
+                <div
+                    className="mx-6 mt-3 rounded-lg overflow-hidden shadow-sm border border-amber-300"
+                    style={{
+                        backgroundImage: 'repeating-linear-gradient(45deg, rgba(251,191,36,0.10) 0px, rgba(251,191,36,0.10) 12px, rgba(251,191,36,0.20) 12px, rgba(251,191,36,0.20) 24px)',
+                    }}
+                >
+                    <div className="flex items-start gap-3 px-4 py-2.5 bg-amber-50/70">
+                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-sm">
+                            <Sparkles size={14} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <div className="text-[11px] font-extrabold tracking-widest text-amber-800 uppercase">
+                                {scenarioFromLink ? 'Escenario compartido contigo' : 'Vista simulada'}
+                            </div>
+                            <div className="text-sm font-bold text-gray-900 truncate">
+                                {activeScenario.name || 'Escenario sin nombre'}
+                            </div>
+                            <div className="text-[11px] text-gray-700 truncate">
+                                Se aplicaron cambios sobre el {activeTab}. Este es un escenario simulado — {scenarioSummary(activeScenario)}
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setActiveScenario(null)}
+                            className="flex-shrink-0 text-[11px] font-semibold px-3 py-1.5 rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors"
+                            title="Salir del escenario y volver a la vista base"
+                        >
+                            Volver a {activeTab === 'Forecast' ? 'Forecast base' : 'Presupuesto base'}
+                        </button>
+                    </div>
+
+                    {/* Comparativa BASE → ESCENARIO (impacto anual) */}
+                    {baseTotalsAnnual && (() => {
+                        const rows: { label: string; before: number; after: number; kind: 'money' | 'pct'; positiveIsGood: boolean }[] = [
+                            { label: 'Ingresos', before: baseTotalsAnnual.revenue, after: ingresosAnual, kind: 'money', positiveIsGood: true },
+                            { label: 'Gastos', before: baseTotalsAnnual.expenses, after: gastosAnual, kind: 'money', positiveIsGood: false },
+                            { label: 'EBITDA', before: baseTotalsAnnual.ebitda, after: ebitdaAnual, kind: 'money', positiveIsGood: true },
+                            {
+                                label: 'Rentabilidad',
+                                before: baseTotalsAnnual.revenue > 0 ? (baseTotalsAnnual.ebitda / baseTotalsAnnual.revenue) * 100 : 0,
+                                after: ingresosAnual > 0 ? (ebitdaAnual / ingresosAnual) * 100 : 0,
+                                kind: 'pct',
+                                positiveIsGood: true,
+                            },
+                        ];
+                        const fmt = (v: number, kind: 'money' | 'pct') => kind === 'money'
+                            ? Math.round(v).toLocaleString('de-DE') + ' €'
+                            : `${v.toFixed(1)}%`;
+                        return (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 px-4 py-2 bg-white/70 border-t border-amber-200">
+                                {rows.map(r => {
+                                    const delta = r.after - r.before;
+                                    const isImprovement = r.positiveIsGood ? delta >= 0 : delta <= 0;
+                                    const deltaAbs = Math.abs(delta);
+                                    const deltaColor = deltaAbs < 0.005 ? 'text-gray-500' : (isImprovement ? 'text-emerald-700' : 'text-rose-700');
+                                    const arrow = deltaAbs < 0.005 ? '=' : (delta > 0 ? '▲' : '▼');
+                                    return (
+                                        <div key={r.label} className="rounded-md bg-white border border-amber-100 px-2.5 py-1.5">
+                                            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">{r.label} · anual</div>
+                                            <div className="flex items-baseline gap-1.5 mt-0.5 flex-wrap">
+                                                <span className="text-[11px] text-gray-500 tabular-nums line-through opacity-70">{fmt(r.before, r.kind)}</span>
+                                                <span className="text-[10px] text-gray-400">→</span>
+                                                <span className="text-sm font-bold text-gray-900 tabular-nums">{fmt(r.after, r.kind)}</span>
+                                            </div>
+                                            <div className={`text-[10.5px] font-bold ${deltaColor}`}>
+                                                {arrow} {r.kind === 'money'
+                                                    ? `${delta > 0 ? '+' : ''}${Math.round(delta).toLocaleString('de-DE')} €`
+                                                    : `${delta > 0 ? '+' : ''}${delta.toFixed(1)} pp`}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })()}
+                </div>
+            )}
+
             {/* Modal Forecast — info */}
             {forecastInfoOpen && (
                 <ForecastInfoModal onClose={() => setForecastInfoOpen(false)} />
@@ -2019,6 +2175,18 @@ export default function PLMatrix() {
                         onDelete={(id, name) => {
                             if (!confirm(`¿Eliminar "${name}"?`)) return;
                             deleteScenarioMutation.mutate(id);
+                        }}
+                        onShare={async (id, emails, message) => {
+                            try {
+                                const res = await adminApi.shareForecastScenario(id, { emails, message });
+                                if (res.sent > 0) {
+                                    toast.success(`Escenario enviado a ${res.sent} destinatario${res.sent === 1 ? '' : 's'}`);
+                                } else {
+                                    toast.error('No se pudo enviar. Revisa la config SMTP.');
+                                }
+                            } catch (err) {
+                                toast.error((err as Error)?.message || 'Error al enviar el correo');
+                            }
                         }}
                         onClose={() => setScenarioOpen(false)}
                     />

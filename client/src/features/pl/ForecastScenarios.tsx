@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { X, Sparkles, RotateCcw, Check, Trash2, Bookmark, Users, Pencil, Wand2, CalendarRange, SlidersHorizontal, Save as SaveIcon, UserMinus, UserPlus, Plus } from 'lucide-react';
+import { X, Sparkles, RotateCcw, Check, Trash2, Bookmark, Users, Pencil, Wand2, CalendarRange, SlidersHorizontal, Save as SaveIcon, UserMinus, UserPlus, Plus, Coins, Mail, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
 // ============================================================
@@ -116,6 +116,20 @@ export interface ScenarioAddedRow {
     extraByMonth?: Record<number, number>;
 }
 
+// Override de monto para una fila existente en un rango de meses.
+// Reemplaza el valor base de la fila para esos meses (no suma, no aplica %).
+// Ejemplo: "en julio, ingresos por Paid General = 12.000 €".
+// Si se activa junto a un ajuste por %, este override gana.
+export interface ScenarioAmountOverride {
+    id: string;
+    section: string;  // 'revenue' o clave de sección de gasto
+    dept: string;
+    item: string;
+    fromMonth: number; // 1-12
+    toMonth: number;   // 1-12
+    amount: number;    // Valor fijo en €
+}
+
 export interface ForecastScenario {
     name: string;
     // Rango temporal (meses 1-12, inclusivo) donde aplica el escenario.
@@ -140,6 +154,9 @@ export interface ForecastScenario {
     removedItems?: ScenarioRemovedItem[];
     // Filas nuevas del escenario (opcional — retrocompatible con escenarios antiguos)
     addedRows?: ScenarioAddedRow[];
+    // Overrides de monto por fila y rango de meses (opcional — retrocompatible).
+    // Cuando existe uno para una celda, reemplaza el valor base ignorando el % del escenario.
+    amountOverrides?: ScenarioAmountOverride[];
 }
 
 // Secciones disponibles para añadir/eliminar filas en el escenario.
@@ -238,7 +255,8 @@ export function isScenarioEmpty(s: ForecastScenario | null): boolean {
         ...Object.values(s.expenses.byItem || {}),
     ];
     const hasRowChanges = (s.removedItems && s.removedItems.length > 0) || (s.addedRows && s.addedRows.length > 0);
-    return allPcts.every(v => !v) && !hasRowChanges;
+    const hasOverrides = s.amountOverrides && s.amountOverrides.length > 0;
+    return allPcts.every(v => !v) && !hasRowChanges && !hasOverrides;
 }
 
 // ¿Está la fila eliminada por el escenario para ese mes concreto?
@@ -271,6 +289,23 @@ export function addedRowsBySection(scenario: ForecastScenario | null, section: s
     return scenario.addedRows.filter(r => r.section === section);
 }
 
+// Busca un override de monto activo para una celda concreta.
+// Devuelve el override (que incluye el amount) o undefined si no hay ninguno.
+export function getAmountOverride(
+    scenario: ForecastScenario | null,
+    section: string,
+    dept: string,
+    item: string,
+    monthIdx: number,
+): ScenarioAmountOverride | undefined {
+    if (!scenario?.amountOverrides?.length) return undefined;
+    const month = monthIdx + 1;
+    return scenario.amountOverrides.find(o =>
+        o.section === section && o.dept === dept && o.item === item &&
+        month >= o.fromMonth && month <= o.toMonth,
+    );
+}
+
 // Resumen corto del escenario para mostrar en el chip
 export function scenarioSummary(s: ForecastScenario): string {
     const parts: string[] = [];
@@ -290,6 +325,7 @@ export function scenarioSummary(s: ForecastScenario): string {
     });
     (s.removedItems || []).forEach(r => parts.push(`− ${r.item}`));
     (s.addedRows || []).forEach(r => parts.push(`+ ${r.name}`));
+    (s.amountOverrides || []).forEach(o => parts.push(`= ${o.item}: ${Math.round(o.amount).toLocaleString('de-DE')} €`));
     const head = parts.slice(0, 2).join(' · ') + (parts.length > 2 ? ` · +${parts.length - 2}` : '');
     return `${head} · ${rangeLabel(s.range)}`;
 }
@@ -373,6 +409,23 @@ export const PRESETS: { id: string; emoji: string; label: string; description: s
 ];
 
 // ============================================================
+// AmountInput — input compacto para overrides de monto (€) por fila
+// ============================================================
+
+const AmountInput = ({ value, onChange }: { value: number; onChange: (v: number) => void }) => {
+    const active = value > 0;
+    return (
+        <input
+            type="number"
+            value={value || ''}
+            onChange={e => onChange(Number(e.target.value) || 0)}
+            placeholder="€ /mes"
+            className={`w-24 text-xs h-7 px-2 rounded-md border bg-white text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-300 ${active ? 'border-amber-400 text-amber-800 font-semibold' : 'border-gray-200 text-gray-500'}`}
+        />
+    );
+};
+
+// ============================================================
 // PctSelector — dropdown con saltos de 5% de −30 a +30
 // ============================================================
 
@@ -413,24 +466,30 @@ interface ModalProps {
     onApply: (s: ForecastScenario, fromSavedId?: string) => void;
     onUpdate: (id: string, patch: { name?: string; scenario?: ForecastScenario; shared_with_depts?: string[] }) => void;
     onDelete: (id: string, name: string) => void;
+    onShare?: (id: string, emails: string[], message: string) => Promise<void> | void;
     onClose: () => void;
 }
 
 export const ForecastScenariosModal = ({
     initial, revenueDepts, expenseDepts, revenueItems, expenseItems, targetLabel,
     savedList, canEdit, shareableDepts,
-    onApply, onUpdate, onDelete, onClose
+    onApply, onUpdate, onDelete, onShare, onClose
 }: ModalProps) => {
     const [draft, setDraft] = useState<ForecastScenario>(() => initial ? structuredClone(initial) : structuredClone(EMPTY_SCENARIO));
     const [leaving, setLeaving] = useState(false);
     const [loadedFromId, setLoadedFromId] = useState<string | null>(null);
     const [editing, setEditing] = useState<{ id: string; name: string; depts: string[] } | null>(null);
+    // Form de "compartir por email" — id del escenario, lista de correos y mensaje opcional.
+    const [sharing, setSharing] = useState<{ id: string; emails: string; message: string } | null>(null);
+    const [sharingBusy, setSharingBusy] = useState(false);
     const [showGuide, setShowGuide] = useState(() => localStorage.getItem('scenarios_guide_seen') !== '1');
     // Buscador para "quitar fila"
     const [removeSearch, setRemoveSearch] = useState('');
     // Controlled open/close de los dos bloques (para poder cerrarlos con la X)
     const [removeOpen, setRemoveOpen] = useState(false);
     const [addOpen, setAddOpen] = useState(false);
+    // Qué overrides tienen el editor de rango expandido (por id)
+    const [expandedOverrideRanges, setExpandedOverrideRanges] = useState<Record<string, boolean>>({});
     // Qué secciones están expandidas en el árbol de "eliminar fila"
     const [removeExpandedSections, setRemoveExpandedSections] = useState<Record<string, boolean>>({});
     // Formulario de nueva fila (con paga doble/extra opcionales para personal)
@@ -473,6 +532,26 @@ export const ForecastScenariosModal = ({
         if (!editing) return;
         onUpdate(editing.id, { name: editing.name.trim() || 'Sin nombre', shared_with_depts: editing.depts });
         setEditing(null);
+    };
+
+    const startShare = (s: SavedScenario) => {
+        setSharing({ id: s.id, emails: '', message: '' });
+    };
+
+    const submitShare = async () => {
+        if (!sharing || !onShare) return;
+        const emails = sharing.emails
+            .split(/[,\s;]+/)
+            .map(e => e.trim())
+            .filter(Boolean);
+        if (emails.length === 0) return;
+        setSharingBusy(true);
+        try {
+            await onShare(sharing.id, emails, sharing.message.trim());
+            setSharing(null);
+        } finally {
+            setSharingBusy(false);
+        }
     };
 
     const dismiss = () => {
@@ -535,6 +614,46 @@ export const ForecastScenariosModal = ({
             ...d,
             addedRows: (d.addedRows || []).filter(r => r.id !== id),
         }));
+    };
+
+    // ── Amount overrides ─────────────────────────────────────────────────────
+    const updateAmountOverride = (id: string, patch: Partial<ScenarioAmountOverride>) => {
+        setDraft(d => ({
+            ...d,
+            amountOverrides: (d.amountOverrides || []).map(o => o.id === id ? { ...o, ...patch } : o),
+        }));
+    };
+
+    const removeAmountOverride = (id: string) => {
+        setDraft(d => ({
+            ...d,
+            amountOverrides: (d.amountOverrides || []).filter(o => o.id !== id),
+        }));
+    };
+
+    const findItemOverride = (section: string, dept: string, item: string) =>
+        (draft.amountOverrides || []).find(o => o.section === section && o.dept === dept && o.item === item);
+
+    // Setter combinado: si amount es 0 / vacío, elimina el override.
+    // Si existe uno, actualiza el amount. Si no, crea uno nuevo usando el rango del escenario como default.
+    const setItemAmount = (section: string, dept: string, item: string, amount: number) => {
+        setDraft(d => {
+            const list = d.amountOverrides || [];
+            const existing = list.find(o => o.section === section && o.dept === dept && o.item === item);
+            if (!amount) {
+                return { ...d, amountOverrides: list.filter(o => o.id !== existing?.id) };
+            }
+            if (existing) {
+                return { ...d, amountOverrides: list.map(o => o.id === existing.id ? { ...o, amount } : o) };
+            }
+            return {
+                ...d,
+                amountOverrides: [
+                    ...list,
+                    { id: rid(), section, dept, item, amount, fromMonth: d.range.from, toMonth: d.range.to },
+                ],
+            };
+        });
     };
 
     // Agrupaciones derivadas para drill-down
@@ -754,6 +873,47 @@ export const ForecastScenariosModal = ({
                                             </div>
                                         );
                                     }
+                                    if (sharing?.id === s.id && canEdit && onShare) {
+                                        const emailList = sharing.emails.split(/[,\s;]+/).map(e => e.trim()).filter(Boolean);
+                                        const validCount = emailList.filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)).length;
+                                        return (
+                                            <div key={s.id} className="rounded-lg border border-amber-300 bg-amber-50/40 px-2.5 py-2 space-y-2">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Mail size={12} className="text-amber-600" />
+                                                    <span className="text-[11px] font-semibold text-amber-900">Compartir "{s.name}" por correo</span>
+                                                </div>
+                                                <input
+                                                    value={sharing.emails}
+                                                    onChange={e => setSharing(prev => prev ? { ...prev, emails: e.target.value } : prev)}
+                                                    placeholder="correo1@ejemplo.com, correo2@ejemplo.com"
+                                                    className="w-full h-7 px-2 text-xs rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                                                    autoFocus
+                                                />
+                                                <textarea
+                                                    value={sharing.message}
+                                                    onChange={e => setSharing(prev => prev ? { ...prev, message: e.target.value } : prev)}
+                                                    placeholder="Mensaje opcional (contexto para quien lo reciba)"
+                                                    rows={2}
+                                                    className="w-full px-2 py-1 text-[11px] rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
+                                                />
+                                                <div className="text-[10px] text-gray-500 leading-tight">
+                                                    Enviaremos un link que abrirá la app con el escenario ya aplicado. El destinatario podrá revisar el impacto sin tocar el {targetLabel} base.
+                                                </div>
+                                                <div className="flex items-center justify-between gap-1.5">
+                                                    <span className="text-[10px] text-gray-500">
+                                                        {validCount > 0 ? `${validCount} destinatario${validCount === 1 ? '' : 's'}` : 'Añade al menos un correo válido'}
+                                                    </span>
+                                                    <div className="flex gap-1.5">
+                                                        <Button variant="outline" size="sm" onClick={() => setSharing(null)} disabled={sharingBusy} className="text-[11px] h-6">Cancelar</Button>
+                                                        <Button size="sm" onClick={submitShare} disabled={validCount === 0 || sharingBusy} className="text-[11px] h-6 gap-1 bg-amber-600 hover:bg-amber-700 focus:ring-amber-500">
+                                                            {sharingBusy ? <Loader2 size={10} className="animate-spin" /> : <Mail size={10} />}
+                                                            {sharingBusy ? 'Enviando…' : 'Enviar'}
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
                                     return (
                                         <div
                                             key={s.id}
@@ -781,10 +941,19 @@ export const ForecastScenariosModal = ({
                                             </button>
                                             {canEdit && (
                                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    {onShare && (
+                                                        <button
+                                                            onClick={() => startShare(s)}
+                                                            className="p-1 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50"
+                                                            title="Compartir por correo"
+                                                        >
+                                                            <Mail size={12} />
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => startEdit(s)}
                                                         className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
-                                                        title="Renombrar y compartir"
+                                                        title="Renombrar y compartir con hubs"
                                                     >
                                                         <Pencil size={12} />
                                                     </button>
@@ -1045,6 +1214,209 @@ export const ForecastScenariosModal = ({
                                 </div>
                                 <p className="mt-2 text-[10px] text-gray-500 italic">Prioridad: item &gt; categoría dentro de hub &gt; hub &gt; categoría global &gt; global.</p>
                             </details>
+                        </div>
+                    </section>
+
+                    {/* DEFINIR MONTO POR FILA */}
+                    <section>
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2 flex items-center gap-1.5">
+                            <Coins size={12} /> Definir monto por fila
+                            <span className="text-[9px] font-extrabold tracking-widest text-white bg-gradient-to-r from-amber-500 to-orange-500 px-1.5 py-0.5 rounded shadow-sm">NUEVO</span>
+                        </h3>
+                        <div className="space-y-2 rounded-lg border border-amber-100 bg-amber-50/40 p-3">
+                            <p className="text-[11px] text-gray-600 leading-snug">
+                                Escribe un objetivo o monto exacto en € para una fila en el rango de meses que elijas. Sustituye el valor base y prevalece sobre el ajuste por %. Ejemplo: los ingresos de un servicio serán 12.000 € en julio.
+                            </p>
+
+                            {/* Overrides activos — muestra el rango de meses de cada uno y permite editarlo */}
+                            {(draft.amountOverrides || []).length > 0 && (
+                                <div className="space-y-1">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700 flex items-center gap-1">
+                                        Definidos ({(draft.amountOverrides || []).length})
+                                    </div>
+                                    <div className="space-y-1">
+                                        {(draft.amountOverrides || []).map(o => {
+                                            const sectionLabel = o.section === 'revenue' ? 'Facturación' : (EXPENSE_SECTION_LABELS[o.section] || o.section);
+                                            const rangeMatchesScenario = o.fromMonth === draft.range.from && o.toMonth === draft.range.to;
+                                            const isRangeOpen = !!expandedOverrideRanges[o.id];
+                                            return (
+                                                <div key={o.id} className="rounded-md bg-white border border-amber-200 px-2 py-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-[11px] font-semibold text-gray-800 truncate">{o.item}</div>
+                                                            <div className="text-[10px] text-gray-500 truncate">{sectionLabel} · {o.dept}</div>
+                                                        </div>
+                                                        <span className="text-[11px] font-bold text-amber-800 tabular-nums whitespace-nowrap">
+                                                            {Math.round(o.amount).toLocaleString('de-DE')} €
+                                                        </span>
+                                                        <button
+                                                            onClick={() => setExpandedOverrideRanges(s => ({ ...s, [o.id]: !s[o.id] }))}
+                                                            className={`text-[10px] px-1.5 py-0.5 rounded border ${rangeMatchesScenario ? 'border-gray-200 text-gray-500' : 'border-amber-300 text-amber-700 bg-amber-50'} hover:bg-amber-100`}
+                                                            title="Editar rango de meses"
+                                                        >
+                                                            {o.fromMonth === o.toMonth ? MONTHS_SHORT[o.fromMonth - 1] : `${MONTHS_SHORT[o.fromMonth - 1]}–${MONTHS_SHORT[o.toMonth - 1]}`}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => removeAmountOverride(o.id)}
+                                                            className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+                                                            title="Quitar override"
+                                                        >
+                                                            <Trash2 size={11} />
+                                                        </button>
+                                                    </div>
+                                                    {isRangeOpen && (
+                                                        <div className="mt-1.5 flex items-center gap-1 text-[11px] border-t border-amber-100 pt-1.5">
+                                                            <span className="text-gray-500">De</span>
+                                                            <select
+                                                                value={o.fromMonth}
+                                                                onChange={e => {
+                                                                    const from = Number(e.target.value);
+                                                                    updateAmountOverride(o.id, { fromMonth: from, toMonth: Math.max(o.toMonth, from) });
+                                                                }}
+                                                                className="h-6 px-1 rounded border border-gray-200 bg-white"
+                                                            >
+                                                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                                    <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                                ))}
+                                                            </select>
+                                                            <span className="text-gray-500">a</span>
+                                                            <select
+                                                                value={o.toMonth}
+                                                                onChange={e => {
+                                                                    const to = Number(e.target.value);
+                                                                    updateAmountOverride(o.id, { toMonth: to, fromMonth: Math.min(o.fromMonth, to) });
+                                                                }}
+                                                                className="h-6 px-1 rounded border border-gray-200 bg-white"
+                                                            >
+                                                                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                                                                    <option key={m} value={m}>{MONTHS_SHORT[m - 1]}</option>
+                                                                ))}
+                                                            </select>
+                                                            {!rangeMatchesScenario && (
+                                                                <button
+                                                                    onClick={() => updateAmountOverride(o.id, { fromMonth: draft.range.from, toMonth: draft.range.to })}
+                                                                    className="ml-auto text-[10px] text-gray-500 hover:text-amber-700 underline"
+                                                                >
+                                                                    Usar rango del escenario
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Drill-down INGRESOS — hub → servicio */}
+                            {(revenueItems || []).length > 0 && (
+                                <details className="text-xs">
+                                    <summary className="cursor-pointer text-emerald-700 hover:text-emerald-900 font-semibold select-none">Ingresos por hub y servicio</summary>
+                                    <div className="mt-2 space-y-1.5 pl-2">
+                                        {revenueDepts.map(d => {
+                                            const items = revenueByDeptItems[d] || [];
+                                            if (items.length === 0) return null;
+                                            const activeCount = items.reduce((n, it) => n + (findItemOverride('revenue', d, it) ? 1 : 0), 0);
+                                            return (
+                                                <details key={d} className="rounded-md bg-white/60 px-2 py-1" open={activeCount > 0}>
+                                                    <summary className="cursor-pointer flex items-center justify-between text-gray-700 font-medium select-none">
+                                                        <span>{d}</span>
+                                                        <span className="text-[10px] text-gray-500">
+                                                            {activeCount > 0 ? <span className="text-amber-700 font-bold mr-1">{activeCount} definidos</span> : null}
+                                                            ({items.length})
+                                                        </span>
+                                                    </summary>
+                                                    <div className="mt-1.5 space-y-1 pl-3 border-l-2 border-emerald-100">
+                                                        {items.map(it => {
+                                                            const ov = findItemOverride('revenue', d, it);
+                                                            return (
+                                                                <div
+                                                                    key={it}
+                                                                    className={`flex items-center justify-between gap-2 rounded px-1.5 py-0.5 -mx-1 ${ov ? 'bg-amber-100/70 ring-1 ring-amber-200' : ''}`}
+                                                                >
+                                                                    <div className="flex items-center gap-1 min-w-0">
+                                                                        {ov && <Coins size={10} className="flex-shrink-0 text-amber-600" />}
+                                                                        <span className={`text-[11px] truncate ${ov ? 'text-amber-900 font-semibold' : 'text-gray-700'}`}>{it}</span>
+                                                                    </div>
+                                                                    <AmountInput
+                                                                        value={ov?.amount || 0}
+                                                                        onChange={(v) => setItemAmount('revenue', d, it, v)}
+                                                                    />
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </details>
+                                            );
+                                        })}
+                                    </div>
+                                </details>
+                            )}
+
+                            {/* Drill-down GASTOS — categoría → hub → item */}
+                            {(expenseItems || []).length > 0 && (
+                                <details className="text-xs">
+                                    <summary className="cursor-pointer text-rose-700 hover:text-rose-900 font-semibold select-none">Gastos por categoría, hub e item</summary>
+                                    <div className="mt-2 space-y-1.5 pl-2">
+                                        {EXPENSE_SECTION_KEYS.map(k => {
+                                            const depts = Object.keys(expenseBySectionDeptItems[k] || {});
+                                            if (depts.length === 0) return null;
+                                            const catActive = depts.reduce((n, d) => n + (expenseBySectionDeptItems[k][d] || []).reduce((m, it) => m + (findItemOverride(k, d, it) ? 1 : 0), 0), 0);
+                                            return (
+                                                <details key={k} className="rounded-md bg-white/60 px-2 py-1" open={catActive > 0}>
+                                                    <summary className="cursor-pointer flex items-center justify-between text-gray-700 font-medium select-none">
+                                                        <span>{EXPENSE_SECTION_LABELS[k]}</span>
+                                                        <span className="text-[10px] text-gray-500">
+                                                            {catActive > 0 ? <span className="text-amber-700 font-bold mr-1">{catActive} definidos</span> : null}
+                                                            ({depts.length})
+                                                        </span>
+                                                    </summary>
+                                                    <div className="mt-1.5 space-y-1.5 pl-3 border-l-2 border-rose-100">
+                                                        {depts.map(d => {
+                                                            const items = expenseBySectionDeptItems[k][d] || [];
+                                                            const deptActive = items.reduce((n, it) => n + (findItemOverride(k, d, it) ? 1 : 0), 0);
+                                                            return (
+                                                                <details key={d} className="rounded bg-white/70 px-1.5 py-1" open={deptActive > 0}>
+                                                                    <summary className="cursor-pointer flex items-center justify-between text-[11px] text-gray-700 select-none">
+                                                                        <span>{d}</span>
+                                                                        <span className="text-[10px] text-gray-500">
+                                                                            {deptActive > 0 ? <span className="text-amber-700 font-bold mr-1">{deptActive} definidos</span> : null}
+                                                                            ({items.length})
+                                                                        </span>
+                                                                    </summary>
+                                                                    <div className="mt-1 space-y-0.5 pl-2.5 border-l border-gray-200">
+                                                                        {items.map(it => {
+                                                                            const ov = findItemOverride(k, d, it);
+                                                                            return (
+                                                                                <div
+                                                                                    key={it}
+                                                                                    className={`flex items-center justify-between gap-2 rounded px-1.5 py-0.5 -mx-1 ${ov ? 'bg-amber-100/70 ring-1 ring-amber-200' : ''}`}
+                                                                                >
+                                                                                    <div className="flex items-center gap-1 min-w-0">
+                                                                                        {ov && <Coins size={10} className="flex-shrink-0 text-amber-600" />}
+                                                                                        <span className={`text-[10.5px] truncate ${ov ? 'text-amber-900 font-semibold' : 'text-gray-700'}`}>{it}</span>
+                                                                                    </div>
+                                                                                    <AmountInput
+                                                                                        value={ov?.amount || 0}
+                                                                                        onChange={(v) => setItemAmount(k, d, it, v)}
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </details>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </details>
+                                            );
+                                        })}
+                                    </div>
+                                </details>
+                            )}
+
+                            <p className="text-[10px] text-gray-500 italic">Por defecto se aplica al rango del escenario ({rangeLabel(draft.range)}). Toca el chip de meses para personalizarlo por fila.</p>
                         </div>
                     </section>
 
@@ -1450,6 +1822,7 @@ export const ForecastScenariosModal = ({
                                     </div>
                                 )}
                             </div>
+
                         </div>
                     </section>
 
