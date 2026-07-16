@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
 import supabase from '../config/supabase.js';
 import { renderDunningEmail, SAMPLE_VARS } from '../lib/dunningRenderer.js';
@@ -145,15 +146,44 @@ function isCronScheduledNow(config, now = new Date()) {
     }
 }
 
+// Detecta el origen de la llamada al cron para diferenciar vercel vs manual.
+function detectCronSource(req) {
+    // Vercel Cron añade el header 'x-vercel-cron' con valor '1'.
+    if (req.headers['x-vercel-cron']) return 'vercel-cron';
+    return 'manual';
+}
+
+// Persiste una entrada en dunning_cron_runs. No lanza — si falla el log,
+// no queremos romper la propia ejecución del cron.
+async function logCronRun({ endpoint, status, reason, summary, is_test, startedMs }) {
+    try {
+        await supabase.from('dunning_cron_runs').insert({
+            endpoint,
+            status,
+            reason: reason || null,
+            summary: summary || {},
+            is_test: !!is_test,
+            duration_ms: startedMs ? Date.now() - startedMs : null,
+        });
+    } catch (err) {
+        console.warn('[dunning] logCronRun failed:', err.message);
+    }
+}
+
 // GET/POST /dunning/cron/run — ejecuta el envío si toca según config.
 // IMPORTANTE: Vercel Cron llama con método GET, así que el handler debe estar
 // registrado en GET. Aceptamos también POST para poder disparar manualmente
 // desde curl u otra herramienta si hace falta.
 // Idempotente: si el cron corre 2 veces en la misma hora, la segunda no repite.
 async function cronRunHandler(req, res) {
+    const startedMs = Date.now();
+    const source = detectCronSource(req);
     try {
         const { data: config } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
-        if (!config) return res.status(500).json({ error: 'no-config' });
+        if (!config) {
+            await logCronRun({ endpoint: 'run', status: 'error', reason: 'no-config', summary: {}, startedMs });
+            return res.status(500).json({ error: 'no-config' });
+        }
 
         // Trazabilidad: dejar constancia de cada llamada del cron aunque acabe
         // siendo un skip, así en la UI se puede ver que Vercel sí está pegando.
@@ -162,8 +192,16 @@ async function cronRunHandler(req, res) {
             await supabase.from('dunning_config').update({
                 last_cron_run_at: nowIso,
                 last_cron_status: `skipped: ${reason}`,
-                last_cron_summary: { skipped: true, reason, ...extra },
+                last_cron_summary: { skipped: true, reason, source, ...extra },
             }).eq('id', 1).then(() => {}, () => {});
+            await logCronRun({
+                endpoint: 'run',
+                status: 'skipped',
+                reason,
+                summary: { source, ...extra },
+                is_test: !!config.test_mode,
+                startedMs,
+            });
         };
 
         if (!config.enabled) {
@@ -181,6 +219,14 @@ async function cronRunHandler(req, res) {
         if (config.last_cron_run_at) {
             const lastMs = new Date(config.last_cron_run_at).getTime();
             if (Date.now() - lastMs < 30 * 60 * 1000) {
+                await logCronRun({
+                    endpoint: 'run',
+                    status: 'skipped',
+                    reason: 'ran-recently',
+                    summary: { source, last_cron_run_at: config.last_cron_run_at },
+                    is_test: !!config.test_mode,
+                    startedMs,
+                });
                 return res.json({ skipped: true, reason: 'ran-recently', last_cron_run_at: config.last_cron_run_at });
             }
         }
@@ -190,17 +236,38 @@ async function cronRunHandler(req, res) {
         // secuencia inline. Cambios importantes están en executeSend abajo.
         const result = await executeSend({ dryRun: false, forcedConfig: config, baseUrl: computeBaseUrl(req) });
 
+        const summarySent = result.executed.filter(r => r.status === 'sent').length;
+        const summaryFailed = result.executed.filter(r => r.status === 'failed').length;
+        const summarySkipped = result.executed.filter(r => r.status === 'skipped').length;
+
         // Actualizar timestamps de trazabilidad.
         await supabase.from('dunning_config').update({
             last_cron_run_at: new Date().toISOString(),
             last_cron_status: 'ok',
             last_cron_summary: {
-                sent: result.executed.filter(r => r.status === 'sent').length,
-                failed: result.executed.filter(r => r.status === 'failed').length,
-                skipped: result.executed.filter(r => r.status === 'skipped').length,
+                source,
+                sent: summarySent,
+                failed: summaryFailed,
+                skipped: summarySkipped,
                 summary: result.summary,
             },
         }).eq('id', 1);
+
+        await logCronRun({
+            endpoint: 'run',
+            status: 'ok',
+            reason: null,
+            summary: {
+                source,
+                sent: summarySent,
+                failed: summaryFailed,
+                skipped: summarySkipped,
+                summary: result.summary,
+                executed: result.executed,
+            },
+            is_test: !!config.test_mode,
+            startedMs,
+        });
 
         res.json({ ok: true, ...result });
     } catch (err) {
@@ -209,6 +276,13 @@ async function cronRunHandler(req, res) {
             last_cron_run_at: new Date().toISOString(),
             last_cron_status: `error: ${String(err.message || err).slice(0, 200)}`,
         }).eq('id', 1).then(() => {}, () => {});
+        await logCronRun({
+            endpoint: 'run',
+            status: 'error',
+            reason: String(err.message || err).slice(0, 300),
+            summary: { source },
+            startedMs,
+        });
         res.status(500).json({ error: err.message });
     }
 }
@@ -216,20 +290,76 @@ router.get('/cron/run', requireCronSecret, cronRunHandler);
 router.post('/cron/run', requireCronSecret, cronRunHandler);
 
 // GET/POST /dunning/cron/sync-paid — sincroniza cobros diariamente.
-async function cronSyncPaidHandler(_req, res) {
+async function cronSyncPaidHandler(req, res) {
+    const startedMs = Date.now();
+    const source = detectCronSource(req);
     try {
         const result = await runSyncPaid();
         await supabase.from('dunning_config').update({
             last_sync_paid_at: new Date().toISOString(),
         }).eq('id', 1);
+        await logCronRun({
+            endpoint: 'sync-paid',
+            status: 'ok',
+            summary: { source, ...result },
+            startedMs,
+        });
         res.json({ ok: true, ...result });
     } catch (err) {
         console.error('[dunning] cron/sync-paid error:', err);
+        await logCronRun({
+            endpoint: 'sync-paid',
+            status: 'error',
+            reason: String(err.message || err).slice(0, 300),
+            summary: { source },
+            startedMs,
+        });
         res.status(500).json({ error: err.message });
     }
 }
 router.get('/cron/sync-paid', requireCronSecret, cronSyncPaidHandler);
 router.post('/cron/sync-paid', requireCronSecret, cronSyncPaidHandler);
+
+
+// ── GET /dunning/track/open/:reminderId.gif ─────────────────────────────
+// Endpoint PÚBLICO (sin auth) — cuando el gestor de correo del destinatario
+// carga el pixel invisible del email, registramos la apertura. Devuelve
+// siempre un GIF 1x1 transparente aunque el UUID no exista, para no filtrar
+// información al escáner ni romper el pipe si nos toca un reminder borrado.
+const TRANSPARENT_GIF = Buffer.from(
+    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    'base64'
+);
+router.get('/track/open/:reminderId.gif', async (req, res) => {
+    // Servimos el pixel PRIMERO, registramos DESPUÉS. Así, un fallo de BD
+    // no rompe la carga del email ni deja pixels rotos.
+    res.setHeader('Content-Type', 'image/gif');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.status(200).end(TRANSPARENT_GIF);
+
+    const raw = String(req.params.reminderId || '');
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRe.test(raw)) return;
+
+    try {
+        // Leemos primero para incrementar open_count sin RPC (Supabase no
+        // permite bump nativo desde el cliente sin función).
+        const { data: current } = await supabase
+            .from('dunning_reminders').select('open_count, first_opened_at')
+            .eq('id', raw).maybeSingle();
+        if (!current) return;
+        const nowIso = new Date().toISOString();
+        await supabase.from('dunning_reminders').update({
+            first_opened_at: current.first_opened_at || nowIso,
+            last_opened_at: nowIso,
+            open_count: (current.open_count || 0) + 1,
+        }).eq('id', raw);
+    } catch (err) {
+        console.warn('[dunning] track/open failed:', err.message);
+    }
+});
 
 
 // ── Lógica compartida: ejecución de envíos y sync-paid ──────────────────────
@@ -350,6 +480,17 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                 }
             }
 
+            // Pre-generamos el id del reminder para poder inyectar en el email
+            // un pixel de tracking que apunte a /dunning/track/open/:id.gif y
+            // saber si el destinatario abrió el correo. Necesitamos baseUrl
+            // para construir la URL pública absoluta (si no lo tenemos, la
+            // apertura no se puede medir). Se registra igual en modo prueba,
+            // para poder validar end-to-end sin arriesgar.
+            const reminderId = crypto.randomUUID();
+            const trackingPixelUrl = baseUrl
+                ? `${baseUrl}/api/admin/dunning/track/open/${reminderId}.gif`
+                : null;
+
             const rendered = renderDunningEmailV2({
                 config: activeConfig,
                 base_url: baseUrl,
@@ -368,6 +509,7 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                     original_email: originalEmail,
                     contact_name: item.invoice.contact_name,
                 } : null,
+                tracking_pixel_url: trackingPixelUrl,
             });
 
             const info = await getTransporter().sendMail({
@@ -379,6 +521,7 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
             });
 
             await supabase.from('dunning_reminders').insert({
+                id: reminderId,
                 case_id: caseRow.id,
                 invoice_id: item.invoice.id,
                 level: item.level,
@@ -785,6 +928,79 @@ router.get('/stats', async (_req, res) => {
             avg_days_to_pay: avgDaysToPay,
             reminders_by_level: perLevel,
         });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /dunning/cron-runs ────────────────────────────────────────────────────
+// Historial de ejecuciones del cron (Vercel Cron + disparos manuales).
+// Query params:
+//   limit    número de filas (default 50, máx 500)
+//   status   filtro: 'ok' | 'skipped' | 'error'
+//   endpoint filtro: 'run' | 'sync-paid'
+router.get('/cron-runs', async (req, res) => {
+    try {
+        const limit = Math.min(Number(req.query.limit) || 50, 500);
+        let q = supabase
+            .from('dunning_cron_runs')
+            .select('*')
+            .order('ran_at', { ascending: false })
+            .limit(limit);
+        if (req.query.status) q = q.eq('status', String(req.query.status));
+        if (req.query.endpoint) q = q.eq('endpoint', String(req.query.endpoint));
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+        res.json({ runs: data || [] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /dunning/reminders ────────────────────────────────────────────────────
+// Historial global de recordatorios enviados (no por caso). Incluye tracking
+// de aperturas (open_count, first_opened_at, last_opened_at).
+// Query params:
+//   limit         número de filas (default 100, máx 1000)
+//   status        filtro: 'sent' | 'failed' | 'skipped'
+//   include_test  si '1', incluye también envíos de modo prueba
+router.get('/reminders', async (req, res) => {
+    try {
+        const limit = Math.min(Number(req.query.limit) || 100, 1000);
+        const includeTest = req.query.include_test === '1' || req.query.include_test === 'true';
+        let q = supabase
+            .from('dunning_reminders')
+            .select('id, case_id, invoice_id, level, days_overdue, sent_at, sent_to, subject, smtp_message_id, status, error_message, is_test, first_opened_at, last_opened_at, open_count, stripe_payment_url')
+            .order('sent_at', { ascending: false })
+            .limit(limit);
+        if (req.query.status) q = q.eq('status', String(req.query.status));
+        if (!includeTest) q = q.eq('is_test', false);
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+
+        // Enriquecer con datos del caso (invoice_number, contact_name) sin
+        // hacer join complejo: cargamos solo los cases referenciados.
+        const caseIds = Array.from(new Set((data || []).map(r => r.case_id).filter(Boolean)));
+        const { data: cases } = caseIds.length
+            ? await supabase.from('dunning_cases')
+                .select('id, invoice_number, contact_name, contact_email, amount, currency')
+                .in('id', caseIds)
+            : { data: [] };
+        const caseById = new Map((cases || []).map(c => [c.id, c]));
+
+        const reminders = (data || []).map(r => {
+            const c = caseById.get(r.case_id);
+            return {
+                ...r,
+                invoice_number: c?.invoice_number || null,
+                contact_name: c?.contact_name || null,
+                contact_email: c?.contact_email || null,
+                amount: c?.amount || null,
+                currency: c?.currency || 'EUR',
+            };
+        });
+
+        res.json({ reminders });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

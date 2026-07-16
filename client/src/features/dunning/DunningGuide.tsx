@@ -1,7 +1,7 @@
 import { useState, ReactNode } from 'react';
 import {
     Lightbulb, ChevronDown, X, FileWarning, Mail, Send,
-    Calendar, Palette, Zap, Settings, ShieldAlert, ArrowRight,
+    Calendar, Palette, Zap, Settings, ShieldAlert, ArrowRight, Clock,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -215,7 +215,7 @@ function LevelChip({
 export function TabGuide({
     tab, title, desc, tips, storageKey,
 }: {
-    tab: 'rules' | 'schedule' | 'brand' | 'templates' | 'run';
+    tab: 'rules' | 'schedule' | 'brand' | 'templates' | 'run' | 'history';
     title: string;
     desc: ReactNode;
     tips: ReactNode[];
@@ -229,6 +229,7 @@ export function TabGuide({
         brand: { icon: Palette, color: 'text-purple-600 bg-purple-50 dark:bg-purple-950/30 dark:text-purple-300' },
         templates: { icon: Mail, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30 dark:text-orange-300' },
         run: { icon: Zap, color: 'text-red-600 bg-red-50 dark:bg-red-950/30 dark:text-red-300' },
+        history: { icon: Clock, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/30 dark:text-sky-300' },
     }[tab];
 
     if (dismissed) {

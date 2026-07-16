@@ -1614,3 +1614,66 @@ Vercel Cron Jobs llaman al endpoint configurado usando el método **GET**. Nuest
 2. En Impagos → Configuración → Programación, mirar "Última ejecución": debe actualizarse aunque no toque enviar (por defecto solo lunes 9:00 Madrid).
 3. Cuando toque día/hora configurados, revisar en la BD `dunning_reminders` para ver los envíos.
 4. Manual: `curl -H "Authorization: Bearer $CRON_SECRET" https://app-finance.vercel.app/api/admin/dunning/cron/run` (GET) debe responder JSON.
+
+---
+
+### 2026-07-16 — Feature: Historial de envíos + open tracking en Impagos
+
+**Rama:** `fix/impagos3`
+
+**Motivo:**
+Después del fix del cron (`fix/impagos2`) los recordatorios empezaron a salir, pero la única forma de saber qué había hecho el sistema era mirar `dunning_config.last_cron_status` (solo la última ejecución) y `dunning_cases` (uno por factura). No había una vista con el histórico completo de cron runs, ni un log unificado de envíos que dijese "por qué no salió este correo", ni nada para saber si el cliente había abierto el email.
+
+**Cambios**
+
+`database/migrations/add_dunning_v7.sql` (nuevo):
+
+- Tabla `dunning_cron_runs` (id, ran_at, source, endpoint, status, reason, summary jsonb, is_test, duration_ms) con RLS restringido a superadmins e índices por `ran_at DESC`, `status`, `endpoint`.
+- Columnas nuevas en `dunning_reminders`: `first_opened_at`, `last_opened_at`, `open_count`.
+
+`services/admin-service/src/routes/dunning.js`:
+
+- Helper `detectCronSource(req)`: distingue Vercel Cron (`x-vercel-cron` header) de disparos manuales.
+- Helper `logCronRun(...)`: inserta una fila en `dunning_cron_runs` por cada llamada al cron (ok / skipped / error), sin tirar la ejecución si el log falla.
+- `cronRunHandler` y `cronSyncPaidHandler`: envuelven la lógica ya existente y llaman a `logCronRun` en todas las ramas (system-disabled, not-scheduled, ran-recently, ok, error).
+- Nuevo endpoint público `GET /dunning/track/open/:reminderId.gif`: sirve un GIF transparente 1×1 y registra `open_count += 1` + `first_opened_at` (si es la primera) + `last_opened_at`. Devuelve el pixel primero y actualiza después para no romper la carga si BD falla. Valida el UUID antes de tocar BD para no filtrar información.
+- `executeSend`: pre-genera el `id` del reminder con `crypto.randomUUID()`, se lo pasa como `tracking_pixel_url` al renderer y usa ese mismo id al insertar la fila.
+- Nuevos endpoints superadmin `GET /dunning/cron-runs` y `GET /dunning/reminders` (paginados, con filtros por status/endpoint y opción `include_test`).
+
+`services/admin-service/src/lib/dunningEmailV2.js`:
+
+- `renderDunningEmailV2` acepta un nuevo parámetro opcional `tracking_pixel_url` y, si viene, inyecta `<img src="{tracking_pixel_url}" width="1" height="1" .../>` justo antes de `</body>`.
+
+`client/src/lib/api/dunning.ts`:
+
+- Tipos nuevos `DunningCronRun`, `DunningReminderRow`. Ampliación de `DunningReminder` con `first_opened_at`, `last_opened_at`, `open_count`, `is_test`, `stripe_payment_url`.
+- Métodos `listCronRuns()` y `listReminders()` en `dunningApi`.
+
+`client/src/features/dunning/DunningConfig.tsx`:
+
+- Nueva pestaña `history` con icono `Clock`.
+- Componente `HistoryTab` compuesto por:
+  - `CronRunsSection`: tabla con las últimas 100 ejecuciones. Columnas: fecha, origen (Vercel Cron / Manual), endpoint, estado (chip verde/amarillo/rojo), motivo o resumen (X enviados, Y fallidos), duración (ms) y botón "Detalle" que despliega el JSON de summary plegable.
+  - `RemindersSection`: tabla con los últimos 200 recordatorios. Columnas: fecha, factura, cliente, nivel, destinatario (con badge `·PRUEBA` si aplica), estado (chip), **abierto** (verde con timestamp de primera apertura + contador si >1, gris "No" si no), y error si falló. Toggle "Incluir envíos de prueba".
+- Ambas secciones con botón "Actualizar" (refetch) y su propia guía plegable en `TabGuide`.
+
+`client/src/features/dunning/DunningGuide.tsx`:
+
+- Añadido `'history'` al union type del prop `tab` de `TabGuide`.
+
+`client/src/lib/changelog.ts`:
+
+- Entrada `v1.48-impagos-historial-y-tracking`.
+
+**Limitaciones del open tracking (documentadas en la propia UI)**
+
+- Gmail y Outlook web → funciona bien (el proxy de imágenes de Google carga el pixel en cuanto el usuario abre el correo).
+- Outlook desktop → funciona salvo que el usuario haya bloqueado descarga de imágenes.
+- Apple Mail iOS 15+ / macOS → Mail Privacy Protection **pre-carga todos los pixels** aunque el usuario no abra el correo → falsos positivos "abierto".
+- Clientes que bloquean imágenes por defecto → no se registra apertura aunque hayan leído.
+
+Es orientativo, no auditoría. Sirve para señalar clientes que aparentemente no lo han visto (candidatos a reintento por otro canal) pero no vale como prueba legal.
+
+**Migración a aplicar en Supabase**
+
+`database/migrations/add_dunning_v7.sql` (aditiva, sin borrado).

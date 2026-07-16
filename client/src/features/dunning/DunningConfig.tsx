@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     dunningApi, DunningBank, DunningConfig as DunningConfigType, DunningTemplate,
-    PlanItem, PlanSummary, RunResult,
+    PlanItem, PlanSummary, RunResult, DunningCronRun, DunningReminderRow,
 } from '@/lib/api/dunning';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/Input';
 import { formatCurrency } from '@/lib/utils';
 import {
     Save, Settings, Calendar, Mail, Loader2, Eye, Info, Check, Play, Send, RefreshCw,
-    AlertTriangle, X, Zap, Palette, Trash2, Plus,
+    AlertTriangle, X, Zap, Palette, Trash2, Plus, Clock, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { DunningIntroPanel, TabGuide } from './DunningGuide';
 
@@ -18,7 +18,7 @@ import { DunningIntroPanel, TabGuide } from './DunningGuide';
 // Configuración de Impagos — Fase 3
 // ══════════════════════════════════════════════════════════════════════════════
 
-type Tab = 'rules' | 'schedule' | 'brand' | 'templates' | 'run';
+type Tab = 'rules' | 'schedule' | 'brand' | 'templates' | 'run' | 'history';
 
 const TABS: { key: Tab; label: string; icon: any }[] = [
     { key: 'rules', label: 'Reglas', icon: Settings },
@@ -26,6 +26,7 @@ const TABS: { key: Tab; label: string; icon: any }[] = [
     { key: 'brand', label: 'Marca y bancos', icon: Palette },
     { key: 'templates', label: 'Plantillas', icon: Mail },
     { key: 'run', label: 'Ejecutar', icon: Zap },
+    { key: 'history', label: 'Historial', icon: Clock },
 ];
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -1229,6 +1230,252 @@ function RunTab({ config }: { config: DunningConfigType }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+// ── Tab: Historial (v7) ────────────────────────────────────────────────────────
+// Dos secciones:
+//   1. Ejecuciones del cron — cada llamada a /dunning/cron/run y /cron/sync-paid
+//      (Vercel + manual), con estado y motivo si se saltó.
+//   2. Historial de envíos — cada recordatorio enviado (o intento fallido) con
+//      apertura del correo (open tracking).
+
+function statusChipClass(status: string): string {
+    if (status === 'ok' || status === 'sent') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+    if (status === 'skipped') return 'bg-amber-100 text-amber-700 border-amber-200';
+    if (status === 'failed' || status === 'error') return 'bg-red-100 text-red-700 border-red-200';
+    return 'bg-slate-100 text-slate-700 border-slate-200';
+}
+
+function formatDateTime(iso: string | null | undefined): string {
+    if (!iso) return '—';
+    try {
+        return new Date(iso).toLocaleString('es-ES', {
+            day: '2-digit', month: '2-digit', year: '2-digit',
+            hour: '2-digit', minute: '2-digit',
+        });
+    } catch { return String(iso); }
+}
+
+function CronRunsSection() {
+    const { data, isLoading, refetch, isRefetching } = useQuery({
+        queryKey: ['dunning', 'cron-runs'],
+        queryFn: () => dunningApi.listCronRuns({ limit: 100 }),
+        refetchOnWindowFocus: false,
+    });
+    const runs = data?.runs || [];
+
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+
+    return (
+        <Card>
+            <CardHeader className="flex flex-row items-start justify-between gap-4">
+                <div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                        <Clock size={16} /> Ejecuciones del cron
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground mt-1">
+                        Cada vez que Vercel Cron o un disparo manual pega contra <code className="text-[11px] bg-muted px-1 rounded">/cron/run</code> o <code className="text-[11px] bg-muted px-1 rounded">/cron/sync-paid</code>. Aunque no toque enviar, queda registro con el motivo del skip.
+                    </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isRefetching}>
+                    <RefreshCw size={14} className={isRefetching ? 'animate-spin' : ''} /> Actualizar
+                </Button>
+            </CardHeader>
+            <CardContent>
+                {isLoading ? (
+                    <div className="flex items-center justify-center py-8 text-muted-foreground">
+                        <Loader2 className="animate-spin mr-2" size={16} /> Cargando…
+                    </div>
+                ) : runs.length === 0 ? (
+                    <div className="text-center py-8 text-sm text-muted-foreground">
+                        Todavía no hay ejecuciones registradas. Vercel Cron se dispara cada hora en punto (UTC).
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto -mx-4 sm:mx-0">
+                        <table className="w-full text-sm">
+                            <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                                <tr>
+                                    <th className="text-left px-3 py-2 font-semibold">Cuándo</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Origen</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Endpoint</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Estado</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Motivo / resultado</th>
+                                    <th className="text-right px-3 py-2 font-semibold">Duración</th>
+                                    <th className="px-3 py-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {runs.map((r: DunningCronRun) => {
+                                    const isExpanded = expandedId === r.id;
+                                    const sentCount = Number((r.summary as any)?.sent || 0);
+                                    const failedCount = Number((r.summary as any)?.failed || 0);
+                                    const resultText = r.status === 'ok'
+                                        ? `${sentCount} enviados, ${failedCount} fallidos`
+                                        : (r.reason || '—');
+                                    return (
+                                        <Fragment key={r.id}>
+                                            <tr className="hover:bg-muted/30">
+                                                <td className="px-3 py-2 whitespace-nowrap">{formatDateTime(r.ran_at)}</td>
+                                                <td className="px-3 py-2 whitespace-nowrap text-xs">
+                                                    {r.source === 'vercel-cron' ? 'Vercel Cron' : 'Manual'}
+                                                    {r.is_test && <span className="ml-1 text-amber-600">·prueba</span>}
+                                                </td>
+                                                <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">{r.endpoint}</td>
+                                                <td className="px-3 py-2 whitespace-nowrap">
+                                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-semibold ${statusChipClass(r.status)}`}>
+                                                        {r.status === 'ok' ? <CheckCircle2 size={12} /> : r.status === 'error' ? <XCircle size={12} /> : <AlertTriangle size={12} />}
+                                                        {r.status}
+                                                    </span>
+                                                </td>
+                                                <td className="px-3 py-2 text-xs">{resultText}</td>
+                                                <td className="px-3 py-2 text-right text-xs text-muted-foreground">{r.duration_ms != null ? `${r.duration_ms} ms` : '—'}</td>
+                                                <td className="px-3 py-2 text-right">
+                                                    <button className="text-xs text-primary hover:underline" onClick={() => setExpandedId(isExpanded ? null : r.id)}>
+                                                        {isExpanded ? 'Ocultar' : 'Detalle'}
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            {isExpanded && (
+                                                <tr className="bg-muted/20">
+                                                    <td colSpan={7} className="px-3 py-3">
+                                                        <pre className="text-[11px] leading-relaxed whitespace-pre-wrap break-words max-h-[400px] overflow-auto bg-background border rounded p-3">
+                                                            {JSON.stringify(r.summary, null, 2)}
+                                                        </pre>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function RemindersSection() {
+    const [includeTest, setIncludeTest] = useState(true);
+    const { data, isLoading, refetch, isRefetching } = useQuery({
+        queryKey: ['dunning', 'reminders', { includeTest }],
+        queryFn: () => dunningApi.listReminders({ limit: 200, include_test: includeTest }),
+        refetchOnWindowFocus: false,
+    });
+    const reminders = data?.reminders || [];
+
+    return (
+        <Card>
+            <CardHeader className="flex flex-row items-start justify-between gap-4">
+                <div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                        <Mail size={16} /> Historial de envíos
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground mt-1">
+                        Todos los recordatorios que han salido (o intentado salir). La columna <strong>Abierto</strong> se rellena si el destinatario cargó las imágenes del correo (Gmail y Outlook web funcionan; Apple Mail lo pre-carga siempre, así que ahí puede dar falso positivo).
+                    </p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <label className="text-xs flex items-center gap-1.5 cursor-pointer select-none">
+                        <input type="checkbox" checked={includeTest} onChange={e => setIncludeTest(e.target.checked)} />
+                        Incluir envíos de prueba
+                    </label>
+                    <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isRefetching}>
+                        <RefreshCw size={14} className={isRefetching ? 'animate-spin' : ''} /> Actualizar
+                    </Button>
+                </div>
+            </CardHeader>
+            <CardContent>
+                {isLoading ? (
+                    <div className="flex items-center justify-center py-8 text-muted-foreground">
+                        <Loader2 className="animate-spin mr-2" size={16} /> Cargando…
+                    </div>
+                ) : reminders.length === 0 ? (
+                    <div className="text-center py-8 text-sm text-muted-foreground">
+                        Todavía no hay envíos registrados.
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto -mx-4 sm:mx-0">
+                        <table className="w-full text-sm">
+                            <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                                <tr>
+                                    <th className="text-left px-3 py-2 font-semibold">Cuándo</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Factura</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Cliente</th>
+                                    <th className="text-center px-3 py-2 font-semibold">Nivel</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Destino</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Estado</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Abierto</th>
+                                    <th className="text-left px-3 py-2 font-semibold">Error</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {reminders.map((r: DunningReminderRow) => (
+                                    <tr key={r.id} className="hover:bg-muted/30">
+                                        <td className="px-3 py-2 whitespace-nowrap text-xs">{formatDateTime(r.sent_at)}</td>
+                                        <td className="px-3 py-2 text-xs font-mono">{r.invoice_number || r.invoice_id.slice(0, 8)}</td>
+                                        <td className="px-3 py-2 text-xs">{r.contact_name || '—'}</td>
+                                        <td className="px-3 py-2 text-center text-xs font-semibold">{r.level}</td>
+                                        <td className="px-3 py-2 text-xs">
+                                            {r.sent_to}
+                                            {r.is_test && <span className="ml-1 text-[10px] text-amber-600 font-semibold">·PRUEBA</span>}
+                                        </td>
+                                        <td className="px-3 py-2 whitespace-nowrap">
+                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-semibold ${statusChipClass(r.status)}`}>
+                                                {r.status === 'sent' ? <CheckCircle2 size={12} /> : r.status === 'failed' ? <XCircle size={12} /> : <AlertTriangle size={12} />}
+                                                {r.status}
+                                            </span>
+                                        </td>
+                                        <td className="px-3 py-2 text-xs">
+                                            {r.first_opened_at ? (
+                                                <span className="inline-flex items-center gap-1 text-emerald-700" title={`Última apertura: ${formatDateTime(r.last_opened_at)} · ${r.open_count} aperturas`}>
+                                                    <Eye size={12} /> {formatDateTime(r.first_opened_at)}
+                                                    {(r.open_count || 0) > 1 && <span className="text-[10px] text-muted-foreground">×{r.open_count}</span>}
+                                                </span>
+                                            ) : (
+                                                <span className="text-muted-foreground">No</span>
+                                            )}
+                                        </td>
+                                        <td className="px-3 py-2 text-xs text-red-600 max-w-[300px] truncate" title={r.error_message || ''}>
+                                            {r.error_message || ''}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function HistoryTab() {
+    return (
+        <div className="space-y-4">
+            <TabGuide
+                tab="history"
+                storageKey="dunning:guide:history"
+                title="¿Qué se ve aquí?"
+                desc={
+                    <>
+                        Dos historiales para entender qué está haciendo el sistema:
+                        <strong> Ejecuciones del cron</strong> registra cada vez que Vercel (o tú manualmente) pega contra el endpoint del cron, incluso cuando se salta el envío por no ser el día/hora configurados.
+                        El <strong>Historial de envíos</strong> tiene la lista completa de correos que han salido, con si fallaron y si el destinatario los abrió.
+                    </>
+                }
+                tips={[
+                    <>El motivo del skip te dice por qué no se envió: <code>system-disabled</code>, <code>not-scheduled</code>, <code>ran-recently</code>.</>,
+                    <>La columna <strong>Abierto</strong> se rellena con un pixel invisible. Gmail y Outlook web son fiables; Apple Mail lo pre-carga siempre y da falsos positivos.</>,
+                    <>Detalle en las ejecuciones: click en "Detalle" para ver el JSON con las facturas planeadas y el resultado por cada una.</>,
+                ]}
+            />
+            <CronRunsSection />
+            <RemindersSection />
+        </div>
+    );
+}
+
+
 export default function DunningConfig() {
     const queryClient = useQueryClient();
     const [tab, setTab] = useState<Tab>('rules');
@@ -1284,6 +1531,7 @@ export default function DunningConfig() {
                     {tab === 'brand' && <BrandTab config={config} onSave={p => saveMutation.mutate(p)} saving={saveMutation.isPending} />}
                     {tab === 'templates' && <TemplatesTab config={config} />}
                     {tab === 'run' && <RunTab config={config} />}
+                    {tab === 'history' && <HistoryTab />}
                 </>
             )}
         </div>
