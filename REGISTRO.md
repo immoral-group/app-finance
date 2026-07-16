@@ -1410,3 +1410,52 @@ En orden:
 **Commits añadidos tras el registro inicial:**
 - `ffe6302` docs: registrar módulo en REGISTRO y changelog
 - `8381bae` UX: resumen del estado + feedback guardado en Programación
+
+---
+
+### 2026-07-16 — UX: Pantallitas de guía en Impagos y Configuración de impagos
+
+**Rama:** `fix/impagos1`
+
+**Motivo:**
+El módulo de impagos es nuevo y tiene bastante superficie (dashboard, 5 tabs de configuración, modo prueba, overrides, cron, plantillas por nivel…). Un usuario que entra por primera vez no tiene contexto de qué mira ni qué hace cada botón. Se añaden pantallitas explicativas cortas dentro de la propia app para que se entienda sin necesidad de consultar documentación externa.
+
+#### Nuevo componente `client/src/features/dunning/DunningGuide.tsx`
+
+Contiene 3 piezas reutilizables:
+
+| Componente | Uso |
+|---|---|
+| `DunningIntroPanel` | Panel plegable "¿Qué es el módulo de impagos?" con el flujo en 3 pasos (Detecta → Recuerda → Sigue) y aviso de arrancar en modo prueba. Se renderiza tanto en el dashboard como en la página de configuración. |
+| `LevelsLegend` | Tarjeta con los 3 niveles de aviso (colores amber/orange/red) mostrando el rango de días real leído de `dunning_config` y una descripción del tono de cada uno. Aparece en el dashboard antes del reparto por nivel. |
+| `TabGuide` | Panel guía por pestaña de configuración. Icono contextual + descripción + lista de tips prácticos con `ArrowRight`. Se puede ocultar. |
+
+Todos los paneles son **ocultables** y el estado se persiste en `localStorage` con claves específicas (`dunning:intro-dismissed`, `dunning:guide:rules`, `dunning:guide:schedule`, etc.). Cuando están ocultos aparece un enlace pequeño "Mostrar guía" para volverlos a abrir.
+
+#### Integración en `DunningDashboard.tsx`
+
+- `DunningIntroPanel` justo debajo del header (antes de los banners de estado).
+- `LevelsLegend` antes del bloque de reparto por nivel, alimentado con los valores actuales de `configData.config.level_*_days_*` (con fallback a 5/9, 10/14, 15).
+
+#### Integración en `DunningConfig.tsx`
+
+- `DunningIntroPanel` bajo el header general.
+- `TabGuide` como primer elemento dentro de cada tab:
+  - **Reglas** — explica qué son los rangos, la repetición del nivel 3, el importe mínimo y el BCC.
+  - **Programación** — explica el reloj cada hora, cómo elegir día/hora, ejemplo típico (lunes 09:00) y el sync-paid diario.
+  - **Marca y bancos** — explica que todo lo de esta pestaña afecta al email real que recibe el cliente, con el toggle del logo, colores del degradado y firma HTML.
+  - **Plantillas** — explica las variables disponibles (`{{contact_name}}`, `{{invoice_number}}`…), qué es el hero, el intro y el outro copy.
+  - **Ejecutar** — explica el modo prueba, overrides, preview vs dry-run vs ejecutar, y sincronización de cobros.
+
+#### Cambios menores
+
+- `changelog.ts`: nueva entrada `v1.44-impagos-guia` (icon Lightbulb, highlight true, superadminOnly true) para que los superadmins vean la novedad en el ChangeLogPanel.
+
+#### Verificación
+
+- `npx tsc --noEmit -p tsconfig.app.json` — sin errores.
+- `npx vite build` — build limpio.
+
+#### Commit
+
+- `fix/impagos1` — feat(dunning): pantallitas guía integradas en Impagos y su configuración + registro en REGISTRO y changelog.

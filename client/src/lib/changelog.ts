@@ -23,6 +23,17 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        id: 'v1.44-impagos-guia',
+        date: '2026-07-16',
+        title: 'Impagos: pantallitas de ayuda integradas',
+        description: 'Añadidas guías cortas dentro del módulo de Impagos y Configuración de impagos para que cualquier usuario que entre por primera vez entienda qué es, cómo funciona y qué hace cada pestaña. En la pantalla principal aparece un panel plegable "¿Qué es el módulo de impagos?" con el flujo en 3 pasos (Detecta → Recuerda → Sigue) y una leyenda de los 3 niveles de aviso con los rangos de días reales. En Configuración, cada pestaña (Reglas, Programación, Marca y bancos, Plantillas, Ejecutar) trae su propio panel explicativo con consejos prácticos. Las guías se pueden ocultar y el estado se recuerda por usuario (localStorage).',
+        type: 'improvement',
+        moduleKey: 'dunning',
+        superadminOnly: true,
+        icon: 'Lightbulb',
+        highlight: true,
+    },
+    {
         id: 'v1.43-impagos',
         date: '2026-07-14',
         title: 'Impagos: gestión automática de recordatorios de pago',

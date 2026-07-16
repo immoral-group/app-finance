@@ -10,6 +10,7 @@ import {
     AlertTriangle, Clock, Mail, CheckCircle2, Settings, RefreshCw, Loader2,
     FileWarning
 } from 'lucide-react';
+import { DunningIntroPanel, LevelsLegend } from './DunningGuide';
 
 function levelBadge(level: 0 | 1 | 2 | 3) {
     if (level === 0) return <Badge variant="outline" className="text-muted-foreground">Sin nivel</Badge>;
@@ -125,6 +126,9 @@ export default function DunningDashboard() {
                 </div>
             </div>
 
+            {/* Panel guía — qué es este módulo y cómo funciona */}
+            <DunningIntroPanel />
+
             {/* Banner MODO PRUEBA */}
             {configData?.config?.test_mode && (
                 <div className="rounded-lg border-2 border-amber-400 bg-amber-100 dark:bg-amber-950/30 dark:border-amber-700 p-3 flex items-start gap-3">
@@ -188,6 +192,15 @@ export default function DunningDashboard() {
                     hint="Con al menos un recordatorio ya enviado"
                 />
             </div>
+
+            {/* Leyenda de niveles */}
+            <LevelsLegend
+                level1From={configData?.config?.level_1_days_min ?? 5}
+                level1To={configData?.config?.level_1_days_max ?? 9}
+                level2From={configData?.config?.level_2_days_min ?? 10}
+                level2To={configData?.config?.level_2_days_max ?? 14}
+                level3From={configData?.config?.level_3_days_min ?? 15}
+            />
 
             {/* Reparto por nivel */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

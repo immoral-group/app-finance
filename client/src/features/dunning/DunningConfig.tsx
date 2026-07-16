@@ -12,6 +12,7 @@ import {
     Save, Settings, Calendar, Mail, Loader2, Eye, Info, Check, Play, Send, RefreshCw,
     AlertTriangle, X, Zap, Palette, Trash2, Plus,
 } from 'lucide-react';
+import { DunningIntroPanel, TabGuide } from './DunningGuide';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Configuración de Impagos — Fase 3
@@ -36,6 +37,25 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
     useEffect(() => setForm(config), [config]);
 
     return (
+        <div className="space-y-4">
+        <TabGuide
+            tab="rules"
+            storageKey="dunning:guide:rules"
+            title="¿Qué son las reglas de clasificación?"
+            desc={
+                <>
+                    Aquí decides <strong>cuándo una factura entra en cada nivel de aviso</strong> según los días que lleva vencida.
+                    El sistema mira cada factura vencida de Holded y, según los rangos que definas aquí, la mete en nivel 1, 2 o 3.
+                    A cada nivel le corresponde un email distinto (más suave o más firme).
+                </>
+            }
+            tips={[
+                <>Recomendado: <strong>Nivel 1</strong> del día 5 al 9, <strong>Nivel 2</strong> del 10 al 14, <strong>Nivel 3</strong> a partir del 15.</>,
+                <>La <strong>repetición del nivel 3</strong> hace que se reenvíe el aviso cada X días mientras la factura siga sin pagar.</>,
+                <>El <strong>importe mínimo</strong> filtra facturas pequeñas para no molestar por céntimos.</>,
+                <>El <strong>BCC</strong> pone en copia oculta a administración para que veas todos los envíos.</>,
+            ]}
+        />
         <Card>
             <CardHeader>
                 <CardTitle className="text-base">Reglas de clasificación</CardTitle>
@@ -103,6 +123,7 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 </div>
             </CardContent>
         </Card>
+        </div>
     );
 }
 
@@ -138,6 +159,25 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
     });
 
     return (
+        <div className="space-y-4">
+        <TabGuide
+            tab="schedule"
+            storageKey="dunning:guide:schedule"
+            title="¿Cuándo se envían los recordatorios?"
+            desc={
+                <>
+                    El sistema tiene un <strong>reloj automático</strong> que se despierta cada hora. Cuando llega uno de los días
+                    y la hora que marques aquí, y el <strong>Sistema activo</strong> está encendido, envía los emails que toquen.
+                    Si no está activo, no se envía nada aunque haya facturas vencidas.
+                </>
+            }
+            tips={[
+                <>Ejemplo típico: <strong>Lunes a las 09:00</strong>. Así cada semana se revisan las vencidas.</>,
+                <>Puedes marcar <strong>varios días</strong> (por ejemplo lunes y jueves) si quieres avisar más de una vez por semana.</>,
+                <>El resumen verde/gris de arriba te dice si el sistema está enviando o no en este momento.</>,
+                <>El sync-paid diario cruza automáticamente con Holded para <strong>cerrar los casos que ya se hayan cobrado</strong>.</>,
+            ]}
+        />
         <Card>
             <CardHeader>
                 <CardTitle className="text-base">Cuándo se envían los recordatorios</CardTitle>
@@ -275,6 +315,7 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
                 </div>
             </CardContent>
         </Card>
+        </div>
     );
 }
 
@@ -294,6 +335,24 @@ function BrandTab({ config, onSave, saving }: { config: DunningConfigType; onSav
 
     return (
         <div className="space-y-4">
+            <TabGuide
+                tab="brand"
+                storageKey="dunning:guide:brand"
+                title="Personaliza cómo se ven los emails"
+                desc={
+                    <>
+                        Todo lo que configures aquí afecta a <strong>los emails que reciben los clientes</strong>: colores del hero,
+                        logo, firma, textos de los botones y la lista de bancos que aparece debajo del botón de tarjeta.
+                        Usa <em>Previsualizar</em> en la pestaña <em>Plantillas</em> para ver el resultado con datos de ejemplo.
+                    </>
+                }
+                tips={[
+                    <>El <strong>logo</strong> se sirve desde una URL pública. Si no se ve bien, desactiva el toggle y el email queda solo con título y subtítulo.</>,
+                    <>Los <strong>colores</strong> definen el degradado del hero (bloque superior grande del email).</>,
+                    <>La <strong>firma</strong> acepta HTML básico (&lt;br&gt;, &lt;strong&gt;, &lt;a&gt;) para poder poner enlaces y saltos.</>,
+                    <>Cada <strong>banco</strong> es un botón que aparece en el email; el cliente puede clicar para ir a su banca online.</>,
+                ]}
+            />
             <Card>
                 <CardHeader>
                     <CardTitle className="text-base">Marca del email</CardTitle>
@@ -560,6 +619,24 @@ function TemplatesTab({ config }: { config: DunningConfigType }) {
 
     return (
         <div className="space-y-4">
+            <TabGuide
+                tab="templates"
+                storageKey="dunning:guide:templates"
+                title="Textos de los emails por nivel"
+                desc={
+                    <>
+                        Aquí escribes <strong>qué dirá cada email</strong>. Hay una plantilla por nivel (1, 2 y 3), así puedes ir
+                        subiendo el tono a medida que la factura lleva más días vencida. Usa <em>Previsualizar</em> para ver el
+                        email con datos de ejemplo antes de guardarlo.
+                    </>
+                }
+                tips={[
+                    <>Usa las <strong>variables</strong> (por ejemplo <code>{'{{contact_name}}'}</code>) para que el email se personalice con los datos reales de cada cliente.</>,
+                    <>El <strong>título del hero</strong> es el mensaje grande de arriba (por ejemplo "Recordatorio de pago").</>,
+                    <>El <strong>texto principal</strong> aparece antes de las tarjetas con los datos de la factura.</>,
+                    <>El <strong>texto de cierre</strong> va después de los botones de banco: buen sitio para poner instrucciones o teléfono de contacto.</>,
+                ]}
+            />
             <div className="flex items-center gap-2">
                 {([1, 2, 3] as const).map(lvl => {
                     const isActive = activeLevel === lvl;
@@ -1037,6 +1114,24 @@ function RunTab({ config }: { config: DunningConfigType }) {
 
     return (
         <div className="space-y-4">
+            <TabGuide
+                tab="run"
+                storageKey="dunning:guide:run"
+                title="Probar y disparar el sistema a mano"
+                desc={
+                    <>
+                        Esta pestaña sirve para <strong>probar todo antes de dejarlo en automático</strong> y para lanzar envíos
+                        puntuales fuera del horario configurado. Ideal para hacer QA sin arriesgar mandar nada al cliente.
+                    </>
+                }
+                tips={[
+                    <><strong>Modo prueba</strong>: redirige TODOS los emails a tu dirección de prueba, así puedes revisar cómo llegarían sin enviarlos a los clientes.</>,
+                    <><strong>Overrides</strong>: cambia el email de destino solo para clientes concretos (útil si el email en Holded está mal).</>,
+                    <><strong>Ver preview</strong>: te enseña qué facturas se enviarían y a qué nivel, sin enviar nada.</>,
+                    <><strong>Dry-run</strong>: simula el envío completo pero sin mandar los emails. <strong>Ejecutar ahora</strong> sí los manda de verdad.</>,
+                    <><strong>Sincronizar cobros</strong>: cierra automáticamente los casos que ya se hayan pagado en Holded.</>,
+                ]}
+            />
             <TestModePanel config={config} />
 
             <OverridesPanel />
@@ -1163,6 +1258,8 @@ export default function DunningConfig() {
                     Reglas de clasificación, programación, marca visual, bancos, plantillas de email y ejecución manual.
                 </p>
             </div>
+
+            <DunningIntroPanel />
 
             <div className="flex items-center gap-1 border-b overflow-x-auto">
                 {TABS.map(({ key, label, icon: Icon }) => (
