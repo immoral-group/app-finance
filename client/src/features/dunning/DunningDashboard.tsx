@@ -1,14 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { dunningApi, OverdueInvoice } from '@/lib/api/dunning';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
 import { formatCurrency } from '@/lib/utils';
 import {
     AlertTriangle, Clock, Mail, CheckCircle2, Settings, RefreshCw, Loader2,
-    FileWarning
+    FileWarning, Search,
 } from 'lucide-react';
 import { DunningIntroPanel, LevelsLegend } from './DunningGuide';
 
@@ -77,6 +78,17 @@ export default function DunningDashboard() {
     });
 
     const invoices = overdueData?.invoices || [];
+
+    const [search, setSearch] = useState('');
+    const filteredInvoices = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        if (!q) return invoices;
+        return invoices.filter(inv =>
+            (inv.contact_name || '').toLowerCase().includes(q) ||
+            (inv.contact_email || '').toLowerCase().includes(q) ||
+            (inv.invoice_number || '').toLowerCase().includes(q)
+        );
+    }, [invoices, search]);
 
     // Reparto por nivel para las tarjetas
     const byLevel = useMemo(() => {
@@ -231,10 +243,24 @@ export default function DunningDashboard() {
             {/* Tabla facturas vencidas */}
             <Card>
                 <CardHeader className="pb-3">
-                    <CardTitle className="text-lg">Facturas vencidas actualmente</CardTitle>
-                    <p className="text-xs text-muted-foreground">
-                        Datos en vivo desde Holded. Se cruzan con los recordatorios ya enviados desde esta app.
-                    </p>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <CardTitle className="text-lg">Facturas vencidas actualmente</CardTitle>
+                            <p className="text-xs text-muted-foreground">
+                                Datos en vivo desde Holded. Se cruzan con los recordatorios reales enviados (los envíos de prueba se ignoran).
+                            </p>
+                        </div>
+                        <div className="relative w-full sm:w-72">
+                            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                            <Input
+                                type="search"
+                                placeholder="Buscar cliente, email o factura…"
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                className="pl-8"
+                            />
+                        </div>
+                    </div>
                 </CardHeader>
                 <CardContent>
                     {overdueLoading ? (
@@ -248,8 +274,17 @@ export default function DunningDashboard() {
                             <p className="text-sm font-semibold text-foreground">Ninguna factura vencida</p>
                             <p className="text-xs text-muted-foreground mt-1">Todo al día. 🎉</p>
                         </div>
+                    ) : filteredInvoices.length === 0 ? (
+                        <div className="text-center py-8 text-sm text-muted-foreground">
+                            Ninguna factura coincide con "<strong>{search}</strong>".
+                        </div>
                     ) : (
                         <div className="overflow-x-auto">
+                            {search && (
+                                <p className="text-xs text-muted-foreground mb-2">
+                                    Mostrando <strong>{filteredInvoices.length}</strong> de {invoices.length} facturas.
+                                </p>
+                            )}
                             <table className="w-full text-sm">
                                 <thead className="text-[11px] uppercase tracking-wider text-muted-foreground border-b">
                                     <tr>
@@ -263,7 +298,7 @@ export default function DunningDashboard() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border/40">
-                                    {invoices.map(inv => (
+                                    {filteredInvoices.map(inv => (
                                         <tr key={inv.invoice_id} className="hover:bg-muted/30">
                                             <td className="py-2 px-2 font-mono text-xs">{inv.invoice_number || inv.invoice_id.slice(0, 8)}</td>
                                             <td className="py-2 px-2">

@@ -876,9 +876,12 @@ router.get('/overdue-invoices', async (_req, res) => {
         }
 
         // Cargar casos existentes en un solo query para cruzar.
+        // Ignoramos los casos marcados is_test=true: no queremos que envíos de
+        // prueba ensucien el "último recordatorio" de una factura viva. Los
+        // KPIs del dashboard filtran igual — así ambos sitios son coherentes.
         const ids = invoices.map(i => i.id).filter(Boolean);
         const { data: cases } = ids.length
-            ? await supabase.from('dunning_cases').select('*').in('invoice_id', ids)
+            ? await supabase.from('dunning_cases').select('*').in('invoice_id', ids).eq('is_test', false)
             : { data: [] };
         const caseByInvoice = new Map((cases || []).map(c => [c.invoice_id, c]));
 
