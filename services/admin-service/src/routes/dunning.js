@@ -887,7 +887,11 @@ router.get('/overdue-invoices', async (_req, res) => {
             const dueMs = normalizeTimestamp(inv.dueDate);
             if (!dueMs) continue;
             const daysOverdue = daysBetween(dueMs, now);
-            if (daysOverdue < config.level_1_days_min) continue;
+            // Mostramos TODAS las vencidas (>=1 día). Las que aún no llegan al
+            // umbral del nivel 1 aparecen con suggested_level=0 ("Sin nivel"):
+            // se ven en la lista pero el motor no les envía recordatorio hasta
+            // que crucen level_1_days_min.
+            if (daysOverdue < 1) continue;
 
             // Filtros de configuración
             const total = Number(inv.total || 0);
