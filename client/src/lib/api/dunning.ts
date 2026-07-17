@@ -38,6 +38,7 @@ export interface DunningConfig {
     min_amount: number;
     excluded_contact_ids: string[];
     bcc_email: string | null;
+    cc_emails: string[];
     updated_at: string;
     // Fase 3: marca y bancos
     brand_logo_text: string;
@@ -64,6 +65,7 @@ export interface DunningEmailOverride {
     contact_id: string;
     contact_name: string | null;
     override_email: string;
+    override_cc_emails: string[];
     note: string | null;
     created_at: string;
     updated_at: string;
@@ -134,6 +136,7 @@ export interface DunningReminder {
     days_overdue: number;
     sent_at: string;
     sent_to: string;
+    cc_emails?: string[];
     subject: string | null;
     body_html_snapshot: string | null;
     smtp_message_id: string | null;
@@ -200,6 +203,7 @@ export interface PlanItem {
     has_email: boolean;
     // Enriquecido por preview-run: destino final y motivo de redirección si aplica.
     dest_email?: string;
+    dest_cc?: string[];
     redirect_reason?: 'test_mode' | 'override' | null;
 }
 
@@ -218,6 +222,7 @@ export interface RunResult {
     status: 'sent' | 'skipped' | 'failed' | 'would-send';
     level?: number;
     to?: string;
+    cc?: string[];
     original_to?: string;
     redirect_reason?: 'test_mode' | 'override' | null;
     reason?: string;
@@ -306,7 +311,7 @@ export const dunningApi = {
     listOverrides: () =>
         fetchApi<{ overrides: DunningEmailOverride[] }>('/dunning/overrides'),
 
-    upsertOverride: (contact_id: string, payload: { override_email: string; contact_name?: string; note?: string }) =>
+    upsertOverride: (contact_id: string, payload: { override_email: string; contact_name?: string; note?: string; override_cc_emails?: string[] }) =>
         fetchApi<{ override: DunningEmailOverride }>(`/dunning/overrides/${encodeURIComponent(contact_id)}`, {
             method: 'PUT',
             body: JSON.stringify(payload),

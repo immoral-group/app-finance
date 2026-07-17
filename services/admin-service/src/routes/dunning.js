@@ -35,6 +35,29 @@ function formatDate(ms) {
     } catch { return ''; }
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Normaliza una lista de emails: recorta, filtra vacíos/inválidos, quita
+// duplicados y opcionalmente excluye una dirección concreta (el destinatario
+// principal, para que no aparezca también en CC).
+function sanitizeEmailList(input, excludeEmail = null) {
+    if (!input) return [];
+    const arr = Array.isArray(input) ? input : String(input).split(/[,;\s]+/);
+    const exclude = excludeEmail ? String(excludeEmail).trim().toLowerCase() : null;
+    const seen = new Set();
+    const out = [];
+    for (const raw of arr) {
+        const email = String(raw || '').trim();
+        if (!email || !EMAIL_RE.test(email)) continue;
+        const lower = email.toLowerCase();
+        if (exclude && lower === exclude) continue;
+        if (seen.has(lower)) continue;
+        seen.add(lower);
+        out.push(email);
+    }
+    return out;
+}
+
 function invoiceVars(invoice, daysOverdue) {
     return {
         contact_name: invoice.contact_name || '',
@@ -382,8 +405,15 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
     for (const t of templates) if (t.active && !tplByLevel.has(t.level)) tplByLevel.set(t.level, t);
 
     const { data: overridesRows } = await supabase
-        .from('dunning_email_overrides').select('contact_id, override_email');
+        .from('dunning_email_overrides').select('contact_id, override_email, override_cc_emails');
     const overrideByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_email]));
+    const overrideCcByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_cc_emails || []]));
+
+    // CC globales del config (siempre visibles). En modo prueba los suprimimos
+    // — un email de test no debe copiar a terceros aunque estén configurados.
+    const globalCcEmails = activeConfig.test_mode
+        ? []
+        : sanitizeEmailList(activeConfig.cc_emails);
 
     const results = [];
     const toSend = plan.filter(p => p.action === 'send');
@@ -422,6 +452,13 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
             continue;
         }
         if (dryRun) {
+            const dryOverrideCcList = activeConfig.test_mode
+                ? []
+                : sanitizeEmailList(overrideCcByContact.get(item.invoice.contact_id));
+            const dryCcList = sanitizeEmailList(
+                [...globalCcEmails, ...dryOverrideCcList],
+                destEmail,
+            );
             results.push({
                 invoice_id: item.invoice.id,
                 invoice_number: item.invoice.invoice_number,
@@ -429,6 +466,7 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                 status: 'would-send',
                 level: item.level,
                 to: destEmail,
+                cc: dryCcList,
                 original_to: originalEmail,
                 redirect_reason,
             });
@@ -512,9 +550,21 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                 tracking_pixel_url: trackingPixelUrl,
             });
 
+            // CC efectivo: globales + los específicos del contacto, deduplicado
+            // y excluyendo la dirección destino para no dispararle dos copias.
+            // En modo prueba no metemos CC — solo debe llegar al email de test.
+            const overrideCcList = activeConfig.test_mode
+                ? []
+                : sanitizeEmailList(overrideCcByContact.get(item.invoice.contact_id));
+            const ccList = sanitizeEmailList(
+                [...globalCcEmails, ...overrideCcList],
+                destEmail,
+            );
+
             const info = await getTransporter().sendMail({
                 from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
                 to: destEmail,
+                cc: ccList.length ? ccList : undefined,
                 bcc: activeConfig.bcc_email || undefined,
                 subject: redirect_reason ? `[${redirect_reason === 'test_mode' ? 'PRUEBA' : 'REDIRIGIDO'}] ${rendered.subject}` : rendered.subject,
                 html: rendered.html,
@@ -528,6 +578,7 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                 template_id: template.id,
                 days_overdue: item.days_overdue,
                 sent_to: destEmail,
+                cc_emails: ccList,
                 subject: rendered.subject,
                 body_html_snapshot: rendered.html,
                 smtp_message_id: info.messageId || null,
@@ -552,6 +603,7 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                 status: 'sent',
                 level: item.level,
                 to: destEmail,
+                cc: ccList,
                 original_to: originalEmail,
                 redirect_reason,
             });
@@ -668,7 +720,7 @@ router.put('/config', async (req, res) => {
             'level_1_days_min', 'level_1_days_max',
             'level_2_days_min', 'level_2_days_max', 'level_3_days_min',
             'level_3_repeat_every_days',
-            'min_amount', 'excluded_contact_ids', 'bcc_email',
+            'min_amount', 'excluded_contact_ids', 'bcc_email', 'cc_emails',
             // Fase 3: marca + bancos + labels
             'brand_logo_text', 'brand_primary_color', 'brand_secondary_color',
             'signature_html', 'cta_stripe_label', 'cta_bank_prefix', 'status_label',
@@ -680,6 +732,22 @@ router.put('/config', async (req, res) => {
         ];
         const patch = {};
         for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
+
+        // Los CC son visibles al cliente — no queremos guardar basura ahí.
+        // Normalizamos siempre: recortamos, filtramos inválidos y deduplicamos.
+        if ('cc_emails' in patch) {
+            const cleaned = sanitizeEmailList(patch.cc_emails);
+            if (Array.isArray(patch.cc_emails) && patch.cc_emails.some(v => v && !cleaned.includes(String(v).trim()))) {
+                // Al menos una dirección de entrada era inválida — respondemos error
+                // para que el usuario corrija en la UI en lugar de perder el dato.
+                return res.status(400).json({
+                    error: 'invalid-cc-emails',
+                    hint: 'Alguna dirección de CC no es un email válido.',
+                });
+            }
+            patch.cc_emails = cleaned;
+        }
+
         patch.updated_at = new Date().toISOString();
         patch.updated_by = req.userId;
 
@@ -970,7 +1038,7 @@ router.get('/reminders', async (req, res) => {
         const includeTest = req.query.include_test === '1' || req.query.include_test === 'true';
         let q = supabase
             .from('dunning_reminders')
-            .select('id, case_id, invoice_id, level, days_overdue, sent_at, sent_to, subject, smtp_message_id, status, error_message, is_test, first_opened_at, last_opened_at, open_count, stripe_payment_url')
+            .select('id, case_id, invoice_id, level, days_overdue, sent_at, sent_to, cc_emails, subject, smtp_message_id, status, error_message, is_test, first_opened_at, last_opened_at, open_count, stripe_payment_url')
             .order('sent_at', { ascending: false })
             .limit(limit);
         if (req.query.status) q = q.eq('status', String(req.query.status));
@@ -1018,8 +1086,13 @@ router.post('/preview-run', async (_req, res) => {
 
         // Resolvemos el destino final por item (respetando test_mode > override > cliente).
         const { data: overridesRows } = await supabase
-            .from('dunning_email_overrides').select('contact_id, override_email');
+            .from('dunning_email_overrides').select('contact_id, override_email, override_cc_emails');
         const overrideByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_email]));
+        const overrideCcByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_cc_emails || []]));
+
+        // Los CC globales del config solo aplican fuera de modo prueba (igual
+        // que en executeSend: en test no queremos disparar copias a terceros).
+        const globalCcEmails = config.test_mode ? [] : sanitizeEmailList(config.cc_emails);
 
         const enrichedPlan = plan.map(item => {
             let dest_email = item.invoice.contact_email;
@@ -1031,7 +1104,14 @@ router.post('/preview-run', async (_req, res) => {
                 dest_email = overrideByContact.get(item.invoice.contact_id);
                 redirect_reason = 'override';
             }
-            return { ...item, dest_email, redirect_reason };
+            const overrideCc = config.test_mode
+                ? []
+                : sanitizeEmailList(overrideCcByContact.get(item.invoice.contact_id));
+            const dest_cc = sanitizeEmailList(
+                [...globalCcEmails, ...overrideCc],
+                dest_email,
+            );
+            return { ...item, dest_email, dest_cc, redirect_reason };
         });
 
         // Recalcular summary considerando el destino final (en test_mode no se blockea por no-email).
@@ -1136,16 +1216,25 @@ router.get('/overrides', async (_req, res) => {
 
 router.put('/overrides/:contact_id', async (req, res) => {
     try {
-        const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        const { override_email, contact_name, note } = req.body || {};
-        if (!override_email || !emailRe.test(override_email)) {
+        const { override_email, contact_name, note, override_cc_emails } = req.body || {};
+        if (!override_email || !EMAIL_RE.test(override_email)) {
             return res.status(400).json({ error: 'invalid-override_email' });
+        }
+        // Igual que en /config: si alguno de los CC no es un email válido,
+        // devolvemos error en lugar de tragárnoslo silenciosamente.
+        const cleanedCc = sanitizeEmailList(override_cc_emails);
+        if (Array.isArray(override_cc_emails) && override_cc_emails.some(v => v && !cleanedCc.includes(String(v).trim()))) {
+            return res.status(400).json({
+                error: 'invalid-override_cc_emails',
+                hint: 'Alguna dirección de CC no es un email válido.',
+            });
         }
         const { data, error } = await supabase
             .from('dunning_email_overrides')
             .upsert({
                 contact_id: req.params.contact_id,
                 override_email,
+                override_cc_emails: cleanedCc,
                 contact_name: contact_name || null,
                 note: note || null,
                 updated_at: new Date().toISOString(),

@@ -31,6 +31,90 @@ const TABS: { key: Tab; label: string; icon: any }[] = [
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── Editor de listas de emails ────────────────────────────────────────────────
+// Se usa tanto para los CC globales del config como para los CC por override.
+// UX: escribes un email + Enter (o coma / espacio) para añadirlo como chip,
+// click en la X para quitarlo. Rechaza inválidos y duplicados sin romper el
+// input — solo hace shake para señalar que no se añadió.
+function EmailListEditor({
+    value, onChange, placeholder = 'nombre@dominio.com', disabled = false,
+}: {
+    value: string[];
+    onChange: (next: string[]) => void;
+    placeholder?: string;
+    disabled?: boolean;
+}) {
+    const [draft, setDraft] = useState('');
+    const [error, setError] = useState<string | null>(null);
+
+    const emails = Array.isArray(value) ? value : [];
+
+    const commit = (raw: string) => {
+        const email = raw.trim().replace(/[,;]+$/, '');
+        if (!email) return true;
+        if (!EMAIL_RE.test(email)) {
+            setError('No es un email válido');
+            return false;
+        }
+        if (emails.some(e => e.toLowerCase() === email.toLowerCase())) {
+            setError('Ya está en la lista');
+            return false;
+        }
+        onChange([...emails, email]);
+        setError(null);
+        return true;
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' || e.key === ',' || e.key === ';') {
+            e.preventDefault();
+            if (commit(draft)) setDraft('');
+        } else if (e.key === 'Backspace' && draft === '' && emails.length > 0) {
+            // Retroceso sobre input vacío quita el último chip — patrón habitual.
+            onChange(emails.slice(0, -1));
+        }
+    };
+
+    const handleBlur = () => {
+        if (draft.trim() && commit(draft)) setDraft('');
+    };
+
+    const remove = (idx: number) => onChange(emails.filter((_, i) => i !== idx));
+
+    return (
+        <div>
+            <div className={`flex flex-wrap gap-1.5 items-center min-h-[40px] w-full px-2 py-1.5 rounded border bg-background ${error ? 'border-red-400' : ''}`}>
+                {emails.map((email, idx) => (
+                    <span key={`${email}-${idx}`}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                        {email}
+                        {!disabled && (
+                            <button type="button" onClick={() => remove(idx)}
+                                className="hover:bg-primary/20 rounded-full p-0.5"
+                                aria-label={`Quitar ${email}`}>
+                                <X size={11} />
+                            </button>
+                        )}
+                    </span>
+                ))}
+                <input
+                    type="email"
+                    value={draft}
+                    onChange={e => { setDraft(e.target.value); if (error) setError(null); }}
+                    onKeyDown={handleKeyDown}
+                    onBlur={handleBlur}
+                    placeholder={emails.length === 0 ? placeholder : ''}
+                    disabled={disabled}
+                    className="flex-1 min-w-[160px] text-sm bg-transparent outline-none px-1 py-0.5"
+                />
+            </div>
+            {error && <p className="text-[11px] text-red-600 mt-1">{error}</p>}
+        </div>
+    );
+}
+
 // ── Tab: Reglas ────────────────────────────────────────────────────────────────
 
 function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
@@ -54,7 +138,8 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 <>Recomendado: <strong>Nivel 1</strong> del día 5 al 9, <strong>Nivel 2</strong> del 10 al 14, <strong>Nivel 3</strong> a partir del 15.</>,
                 <>La <strong>repetición del nivel 3</strong> hace que se reenvíe el aviso cada X días mientras la factura siga sin pagar.</>,
                 <>El <strong>importe mínimo</strong> filtra facturas pequeñas para no molestar por céntimos.</>,
-                <>El <strong>BCC</strong> pone en copia oculta a administración para que veas todos los envíos.</>,
+                <>El <strong>CC</strong> (copia visible) va a los emails que decidas poner en copia junto al cliente — típicamente comercial o gestor del cliente. Se pueden añadir aún más por cliente en Ejecutar → Overrides.</>,
+                <>El <strong>BCC</strong> (copia oculta) pone a administración en copia oculta para que veas todos los envíos sin que el cliente lo sepa.</>,
             ]}
         />
         <Card>
@@ -109,11 +194,24 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 </div>
 
                 <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Copia visible (CC) — se aplica a todos los recordatorios</label>
+                    <EmailListEditor
+                        value={form.cc_emails || []}
+                        onChange={next => setForm({ ...form, cc_emails: next })}
+                        placeholder="Añade emails y pulsa Enter…"
+                    />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                        Estas direcciones irán en CC de cada recordatorio (las verá el cliente). Ideal para poner al gestor
+                        del cliente, al comercial que lleva la cuenta o a administración. En modo prueba no se aplican.
+                    </p>
+                </div>
+
+                <div>
                     <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Copia oculta (BCC) opcional</label>
                     <Input type="email" placeholder="administracion@immoral.es"
                         value={form.bcc_email || ''}
                         onChange={e => setForm({ ...form, bcc_email: e.target.value })} />
-                    <p className="text-[11px] text-muted-foreground mt-1">Cada recordatorio incluirá esta dirección en BCC para tener visibilidad interna.</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Cada recordatorio incluirá esta dirección en BCC (no la ve el cliente) para tener visibilidad interna.</p>
                 </div>
 
                 <div className="flex justify-end pt-2 border-t">
@@ -747,7 +845,7 @@ function PreviewModal({ plan, summary, testMode, testModeEmail, onClose }: {
                                         <tr key={p.invoice.id}>
                                             <td className="py-1.5 px-2 font-mono">{p.invoice.invoice_number || p.invoice.id.slice(0, 6)}</td>
                                             <td className="py-1.5 px-2">{p.invoice.contact_name}</td>
-                                            <td className="py-1.5 px-2 truncate max-w-[220px]">
+                                            <td className="py-1.5 px-2 truncate max-w-[260px]">
                                                 <span className={p.redirect_reason ? 'text-amber-600 font-medium' : 'text-muted-foreground'}>
                                                     {p.dest_email}
                                                 </span>
@@ -758,6 +856,11 @@ function PreviewModal({ plan, summary, testMode, testModeEmail, onClose }: {
                                                 )}
                                                 {p.redirect_reason && p.invoice.contact_email && (
                                                     <div className="text-[10px] text-muted-foreground line-through">{p.invoice.contact_email}</div>
+                                                )}
+                                                {(p.dest_cc || []).length > 0 && (
+                                                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                                                        <span className="font-semibold">CC:</span> {(p.dest_cc || []).join(', ')}
+                                                    </div>
                                                 )}
                                             </td>
                                             <td className="py-1.5 px-2 text-center font-semibold">{p.days_overdue}</td>
@@ -916,6 +1019,11 @@ function RunResultsModal({ results, dryRun, onClose }: { results: RunResult[]; d
                                                             [{r.redirect_reason === 'test_mode' ? 'PRUEBA' : 'OVERRIDE'}]
                                                         </span>
                                                     )}
+                                                    {(r.cc || []).length > 0 && (
+                                                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                                                            <span className="font-semibold">CC:</span> {(r.cc || []).join(', ')}
+                                                        </div>
+                                                    )}
                                                 </>
                                             ) : '—'}
                                         </td>
@@ -1001,14 +1109,33 @@ function OverridesPanel() {
     const [contactId, setContactId] = useState('');
     const [contactName, setContactName] = useState('');
     const [overrideEmail, setOverrideEmail] = useState('');
+    const [overrideCc, setOverrideCc] = useState<string[]>([]);
     const [note, setNote] = useState('');
 
     const addMutation = useMutation({
-        mutationFn: () => dunningApi.upsertOverride(contactId, { override_email: overrideEmail, contact_name: contactName, note }),
+        mutationFn: () => dunningApi.upsertOverride(contactId, {
+            override_email: overrideEmail,
+            contact_name: contactName,
+            note,
+            override_cc_emails: overrideCc,
+        }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['dunning', 'overrides'] });
-            setContactId(''); setContactName(''); setOverrideEmail(''); setNote('');
+            setContactId(''); setContactName(''); setOverrideEmail(''); setOverrideCc([]); setNote('');
         },
+    });
+
+    // Actualizar el CC de un override ya guardado sin abrir el formulario de alta.
+    // Se conservan los demás campos re-enviándolos en el upsert.
+    const updateCcMutation = useMutation({
+        mutationFn: ({ o, cc }: { o: typeof overrides[number]; cc: string[] }) =>
+            dunningApi.upsertOverride(o.contact_id, {
+                override_email: o.override_email,
+                contact_name: o.contact_name || undefined,
+                note: o.note || undefined,
+                override_cc_emails: cc,
+            }),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'overrides'] }),
     });
 
     const deleteMutation = useMutation({
@@ -1023,34 +1150,48 @@ function OverridesPanel() {
             <CardHeader>
                 <CardTitle className="text-base">Overrides por cliente</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                    Redirigir los recordatorios de un contacto concreto a otro email. Útil si el email en Holded es incorrecto o si quieres testear un caso específico sin activar el modo prueba global.
+                    Redirigir los recordatorios de un contacto concreto a otro email, o añadir CC específicos para ese cliente
+                    (además de los CC globales del config). Útil cuando el gestor concreto tiene que estar en copia.
                 </p>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
-                    <div className="md:col-span-1">
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Contact ID (Holded)</label>
-                        <Input value={contactId} onChange={e => setContactId(e.target.value)} placeholder="6123abc…" />
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <div>
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Contact ID (Holded)</label>
+                            <Input value={contactId} onChange={e => setContactId(e.target.value)} placeholder="6123abc…" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nombre (opcional)</label>
+                            <Input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Cliente XYZ SL" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Email destino</label>
+                            <Input type="email" value={overrideEmail} onChange={e => setOverrideEmail(e.target.value)} placeholder="nuevo@email.com" />
+                        </div>
                     </div>
                     <div>
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nombre (opcional)</label>
-                        <Input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Cliente XYZ SL" />
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">CC extra para este cliente (opcional)</label>
+                        <EmailListEditor
+                            value={overrideCc}
+                            onChange={setOverrideCc}
+                            placeholder="Añade emails y pulsa Enter…"
+                        />
+                        <p className="text-[11px] text-muted-foreground mt-1">Se suman a los CC globales del config, no los reemplazan.</p>
                     </div>
-                    <div>
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Email destino</label>
-                        <Input type="email" value={overrideEmail} onChange={e => setOverrideEmail(e.target.value)} placeholder="nuevo@email.com" />
+                    <div className="flex items-end gap-2">
+                        <div className="flex-1">
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nota (opcional)</label>
+                            <Input value={note} onChange={e => setNote(e.target.value)} placeholder="Motivo del override" />
+                        </div>
+                        <Button
+                            onClick={() => addMutation.mutate()}
+                            disabled={!contactId || !overrideEmail || addMutation.isPending}
+                        >
+                            {addMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Plus size={14} className="mr-2" />}
+                            Guardar override
+                        </Button>
                     </div>
-                    <Button
-                        onClick={() => addMutation.mutate()}
-                        disabled={!contactId || !overrideEmail || addMutation.isPending}
-                    >
-                        {addMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Plus size={14} className="mr-2" />}
-                        Añadir
-                    </Button>
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nota (opcional)</label>
-                    <Input value={note} onChange={e => setNote(e.target.value)} placeholder="Motivo del override" />
                 </div>
 
                 {overrides.length === 0 ? (
@@ -1063,6 +1204,7 @@ function OverridesPanel() {
                                     <th className="text-left py-2 px-2">Contact ID</th>
                                     <th className="text-left py-2 px-2">Cliente</th>
                                     <th className="text-left py-2 px-2">Email destino</th>
+                                    <th className="text-left py-2 px-2 min-w-[260px]">CC extra</th>
                                     <th className="text-left py-2 px-2">Nota</th>
                                     <th className="text-right py-2 px-2"></th>
                                 </tr>
@@ -1073,6 +1215,14 @@ function OverridesPanel() {
                                         <td className="py-1.5 px-2 font-mono text-muted-foreground truncate max-w-[120px]">{o.contact_id}</td>
                                         <td className="py-1.5 px-2">{o.contact_name || '—'}</td>
                                         <td className="py-1.5 px-2 font-medium text-primary">{o.override_email}</td>
+                                        <td className="py-1.5 px-2">
+                                            <EmailListEditor
+                                                value={o.override_cc_emails || []}
+                                                onChange={cc => updateCcMutation.mutate({ o, cc })}
+                                                placeholder="Añadir CC…"
+                                                disabled={updateCcMutation.isPending}
+                                            />
+                                        </td>
                                         <td className="py-1.5 px-2 text-muted-foreground italic">{o.note || '—'}</td>
                                         <td className="py-1.5 px-2 text-right">
                                             <button onClick={() => deleteMutation.mutate(o.contact_id)} className="p-1 rounded hover:bg-red-50 text-red-500">
@@ -1418,6 +1568,13 @@ function RemindersSection() {
                                         <td className="px-3 py-2 text-xs">
                                             {r.sent_to}
                                             {r.is_test && <span className="ml-1 text-[10px] text-amber-600 font-semibold">·PRUEBA</span>}
+                                            {(r.cc_emails || []).length > 0 && (
+                                                <div className="text-[10px] text-muted-foreground mt-0.5" title={(r.cc_emails || []).join(', ')}>
+                                                    <span className="font-semibold">CC:</span> {(r.cc_emails || []).length === 1
+                                                        ? r.cc_emails![0]
+                                                        : `${r.cc_emails![0]} +${r.cc_emails!.length - 1}`}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="px-3 py-2 whitespace-nowrap">
                                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-semibold ${statusChipClass(r.status)}`}>
