@@ -18,7 +18,7 @@ import { DunningIntroPanel, TabGuide } from './DunningGuide';
 // Configuración de Impagos — Fase 3
 // ══════════════════════════════════════════════════════════════════════════════
 
-type Tab = 'rules' | 'schedule' | 'brand' | 'templates' | 'run' | 'history';
+type Tab = 'rules' | 'schedule' | 'brand' | 'templates' | 'run' | 'history' | 'reincidents';
 
 const TABS: { key: Tab; label: string; icon: any }[] = [
     { key: 'rules', label: 'Reglas', icon: Settings },
@@ -27,6 +27,7 @@ const TABS: { key: Tab; label: string; icon: any }[] = [
     { key: 'templates', label: 'Plantillas', icon: Mail },
     { key: 'run', label: 'Ejecutar', icon: Zap },
     { key: 'history', label: 'Historial', icon: Clock },
+    { key: 'reincidents', label: 'Reincidentes', icon: AlertTriangle },
 ];
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -236,13 +237,21 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
     const [threshold, setThreshold] = useState(config.multi_alert_threshold);
     const [to, setTo] = useState(config.multi_alert_to || '');
     const [cc, setCc] = useState<string[]>(config.multi_alert_cc_emails || []);
+    const [sendDays, setSendDays] = useState<number[]>(config.multi_alert_send_days || []);
 
     useEffect(() => {
         setEnabled(config.multi_alert_enabled);
         setThreshold(config.multi_alert_threshold);
         setTo(config.multi_alert_to || '');
         setCc(config.multi_alert_cc_emails || []);
+        setSendDays(config.multi_alert_send_days || []);
     }, [config.id, config.updated_at]);
+
+    const toggleDay = (day: number) => {
+        const s = new Set(sendDays);
+        if (s.has(day)) s.delete(day); else s.add(day);
+        setSendDays(Array.from(s).sort());
+    };
 
     // Preview: cuántos clientes cumplirían el umbral ahora mismo.
     const { data: preview, refetch: refetchPreview, isFetching: previewLoading } = useQuery({
@@ -269,8 +278,8 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
                         </CardTitle>
                         <p className="text-xs text-muted-foreground mt-1">
                             Cuando un mismo cliente acumule al menos <strong>{threshold}</strong> facturas vencidas, aparece
-                            un banner rojo en toda la app para superadmins y se envía un email diario a los destinatarios de abajo.
-                            Anti-spam: no se manda más de un email cada 24h.
+                            un modal bloqueante en toda la app para superadmins (una vez al día) y se envía un email a los
+                            destinatarios de abajo en los días que elijas. El historial se guarda a diario para métricas mensuales.
                         </p>
                     </div>
                     <button
@@ -311,6 +320,31 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
                     <EmailListEditor value={cc} onChange={setCc} placeholder="Añade correos y pulsa Enter…" />
                     <p className="text-[11px] text-muted-foreground mt-1">
                         Todos los que estén aquí recibirán la alerta en copia visible. Puedes dejar TO vacío y usar solo CC (el primero de la lista pasa a TO).
+                    </p>
+                </div>
+
+                <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                        Días en que se manda el email
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                        {DAY_LABELS.map((label, idx) => {
+                            const active = sendDays.includes(idx);
+                            return (
+                                <button key={idx} onClick={() => toggleDay(idx)}
+                                    type="button"
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                        active ? 'bg-primary text-primary-foreground border-primary'
+                                              : 'bg-background text-foreground border-border hover:bg-muted'
+                                    }`}>
+                                    {label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1.5">
+                        Elige uno o varios días de la semana. El banner en la app sigue apareciendo todos los días — esto controla solo el email.
+                        {sendDays.length === 0 && <span className="text-amber-600 dark:text-amber-400 font-semibold"> Sin días marcados no se enviará ningún email.</span>}
                     </p>
                 </div>
 
@@ -371,6 +405,7 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
                         multi_alert_threshold: threshold,
                         multi_alert_to: to.trim() || null,
                         multi_alert_cc_emails: cc,
+                        multi_alert_send_days: sendDays,
                     })} disabled={saving}>
                         {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
                         Guardar alerta
@@ -1761,6 +1796,110 @@ function RemindersSection() {
     );
 }
 
+function ReincidentsTab() {
+    const [months, setMonths] = useState(12);
+    const { data, isLoading, refetch, isFetching } = useQuery({
+        queryKey: ['dunning', 'multi-history', months],
+        queryFn: () => dunningApi.getMultiOverdueHistory({ months }),
+        refetchOnWindowFocus: false,
+    });
+
+    const clients = data?.clients || [];
+    const currency = (n: number) => new Intl.NumberFormat('es-ES', {
+        style: 'currency', currency: 'EUR', maximumFractionDigits: 0,
+    }).format(Number(n || 0));
+    const monthLabel = (ym: string) => {
+        const [y, m] = ym.split('-').map(Number);
+        if (!y || !m) return ym;
+        return new Date(y, m - 1, 1).toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+    };
+
+    return (
+        <div className="space-y-4">
+            <Card>
+                <CardHeader className="flex flex-row items-start justify-between gap-4">
+                    <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <AlertTriangle size={16} /> Clientes reincidentes en impagos
+                        </CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            Cliente por cliente: en cuántos meses ha superado el umbral de facturas vencidas.
+                            Útil al cierre del mes para saber a quién no darle más crédito o revisar antes de emitir factura nueva.
+                            El registro se guarda cada día que el cron detecta la situación.
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <select value={months} onChange={e => setMonths(Number(e.target.value))}
+                            className="text-xs px-2 py-1.5 rounded border bg-background">
+                            <option value={3}>Últimos 3 meses</option>
+                            <option value={6}>Últimos 6 meses</option>
+                            <option value={12}>Últimos 12 meses</option>
+                            <option value={24}>Últimos 24 meses</option>
+                        </select>
+                        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+                            <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
+                        </Button>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {isLoading ? (
+                        <div className="flex items-center justify-center py-8 text-muted-foreground">
+                            <Loader2 className="animate-spin mr-2" size={16} /> Cargando…
+                        </div>
+                    ) : clients.length === 0 ? (
+                        <div className="text-center py-8 text-sm text-muted-foreground">
+                            Sin registros todavía. El histórico se rellena cada día que el cron detecta clientes por encima del umbral.
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                                    <tr>
+                                        <th className="text-left px-3 py-2 font-semibold">Cliente</th>
+                                        <th className="text-center px-3 py-2 font-semibold" title="Nº de meses distintos en los que ha superado el umbral">Meses afectados</th>
+                                        <th className="text-center px-3 py-2 font-semibold" title="Días totales en los que ha estado por encima del umbral">Días acumulados</th>
+                                        <th className="text-center px-3 py-2 font-semibold">Pico facturas</th>
+                                        <th className="text-right px-3 py-2 font-semibold">Pico deuda</th>
+                                        <th className="text-left px-3 py-2 font-semibold">Línea de tiempo</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {clients.map(c => (
+                                        <tr key={c.contact_id || c.contact_name || Math.random()} className="hover:bg-muted/30">
+                                            <td className="px-3 py-2 font-semibold text-foreground">
+                                                {c.contact_name || <span className="text-muted-foreground italic">(sin nombre)</span>}
+                                            </td>
+                                            <td className="px-3 py-2 text-center">
+                                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${c.months_flagged >= 3 ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200' : c.months_flagged >= 2 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}>
+                                                    {c.months_flagged}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-2 text-center text-xs">{c.total_days_flagged}</td>
+                                            <td className="px-3 py-2 text-center text-xs font-semibold">{c.peak_invoice_count}</td>
+                                            <td className="px-3 py-2 text-right font-semibold">{currency(c.peak_amount)}</td>
+                                            <td className="px-3 py-2">
+                                                <div className="flex flex-wrap gap-1">
+                                                    {c.months.slice(0, 12).map(m => (
+                                                        <span key={m.month}
+                                                            title={`${m.days_flagged} día(s) · pico ${m.max_invoice_count} facturas · ${currency(m.peak_amount)}`}
+                                                            className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${m.max_invoice_count >= 3 ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200'}`}>
+                                                            {monthLabel(m.month)}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+        </div>
+    );
+}
+
 function HistoryTab() {
     return (
         <div className="space-y-4">
@@ -1844,6 +1983,7 @@ export default function DunningConfig() {
                     {tab === 'templates' && <TemplatesTab config={config} />}
                     {tab === 'run' && <RunTab config={config} />}
                     {tab === 'history' && <HistoryTab />}
+                    {tab === 'reincidents' && <ReincidentsTab />}
                 </>
             )}
         </div>

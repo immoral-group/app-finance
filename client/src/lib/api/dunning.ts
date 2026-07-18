@@ -44,6 +44,7 @@ export interface DunningConfig {
     multi_alert_threshold: number;
     multi_alert_to: string | null;
     multi_alert_cc_emails: string[];
+    multi_alert_send_days: number[];
     multi_alert_last_sent_at: string | null;
     multi_alert_last_summary: Record<string, unknown>;
     updated_at: string;
@@ -367,7 +368,55 @@ export const dunningApi = {
             '/dunning/multi-overdue-alerts/send',
             { method: 'POST' }
         ),
+
+    getMultiOverdueHistory: (opts: { months?: number } = {}) => {
+        const qs = new URLSearchParams();
+        if (opts.months) qs.set('months', String(opts.months));
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return fetchApi<{ months_window: number; clients: MultiOverdueHistoryClient[] }>(
+            `/dunning/multi-overdue-history${suffix}`
+        );
+    },
+
+    getMultiOverdueContactHistory: (contactId: string, opts: { months?: number } = {}) => {
+        const qs = new URLSearchParams({ contact_id: contactId });
+        if (opts.months) qs.set('months', String(opts.months));
+        return fetchApi<{ contact_id: string; snapshots: MultiOverdueSnapshot[] }>(
+            `/dunning/multi-overdue-history?${qs.toString()}`
+        );
+    },
 };
+
+export interface MultiOverdueSnapshot {
+    id: string;
+    ran_at: string;
+    ran_date: string;
+    contact_id: string | null;
+    contact_name: string | null;
+    contact_email: string | null;
+    invoice_count: number;
+    max_days_overdue: number;
+    total_amount: number;
+    currency: string;
+    invoices: Array<{ invoice_id: string; invoice_number: string; amount: number; currency: string; days_overdue: number; due_date: number }>;
+    email_sent: boolean;
+}
+
+export interface MultiOverdueHistoryClient {
+    contact_id: string | null;
+    contact_name: string | null;
+    months_flagged: number;
+    total_days_flagged: number;
+    peak_invoice_count: number;
+    peak_amount: number;
+    months: Array<{
+        month: string;
+        days_flagged: number;
+        max_invoice_count: number;
+        max_days_overdue: number;
+        peak_amount: number;
+    }>;
+}
 
 export interface MultiOverdueAlert {
     contact_id: string;

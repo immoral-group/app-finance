@@ -328,16 +328,25 @@ async function cronSyncPaidHandler(req, res) {
         try {
             const { data: cfg } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
             if (cfg?.multi_alert_enabled) {
-                const lastSent = cfg.multi_alert_last_sent_at ? new Date(cfg.multi_alert_last_sent_at).getTime() : 0;
-                if (Date.now() - lastSent < 24 * 60 * 60 * 1000) {
-                    multiAlert = { skipped: true, reason: 'sent-recently' };
-                } else {
-                    const { alerts, threshold } = await computeMultiOverdueAlerts({ config: cfg });
-                    if (!alerts.length) {
-                        multiAlert = { skipped: true, reason: 'no-alerts' };
+                const { alerts, threshold } = await computeMultiOverdueAlerts({ config: cfg });
+                // Snapshot SIEMPRE que haya alertas, aunque hoy no toque email.
+                // Así el historial es diario y sirve para métricas mensuales.
+                let sendResult = null;
+                if (alerts.length) {
+                    const dow = currentWeekday(cfg);
+                    const sendDays = Array.isArray(cfg.multi_alert_send_days) ? cfg.multi_alert_send_days : [];
+                    const isSendDay = sendDays.includes(dow);
+                    const lastSent = cfg.multi_alert_last_sent_at ? new Date(cfg.multi_alert_last_sent_at).getTime() : 0;
+                    const sentRecently = Date.now() - lastSent < 20 * 60 * 60 * 1000;
+
+                    if (!isSendDay) {
+                        multiAlert = { skipped: true, reason: 'not-send-day', alerts_count: alerts.length, weekday: dow };
+                    } else if (sentRecently) {
+                        multiAlert = { skipped: true, reason: 'sent-recently', alerts_count: alerts.length };
                     } else {
-                        multiAlert = await sendMultiOverdueEmail({ alerts, config: cfg, baseUrl: computeBaseUrl(req) });
-                        if (multiAlert.sent) {
+                        sendResult = await sendMultiOverdueEmail({ alerts, config: cfg, baseUrl: computeBaseUrl(req) });
+                        multiAlert = sendResult;
+                        if (sendResult.sent) {
                             await supabase.from('dunning_config').update({
                                 multi_alert_last_sent_at: new Date().toISOString(),
                                 multi_alert_last_summary: {
@@ -349,6 +358,10 @@ async function cronSyncPaidHandler(req, res) {
                             }).eq('id', 1);
                         }
                     }
+                    const snapshot = await snapshotMultiOverdueAlerts({ alerts, emailSent: !!sendResult?.sent });
+                    multiAlert = { ...multiAlert, snapshot };
+                } else {
+                    multiAlert = { skipped: true, reason: 'no-alerts' };
                 }
             }
         } catch (alertErr) {
@@ -850,6 +863,48 @@ async function sendMultiOverdueEmail({ alerts, config, baseUrl }) {
     };
 }
 
+// Persiste un snapshot por cliente en dunning_multi_alert_history. Idempotente
+// gracias al índice único (contact_id, ran_date): si el cron corre dos veces
+// el mismo día, la segunda actualiza en vez de duplicar. `emailSent` marca
+// si el correo salió realmente (para no confundir "hubo alerta" con "hubo email").
+async function snapshotMultiOverdueAlerts({ alerts, emailSent = false }) {
+    if (!alerts.length) return 0;
+    const rows = alerts.map(a => ({
+        contact_id: a.contact_id || null,
+        contact_name: a.contact_name || null,
+        contact_email: a.contact_email || null,
+        invoice_count: a.invoice_count,
+        max_days_overdue: a.max_days_overdue,
+        total_amount: a.total_amount,
+        currency: a.invoices?.[0]?.currency || 'EUR',
+        invoices: a.invoices || [],
+        email_sent: !!emailSent,
+    }));
+    const { error, count } = await supabase
+        .from('dunning_multi_alert_history')
+        .upsert(rows, { onConflict: 'contact_id,ran_date', count: 'exact' });
+    if (error) {
+        console.warn('[dunning] snapshotMultiOverdueAlerts failed:', error.message);
+        return 0;
+    }
+    return count || rows.length;
+}
+
+// Devuelve el día de la semana (0=domingo … 6=sábado) según la zona horaria
+// del config. Se usa para respetar `multi_alert_send_days` de forma consistente
+// con lo que ven los usuarios en España.
+function currentWeekday(config, now = new Date()) {
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: config.timezone || 'Europe/Madrid',
+            weekday: 'short',
+        }).formatToParts(now);
+        const short = parts.find(p => p.type === 'weekday')?.value || '';
+        const MAP = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        return MAP[short] ?? now.getDay();
+    } catch { return now.getDay(); }
+}
+
 async function runSyncPaid() {
     const { data: openCases, error } = await supabase
         .from('dunning_cases').select('*').eq('status', 'open');
@@ -931,6 +986,7 @@ router.put('/config', async (req, res) => {
             'min_amount', 'excluded_contact_ids', 'bcc_email', 'cc_emails',
             // Fase 4 — alerta de clientes con múltiples vencidas
             'multi_alert_enabled', 'multi_alert_threshold', 'multi_alert_to', 'multi_alert_cc_emails',
+            'multi_alert_send_days',
             // Fase 3: marca + bancos + labels
             'brand_logo_text', 'brand_primary_color', 'brand_secondary_color',
             'signature_html', 'cta_stripe_label', 'cta_bank_prefix', 'status_label',
@@ -1626,9 +1682,107 @@ router.post('/multi-overdue-alerts/send', async (req, res) => {
                 },
             }).eq('id', 1);
         }
+        // Snapshot manual: registramos el disparo también en el historial.
+        await snapshotMultiOverdueAlerts({ alerts, emailSent: !!result.sent });
         res.json(result);
     } catch (err) {
         console.error('[dunning] multi-overdue-alerts/send error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /dunning/multi-overdue-history ────────────────────────────────────────
+// Historial de alertas por cliente. Dos modos:
+//   • Sin contact_id: resumen agregado por cliente y mes de los últimos 12
+//     meses — para el dashboard general de reincidentes.
+//   • Con contact_id: detalle día a día de ese cliente.
+router.get('/multi-overdue-history', async (req, res) => {
+    try {
+        const contactId = req.query.contact_id ? String(req.query.contact_id) : null;
+        const months = Math.max(1, Math.min(24, Number(req.query.months) || 12));
+        const sinceIso = new Date(Date.now() - months * 31 * 86_400_000).toISOString();
+
+        let q = supabase
+            .from('dunning_multi_alert_history')
+            .select('*')
+            .gte('ran_at', sinceIso)
+            .order('ran_at', { ascending: false });
+        if (contactId) q = q.eq('contact_id', contactId);
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+        const rows = data || [];
+
+        if (contactId) {
+            return res.json({ contact_id: contactId, snapshots: rows });
+        }
+
+        // Agregación: por cliente, contar cuántos días distintos apareció
+        // en cada mes YYYY-MM. Devolvemos también el máximo de facturas y
+        // deuda media para poder ordenar por gravedad.
+        const byContactMonth = new Map();
+        for (const r of rows) {
+            const month = String(r.ran_date || '').slice(0, 7);
+            if (!month) continue;
+            const key = `${r.contact_id || r.contact_name}||${month}`;
+            let bucket = byContactMonth.get(key);
+            if (!bucket) {
+                bucket = {
+                    contact_id: r.contact_id,
+                    contact_name: r.contact_name,
+                    month,
+                    days_flagged: 0,
+                    max_invoice_count: 0,
+                    max_days_overdue: 0,
+                    peak_amount: 0,
+                };
+                byContactMonth.set(key, bucket);
+            }
+            bucket.days_flagged += 1;
+            if (r.invoice_count > bucket.max_invoice_count) bucket.max_invoice_count = r.invoice_count;
+            if (r.max_days_overdue > bucket.max_days_overdue) bucket.max_days_overdue = r.max_days_overdue;
+            if (Number(r.total_amount || 0) > bucket.peak_amount) bucket.peak_amount = Number(r.total_amount || 0);
+        }
+
+        const byMonth = Array.from(byContactMonth.values());
+
+        // Reagrupamos por cliente para tener una fila por cliente con la
+        // línea temporal de meses en los que ha tenido múltiples vencidas.
+        const byContact = new Map();
+        for (const b of byMonth) {
+            const key = b.contact_id || b.contact_name || 'unknown';
+            let c = byContact.get(key);
+            if (!c) {
+                c = {
+                    contact_id: b.contact_id,
+                    contact_name: b.contact_name,
+                    months_flagged: 0,
+                    total_days_flagged: 0,
+                    peak_invoice_count: 0,
+                    peak_amount: 0,
+                    months: [],
+                };
+                byContact.set(key, c);
+            }
+            c.months_flagged += 1;
+            c.total_days_flagged += b.days_flagged;
+            if (b.max_invoice_count > c.peak_invoice_count) c.peak_invoice_count = b.max_invoice_count;
+            if (b.peak_amount > c.peak_amount) c.peak_amount = b.peak_amount;
+            c.months.push({
+                month: b.month,
+                days_flagged: b.days_flagged,
+                max_invoice_count: b.max_invoice_count,
+                max_days_overdue: b.max_days_overdue,
+                peak_amount: b.peak_amount,
+            });
+        }
+
+        const clients = Array.from(byContact.values())
+            .map(c => ({ ...c, months: c.months.sort((a, b) => b.month.localeCompare(a.month)) }))
+            .sort((a, b) => b.months_flagged - a.months_flagged || b.peak_invoice_count - a.peak_invoice_count);
+
+        res.json({ months_window: months, clients });
+    } catch (err) {
+        console.error('[dunning] multi-overdue-history error:', err);
         res.status(500).json({ error: err.message });
     }
 });
