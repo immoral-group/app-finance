@@ -819,7 +819,11 @@ function renderMultiOverdueEmail({ alerts, threshold, appUrl }) {
         </div>
     </div>
 </body></html>`;
-    const subject = `[Impagos] ${alerts.length} cliente${alerts.length === 1 ? '' : 's'} con ${threshold}+ facturas vencidas`;
+    // Asunto natural, sin corchetes ni tecnicismos, adaptado a si es un solo
+    // cliente o varios — así la bandeja de entrada se lee bien de un vistazo.
+    const subject = alerts.length === 1
+        ? `Alerta de impagos · ${alerts[0].contact_name || 'un cliente'} acumula ${alerts[0].invoice_count} facturas vencidas`
+        : `Alerta de impagos · ${alerts.length} clientes con facturas vencidas pendientes`;
     return { html, subject };
 }
 
