@@ -39,6 +39,13 @@ export interface DunningConfig {
     excluded_contact_ids: string[];
     bcc_email: string | null;
     cc_emails: string[];
+    // Fase 4: alerta cuando un cliente acumula >= threshold facturas vencidas
+    multi_alert_enabled: boolean;
+    multi_alert_threshold: number;
+    multi_alert_to: string | null;
+    multi_alert_cc_emails: string[];
+    multi_alert_last_sent_at: string | null;
+    multi_alert_last_summary: Record<string, unknown>;
     updated_at: string;
     // Fase 3: marca y bancos
     brand_logo_text: string;
@@ -345,4 +352,36 @@ export const dunningApi = {
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         return fetchApi<{ reminders: DunningReminderRow[] }>(`/dunning/reminders${suffix}`);
     },
+
+    // ── Alerta multi-vencida (v9) ─────────────────────────────────────
+    listMultiOverdueAlerts: () =>
+        fetchApi<{
+            alerts: MultiOverdueAlert[];
+            threshold: number;
+            enabled: boolean;
+            last_sent_at: string | null;
+        }>('/dunning/multi-overdue-alerts'),
+
+    sendMultiOverdueAlert: () =>
+        fetchApi<{ sent?: boolean; reason?: string; alerts_count?: number; to?: string; cc?: string[] }>(
+            '/dunning/multi-overdue-alerts/send',
+            { method: 'POST' }
+        ),
 };
+
+export interface MultiOverdueAlert {
+    contact_id: string;
+    contact_name: string;
+    contact_email: string;
+    invoice_count: number;
+    max_days_overdue: number;
+    total_amount: number;
+    invoices: {
+        invoice_id: string;
+        invoice_number: string;
+        amount: number;
+        currency: string;
+        days_overdue: number;
+        due_date: number;
+    }[];
+}

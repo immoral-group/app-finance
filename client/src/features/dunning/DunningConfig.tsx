@@ -222,7 +222,162 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 </div>
             </CardContent>
         </Card>
+        <MultiAlertCard config={config} onSave={onSave} saving={saving} />
         </div>
+    );
+}
+
+// ── Sección: alerta de clientes con múltiples vencidas ────────────────────────
+// Config visible dentro de la pestaña "Reglas". Se guarda mediante el mismo
+// updateConfig que las reglas, así el usuario no tiene que dar dos "Guardar".
+
+function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+    const [enabled, setEnabled] = useState(config.multi_alert_enabled);
+    const [threshold, setThreshold] = useState(config.multi_alert_threshold);
+    const [to, setTo] = useState(config.multi_alert_to || '');
+    const [cc, setCc] = useState<string[]>(config.multi_alert_cc_emails || []);
+
+    useEffect(() => {
+        setEnabled(config.multi_alert_enabled);
+        setThreshold(config.multi_alert_threshold);
+        setTo(config.multi_alert_to || '');
+        setCc(config.multi_alert_cc_emails || []);
+    }, [config.id, config.updated_at]);
+
+    // Preview: cuántos clientes cumplirían el umbral ahora mismo.
+    const { data: preview, refetch: refetchPreview, isFetching: previewLoading } = useQuery({
+        queryKey: ['dunning', 'multi-alerts-config-preview'],
+        queryFn: () => dunningApi.listMultiOverdueAlerts(),
+    });
+
+    const sendMutation = useMutation({
+        mutationFn: () => dunningApi.sendMultiOverdueAlert(),
+        onSuccess: () => refetchPreview(),
+    });
+
+    const alerts = preview?.alerts || [];
+    const canSend = enabled && (!!to.trim() || cc.length > 0);
+
+    return (
+        <Card>
+            <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <AlertTriangle className="text-red-500" size={16} />
+                            Alerta: clientes con múltiples facturas vencidas
+                        </CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            Cuando un mismo cliente acumule al menos <strong>{threshold}</strong> facturas vencidas, aparece
+                            un banner rojo en toda la app para superadmins y se envía un email diario a los destinatarios de abajo.
+                            Anti-spam: no se manda más de un email cada 24h.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => setEnabled(!enabled)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                        role="switch"
+                        aria-checked={enabled}
+                    >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                            Umbral (nº de facturas vencidas por cliente)
+                        </label>
+                        <Input type="number" min={2} value={threshold}
+                            onChange={e => setThreshold(Math.max(2, Number(e.target.value) || 2))} />
+                        <p className="text-[11px] text-muted-foreground mt-1">Mínimo 2. Por defecto salta con 2 o más.</p>
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                            Destinatario principal (TO)
+                        </label>
+                        <Input type="email" value={to}
+                            onChange={e => setTo(e.target.value)}
+                            placeholder="administracion@immoral.es" />
+                        <p className="text-[11px] text-muted-foreground mt-1">Recibe el email como destinatario principal.</p>
+                    </div>
+                </div>
+
+                <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                        En copia (CC)
+                    </label>
+                    <EmailListEditor value={cc} onChange={setCc} placeholder="Añade correos y pulsa Enter…" />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                        Todos los que estén aquí recibirán la alerta en copia visible. Puedes dejar TO vacío y usar solo CC (el primero de la lista pasa a TO).
+                    </p>
+                </div>
+
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-muted-foreground">
+                            <strong className="text-foreground">Estado actual: </strong>
+                            {previewLoading ? 'Calculando…' : alerts.length === 0
+                                ? `Ningún cliente supera el umbral de ${preview?.threshold ?? threshold}.`
+                                : `${alerts.length} cliente${alerts.length === 1 ? '' : 's'} con ${preview?.threshold ?? threshold}+ facturas vencidas.`}
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => refetchPreview()} disabled={previewLoading}>
+                            {previewLoading ? <Loader2 className="animate-spin mr-1.5" size={12} /> : <RefreshCw size={12} className="mr-1.5" />}
+                            Recalcular
+                        </Button>
+                    </div>
+                    {alerts.length > 0 && (
+                        <ul className="text-[11px] text-muted-foreground space-y-0.5 pl-1">
+                            {alerts.slice(0, 5).map(a => (
+                                <li key={a.contact_id || a.contact_name}>
+                                    · <strong className="text-foreground">{a.contact_name || '(sin nombre)'}</strong>: {a.invoice_count} facturas, máx {a.max_days_overdue} días vencido
+                                </li>
+                            ))}
+                            {alerts.length > 5 && <li>… y {alerts.length - 5} más</li>}
+                        </ul>
+                    )}
+                    {config.multi_alert_last_sent_at && (
+                        <p className="text-[11px] text-muted-foreground pt-1 border-t">
+                            Último email enviado: <strong>{new Date(config.multi_alert_last_sent_at).toLocaleString('es-ES')}</strong>
+                        </p>
+                    )}
+                </div>
+
+                {sendMutation.isSuccess && (
+                    <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-3 text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+                        <Check className="shrink-0 mt-0.5" size={14} />
+                        {sendMutation.data?.sent
+                            ? `Alerta enviada a ${sendMutation.data.to}${(sendMutation.data.cc || []).length ? ` (+${(sendMutation.data.cc || []).length} en CC)` : ''}.`
+                            : `No se envió: ${sendMutation.data?.reason || 'sin motivo'}.`}
+                    </div>
+                )}
+                {sendMutation.isError && (
+                    <div className="rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 p-3 text-xs text-red-900 dark:text-red-200 flex items-start gap-2">
+                        <AlertTriangle className="shrink-0 mt-0.5" size={14} />
+                        {String(sendMutation.error)}
+                    </div>
+                )}
+
+                <div className="flex justify-between items-center gap-2 pt-2 border-t">
+                    <Button variant="outline"
+                        onClick={() => sendMutation.mutate()}
+                        disabled={!canSend || sendMutation.isPending || alerts.length === 0}>
+                        {sendMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Send size={14} className="mr-2" />}
+                        Enviar alerta ahora
+                    </Button>
+                    <Button onClick={() => onSave({
+                        multi_alert_enabled: enabled,
+                        multi_alert_threshold: threshold,
+                        multi_alert_to: to.trim() || null,
+                        multi_alert_cc_emails: cc,
+                    })} disabled={saving}>
+                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                        Guardar alerta
+                    </Button>
+                </div>
+            </CardContent>
+        </Card>
     );
 }
 

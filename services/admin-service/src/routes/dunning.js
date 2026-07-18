@@ -313,6 +313,8 @@ router.get('/cron/run', requireCronSecret, cronRunHandler);
 router.post('/cron/run', requireCronSecret, cronRunHandler);
 
 // GET/POST /dunning/cron/sync-paid — sincroniza cobros diariamente.
+// Aprovecha la misma ejecución diaria para disparar la alerta de clientes
+// con múltiples facturas vencidas, con anti-spam de 24h.
 async function cronSyncPaidHandler(req, res) {
     const startedMs = Date.now();
     const source = detectCronSource(req);
@@ -321,13 +323,46 @@ async function cronSyncPaidHandler(req, res) {
         await supabase.from('dunning_config').update({
             last_sync_paid_at: new Date().toISOString(),
         }).eq('id', 1);
+
+        let multiAlert = { skipped: true, reason: 'disabled' };
+        try {
+            const { data: cfg } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
+            if (cfg?.multi_alert_enabled) {
+                const lastSent = cfg.multi_alert_last_sent_at ? new Date(cfg.multi_alert_last_sent_at).getTime() : 0;
+                if (Date.now() - lastSent < 24 * 60 * 60 * 1000) {
+                    multiAlert = { skipped: true, reason: 'sent-recently' };
+                } else {
+                    const { alerts, threshold } = await computeMultiOverdueAlerts({ config: cfg });
+                    if (!alerts.length) {
+                        multiAlert = { skipped: true, reason: 'no-alerts' };
+                    } else {
+                        multiAlert = await sendMultiOverdueEmail({ alerts, config: cfg, baseUrl: computeBaseUrl(req) });
+                        if (multiAlert.sent) {
+                            await supabase.from('dunning_config').update({
+                                multi_alert_last_sent_at: new Date().toISOString(),
+                                multi_alert_last_summary: {
+                                    alerts_count: alerts.length,
+                                    threshold,
+                                    total_invoices: alerts.reduce((s, a) => s + a.invoice_count, 0),
+                                    total_amount: alerts.reduce((s, a) => s + Number(a.total_amount || 0), 0),
+                                },
+                            }).eq('id', 1);
+                        }
+                    }
+                }
+            }
+        } catch (alertErr) {
+            console.warn('[dunning] multi-alert during cron failed:', alertErr.message);
+            multiAlert = { error: alertErr.message };
+        }
+
         await logCronRun({
             endpoint: 'sync-paid',
             status: 'ok',
-            summary: { source, ...result },
+            summary: { source, ...result, multi_alert: multiAlert },
             startedMs,
         });
-        res.json({ ok: true, ...result });
+        res.json({ ok: true, ...result, multi_alert: multiAlert });
     } catch (err) {
         console.error('[dunning] cron/sync-paid error:', err);
         await logCronRun({
@@ -642,6 +677,179 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
     };
 }
 
+// ── Alertas de clientes con múltiples facturas vencidas ────────────────
+// Agrupa las facturas vencidas por contacto y devuelve los que superan el
+// umbral (>=2 por defecto). Reutiliza la misma fuente (Holded live) que
+// /overdue-invoices para que app y email digan lo mismo.
+async function computeMultiOverdueAlerts({ config, now = Date.now() }) {
+    const [holdedInvoices, holdedContacts] = await Promise.all([
+        holdedFetch('/documents/invoice?paid=0'),
+        holdedFetch('/contacts').catch(err => { console.warn('[dunning] no /contacts:', err.message); return []; }),
+    ]);
+    const invoices = Array.isArray(holdedInvoices) ? holdedInvoices : [];
+    const emailByContact = new Map();
+    for (const c of (Array.isArray(holdedContacts) ? holdedContacts : [])) {
+        if (c.id && c.email) emailByContact.set(c.id, c.email);
+    }
+
+    const byContact = new Map();
+    for (const inv of invoices) {
+        const dueMs = normalizeTimestamp(inv.dueDate);
+        if (!dueMs) continue;
+        const daysOverdue = Math.floor((now - dueMs) / 86_400_000);
+        if (daysOverdue < 1) continue;
+        const total = Number(inv.total || 0);
+        if (total < Number(config.min_amount || 0)) continue;
+        if ((config.excluded_contact_ids || []).includes(inv.contact)) continue;
+
+        const key = inv.contact || inv.contactName || 'unknown';
+        if (!byContact.has(key)) {
+            byContact.set(key, {
+                contact_id: inv.contact || '',
+                contact_name: inv.contactName || '',
+                contact_email: inv.contactEmail || inv.email || emailByContact.get(inv.contact) || '',
+                invoices: [],
+                total_amount: 0,
+            });
+        }
+        const bucket = byContact.get(key);
+        bucket.invoices.push({
+            invoice_id: inv.id,
+            invoice_number: inv.docNumber || inv.num || '',
+            amount: total,
+            currency: inv.currency || 'EUR',
+            days_overdue: daysOverdue,
+            due_date: dueMs,
+        });
+        bucket.total_amount += total;
+    }
+
+    const threshold = Math.max(2, Number(config.multi_alert_threshold || 2));
+    const alerts = [];
+    for (const bucket of byContact.values()) {
+        if (bucket.invoices.length < threshold) continue;
+        bucket.invoices.sort((a, b) => b.days_overdue - a.days_overdue);
+        alerts.push({
+            ...bucket,
+            invoice_count: bucket.invoices.length,
+            max_days_overdue: bucket.invoices[0]?.days_overdue || 0,
+        });
+    }
+    alerts.sort((a, b) => b.invoice_count - a.invoice_count || b.total_amount - a.total_amount);
+    return { alerts, threshold };
+}
+
+function renderMultiOverdueEmail({ alerts, threshold, appUrl }) {
+    const fmt = (n, cur = 'EUR') => new Intl.NumberFormat('es-ES', {
+        style: 'currency', currency: cur, maximumFractionDigits: 2,
+    }).format(Number(n || 0));
+    const totalOverall = alerts.reduce((s, a) => s + Number(a.total_amount || 0), 0);
+    const totalInvoices = alerts.reduce((s, a) => s + a.invoice_count, 0);
+
+    const clientRows = alerts.map(a => `
+        <tr>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;">
+                ${escapeHtml(a.contact_name || '(sin nombre)')}
+                ${a.contact_email ? `<div style="font-weight:400;color:#6b7280;font-size:12px;">${escapeHtml(a.contact_email)}</div>` : ''}
+            </td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center;">
+                <span style="display:inline-block;background:#fee2e2;color:#b91c1c;padding:2px 10px;border-radius:999px;font-weight:700;font-size:13px;">
+                    ${a.invoice_count} facturas
+                </span>
+            </td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700;color:#111827;">
+                ${fmt(a.total_amount)}
+            </td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center;color:#b45309;font-weight:600;">
+                ${a.max_days_overdue} días
+            </td>
+        </tr>`).join('');
+
+    const html = `<!doctype html>
+<html><body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+    <div style="max-width:640px;margin:0 auto;padding:24px 16px;">
+        <div style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+            <div style="background:linear-gradient(135deg,#dc2626,#991b1b);padding:20px 24px;color:#fff;">
+                <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;opacity:0.85;">Alerta de impagos</div>
+                <div style="font-size:20px;font-weight:700;margin-top:4px;">
+                    ${alerts.length} cliente${alerts.length === 1 ? '' : 's'} con ${threshold}+ facturas vencidas
+                </div>
+                <div style="font-size:13px;opacity:0.9;margin-top:2px;">
+                    ${totalInvoices} facturas · ${fmt(totalOverall)} totales
+                </div>
+            </div>
+            <div style="padding:20px 24px;color:#374151;font-size:14px;line-height:1.5;">
+                <p style="margin:0 0 16px;">
+                    Los siguientes clientes acumulan ${threshold} o más facturas vencidas simultáneamente. Revisa el módulo Impagos para gestionar recordatorios y contactos:
+                </p>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="background:#f9fafb;">
+                            <th style="padding:8px 12px;text-align:left;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Cliente</th>
+                            <th style="padding:8px 12px;text-align:center;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Facturas</th>
+                            <th style="padding:8px 12px;text-align:right;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Deuda</th>
+                            <th style="padding:8px 12px;text-align:center;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Máx. vencido</th>
+                        </tr>
+                    </thead>
+                    <tbody>${clientRows}</tbody>
+                </table>
+                ${appUrl ? `
+                <div style="text-align:center;margin-top:24px;">
+                    <a href="${appUrl}" style="display:inline-block;background:#dc2626;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">
+                        Abrir módulo Impagos
+                    </a>
+                </div>` : ''}
+            </div>
+            <div style="padding:12px 24px;background:#f9fafb;color:#9ca3af;font-size:11px;text-align:center;">
+                Aviso automático de Immoral Finance · Umbral configurado: ${threshold}+ facturas por cliente
+            </div>
+        </div>
+    </div>
+</body></html>`;
+    const subject = `[Impagos] ${alerts.length} cliente${alerts.length === 1 ? '' : 's'} con ${threshold}+ facturas vencidas`;
+    return { html, subject };
+}
+
+function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[m]));
+}
+
+// Envía el email a los destinatarios configurados. Registra last_sent_at
+// y summary aunque falle parcialmente. No dispara si to+cc están vacíos.
+async function sendMultiOverdueEmail({ alerts, config, baseUrl }) {
+    if (!alerts.length) return { skipped: true, reason: 'no-alerts' };
+    if (!process.env.SMTP_USER) return { skipped: true, reason: 'smtp-not-configured' };
+
+    const toEmail = (config.multi_alert_to || '').trim();
+    const ccList = sanitizeEmailList(config.multi_alert_cc_emails, toEmail);
+    if (!toEmail && ccList.length === 0) {
+        return { skipped: true, reason: 'no-recipients' };
+    }
+
+    const { html, subject } = renderMultiOverdueEmail({
+        alerts,
+        threshold: Math.max(2, Number(config.multi_alert_threshold || 2)),
+        appUrl: baseUrl ? `${baseUrl.replace(/\/+$/, '')}/payments/dunning` : null,
+    });
+
+    const info = await getTransporter().sendMail({
+        from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
+        to: toEmail || ccList[0],
+        cc: (toEmail && ccList.length ? ccList : (toEmail ? undefined : ccList.slice(1))) || undefined,
+        subject,
+        html,
+    });
+    return {
+        sent: true,
+        message_id: info.messageId || null,
+        to: toEmail || ccList[0],
+        cc: (toEmail ? ccList : ccList.slice(1)),
+        alerts_count: alerts.length,
+    };
+}
+
 async function runSyncPaid() {
     const { data: openCases, error } = await supabase
         .from('dunning_cases').select('*').eq('status', 'open');
@@ -721,6 +929,8 @@ router.put('/config', async (req, res) => {
             'level_2_days_min', 'level_2_days_max', 'level_3_days_min',
             'level_3_repeat_every_days',
             'min_amount', 'excluded_contact_ids', 'bcc_email', 'cc_emails',
+            // Fase 4 — alerta de clientes con múltiples vencidas
+            'multi_alert_enabled', 'multi_alert_threshold', 'multi_alert_to', 'multi_alert_cc_emails',
             // Fase 3: marca + bancos + labels
             'brand_logo_text', 'brand_primary_color', 'brand_secondary_color',
             'signature_html', 'cta_stripe_label', 'cta_bank_prefix', 'status_label',
@@ -746,6 +956,38 @@ router.put('/config', async (req, res) => {
                 });
             }
             patch.cc_emails = cleaned;
+        }
+
+        // Alerta multi-vencida: mismos criterios de saneo.
+        if ('multi_alert_cc_emails' in patch) {
+            const cleaned = sanitizeEmailList(patch.multi_alert_cc_emails);
+            if (Array.isArray(patch.multi_alert_cc_emails) && patch.multi_alert_cc_emails.some(v => v && !cleaned.includes(String(v).trim()))) {
+                return res.status(400).json({
+                    error: 'invalid-multi-alert-cc',
+                    hint: 'Alguna dirección de CC de la alerta no es un email válido.',
+                });
+            }
+            patch.multi_alert_cc_emails = cleaned;
+        }
+        if ('multi_alert_to' in patch) {
+            const to = String(patch.multi_alert_to || '').trim();
+            if (to && !EMAIL_RE.test(to)) {
+                return res.status(400).json({
+                    error: 'invalid-multi-alert-to',
+                    hint: 'El destinatario principal de la alerta no es un email válido.',
+                });
+            }
+            patch.multi_alert_to = to || null;
+        }
+        if ('multi_alert_threshold' in patch) {
+            const t = Number(patch.multi_alert_threshold);
+            if (!Number.isFinite(t) || t < 2) {
+                return res.status(400).json({
+                    error: 'invalid-multi-alert-threshold',
+                    hint: 'El umbral tiene que ser un entero mayor o igual a 2.',
+                });
+            }
+            patch.multi_alert_threshold = Math.floor(t);
         }
 
         patch.updated_at = new Date().toISOString();
@@ -1336,6 +1578,57 @@ router.post('/reset-test-data', async (_req, res) => {
         });
     } catch (err) {
         console.error('[dunning] reset-test-data error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /dunning/multi-overdue-alerts ─────────────────────────────────────────
+// Devuelve la lista de clientes con >= threshold facturas vencidas ahora.
+// La consume el banner global de la app y también sirve para probar la
+// alerta desde la config.
+router.get('/multi-overdue-alerts', async (_req, res) => {
+    try {
+        const config = await getConfig();
+        const result = await computeMultiOverdueAlerts({ config });
+        res.json({
+            ...result,
+            enabled: !!config.multi_alert_enabled,
+            last_sent_at: config.multi_alert_last_sent_at || null,
+        });
+    } catch (err) {
+        console.error('[dunning] multi-overdue-alerts error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /dunning/multi-overdue-alerts/send ───────────────────────────────────
+// Fuerza el envío del email de alerta ignorando el anti-spam de 24h. Útil
+// para probar tras configurar los destinatarios.
+router.post('/multi-overdue-alerts/send', async (req, res) => {
+    try {
+        const config = await getConfig();
+        const { alerts } = await computeMultiOverdueAlerts({ config });
+        if (!alerts.length) {
+            return res.json({ sent: false, reason: 'no-alerts' });
+        }
+        const result = await sendMultiOverdueEmail({
+            alerts, config, baseUrl: computeBaseUrl(req),
+        });
+        if (result.sent) {
+            await supabase.from('dunning_config').update({
+                multi_alert_last_sent_at: new Date().toISOString(),
+                multi_alert_last_summary: {
+                    alerts_count: alerts.length,
+                    threshold: Math.max(2, Number(config.multi_alert_threshold || 2)),
+                    total_invoices: alerts.reduce((s, a) => s + a.invoice_count, 0),
+                    total_amount: alerts.reduce((s, a) => s + Number(a.total_amount || 0), 0),
+                    manual: true,
+                },
+            }).eq('id', 1);
+        }
+        res.json(result);
+    } catch (err) {
+        console.error('[dunning] multi-overdue-alerts/send error:', err);
         res.status(500).json({ error: err.message });
     }
 });
