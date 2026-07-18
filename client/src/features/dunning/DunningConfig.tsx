@@ -233,6 +233,7 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
 // updateConfig que las reglas, así el usuario no tiene que dar dos "Guardar".
 
 function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+    const queryClient = useQueryClient();
     const [enabled, setEnabled] = useState(config.multi_alert_enabled);
     const [threshold, setThreshold] = useState(config.multi_alert_threshold);
     const [to, setTo] = useState(config.multi_alert_to || '');
@@ -253,16 +254,46 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
         setSendDays(Array.from(s).sort());
     };
 
+    // Detecta cambios sin guardar comparando formulario vs config persistida.
+    const patch: Partial<DunningConfigType> = {
+        multi_alert_enabled: enabled,
+        multi_alert_threshold: threshold,
+        multi_alert_to: to.trim() || null,
+        multi_alert_cc_emails: cc,
+        multi_alert_send_days: sendDays,
+    };
+    const hasUnsavedChanges =
+        (config.multi_alert_enabled !== enabled) ||
+        (config.multi_alert_threshold !== threshold) ||
+        ((config.multi_alert_to || '') !== to.trim()) ||
+        (JSON.stringify(config.multi_alert_cc_emails || []) !== JSON.stringify(cc)) ||
+        (JSON.stringify(config.multi_alert_send_days || []) !== JSON.stringify(sendDays));
+
     // Preview: cuántos clientes cumplirían el umbral ahora mismo.
     const { data: preview, refetch: refetchPreview, isFetching: previewLoading } = useQuery({
         queryKey: ['dunning', 'multi-alerts-config-preview'],
         queryFn: () => dunningApi.listMultiOverdueAlerts(),
     });
 
+    // "Enviar alerta ahora": si hay cambios sin guardar, guarda primero para
+    // que el backend lea el estado correcto. Después dispara el envío.
     const sendMutation = useMutation({
-        mutationFn: () => dunningApi.sendMultiOverdueAlert(),
+        mutationFn: async () => {
+            if (hasUnsavedChanges) {
+                await dunningApi.updateConfig(patch);
+                await queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] });
+            }
+            return dunningApi.sendMultiOverdueAlert();
+        },
         onSuccess: () => refetchPreview(),
     });
+
+    // Cualquier edición del formulario limpia el resultado del envío anterior
+    // para que no se muestre un mensaje obsoleto ("no-recipients" antiguo).
+    useEffect(() => {
+        if (sendMutation.isSuccess || sendMutation.isError) sendMutation.reset();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [enabled, threshold, to, JSON.stringify(cc), JSON.stringify(sendDays)]);
 
     const alerts = preview?.alerts || [];
     const canSend = enabled && (!!to.trim() || cc.length > 0);
@@ -379,12 +410,31 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
                 </div>
 
                 {sendMutation.isSuccess && (
-                    <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-3 text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
-                        <Check className="shrink-0 mt-0.5" size={14} />
-                        {sendMutation.data?.sent
-                            ? `Alerta enviada a ${sendMutation.data.to}${(sendMutation.data.cc || []).length ? ` (+${(sendMutation.data.cc || []).length} en CC)` : ''}.`
-                            : `No se envió: ${sendMutation.data?.reason || 'sin motivo'}.`}
-                    </div>
+                    sendMutation.data?.sent ? (
+                        <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-3 text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+                            <Check className="shrink-0 mt-0.5" size={14} />
+                            Alerta enviada a <strong>{sendMutation.data.to}</strong>
+                            {(sendMutation.data.cc || []).length ? ` (+${(sendMutation.data.cc || []).length} en CC)` : ''}.
+                        </div>
+                    ) : (
+                        <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                            <AlertTriangle className="shrink-0 mt-0.5" size={14} />
+                            <div>
+                                {sendMutation.data?.reason === 'no-recipients' && (
+                                    <>No se envió porque <strong>no hay destinatarios guardados</strong> en la base de datos. Rellena TO o al menos un CC y pulsa <em>Guardar alerta</em> antes de reintentar.</>
+                                )}
+                                {sendMutation.data?.reason === 'no-alerts' && (
+                                    <>Ningún cliente supera el umbral en este momento.</>
+                                )}
+                                {sendMutation.data?.reason === 'smtp-not-configured' && (
+                                    <>SMTP no está configurado en el servidor. Contacta con administración.</>
+                                )}
+                                {!['no-recipients', 'no-alerts', 'smtp-not-configured'].includes(sendMutation.data?.reason || '') && (
+                                    <>No se envió: {sendMutation.data?.reason || 'sin motivo'}.</>
+                                )}
+                            </div>
+                        </div>
+                    )
                 )}
                 {sendMutation.isError && (
                     <div className="rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 p-3 text-xs text-red-900 dark:text-red-200 flex items-start gap-2">
@@ -393,20 +443,30 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
                     </div>
                 )}
 
+                {hasUnsavedChanges && (
+                    <div className="rounded-lg border border-blue-300 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800 p-2.5 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2">
+                        <Info size={14} className="shrink-0 mt-0.5" />
+                        <span>
+                            Tienes cambios sin guardar. Pulsa <em>Guardar alerta</em> para persistirlos.
+                            Si le das a <em>Enviar alerta ahora</em>, se guardarán automáticamente antes de enviar.
+                        </span>
+                    </div>
+                )}
+
                 <div className="flex justify-between items-center gap-2 pt-2 border-t">
                     <Button variant="outline"
                         onClick={() => sendMutation.mutate()}
-                        disabled={!canSend || sendMutation.isPending || alerts.length === 0}>
+                        disabled={!canSend || sendMutation.isPending || alerts.length === 0}
+                        title={
+                            !canSend ? 'Rellena TO o al menos un CC antes de enviar' :
+                            alerts.length === 0 ? 'Ningún cliente supera el umbral ahora mismo' :
+                            hasUnsavedChanges ? 'Guardará los cambios del formulario y enviará el email' :
+                            'Envía el email a los destinatarios guardados'
+                        }>
                         {sendMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Send size={14} className="mr-2" />}
-                        Enviar alerta ahora
+                        {hasUnsavedChanges ? 'Guardar y enviar' : 'Enviar alerta ahora'}
                     </Button>
-                    <Button onClick={() => onSave({
-                        multi_alert_enabled: enabled,
-                        multi_alert_threshold: threshold,
-                        multi_alert_to: to.trim() || null,
-                        multi_alert_cc_emails: cc,
-                        multi_alert_send_days: sendDays,
-                    })} disabled={saving}>
+                    <Button onClick={() => onSave(patch)} disabled={saving || !hasUnsavedChanges}>
                         {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
                         Guardar alerta
                     </Button>
