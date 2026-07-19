@@ -238,30 +238,45 @@ async function cronRunHandler(req, res) {
             multiAlert = { error: mErr.message };
         }
 
+        // Helper: dispatch del reporte de vencidas. Se invoca en cada camino
+        // (skip o envío) para que el reporte tenga su schedule independiente.
+        const dispatchReport = async () => {
+            try {
+                const { data: freshCfg } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
+                return await maybeDispatchOverdueReport({ config: freshCfg || config, baseUrl: computeBaseUrl(req) });
+            } catch (rErr) {
+                console.warn('[dunning] overdue-report dispatch failed:', rErr.message);
+                return { error: rErr.message };
+            }
+        };
+
         if (!config.enabled) {
-            await stampSkip('system-disabled', { multi_alert: multiAlert });
-            return res.json({ skipped: true, reason: 'system-disabled', multi_alert: multiAlert });
+            const overdueReport = await dispatchReport();
+            await stampSkip('system-disabled', { multi_alert: multiAlert, overdue_report: overdueReport });
+            return res.json({ skipped: true, reason: 'system-disabled', multi_alert: multiAlert, overdue_report: overdueReport });
         }
 
         const schedule = isCronScheduledNow(config);
         if (!schedule.ok) {
-            await stampSkip('not-scheduled', { schedule, multi_alert: multiAlert });
-            return res.json({ skipped: true, reason: 'not-scheduled', schedule, multi_alert: multiAlert });
+            const overdueReport = await dispatchReport();
+            await stampSkip('not-scheduled', { schedule, multi_alert: multiAlert, overdue_report: overdueReport });
+            return res.json({ skipped: true, reason: 'not-scheduled', schedule, multi_alert: multiAlert, overdue_report: overdueReport });
         }
 
         // Idempotencia: si ya se ejecutó hace menos de 30 minutos, saltar.
         if (config.last_cron_run_at) {
             const lastMs = new Date(config.last_cron_run_at).getTime();
             if (Date.now() - lastMs < 30 * 60 * 1000) {
+                const overdueReport = await dispatchReport();
                 await logCronRun({
                     endpoint: 'run',
                     status: 'skipped',
                     reason: 'ran-recently',
-                    summary: { source, last_cron_run_at: config.last_cron_run_at },
+                    summary: { source, last_cron_run_at: config.last_cron_run_at, overdue_report: overdueReport },
                     is_test: !!config.test_mode,
                     startedMs,
                 });
-                return res.json({ skipped: true, reason: 'ran-recently', last_cron_run_at: config.last_cron_run_at });
+                return res.json({ skipped: true, reason: 'ran-recently', last_cron_run_at: config.last_cron_run_at, overdue_report: overdueReport });
             }
         }
 
@@ -273,6 +288,10 @@ async function cronRunHandler(req, res) {
         const summarySent = result.executed.filter(r => r.status === 'sent').length;
         const summaryFailed = result.executed.filter(r => r.status === 'failed').length;
         const summarySkipped = result.executed.filter(r => r.status === 'skipped').length;
+
+        // Reporte de facturas vencidas — DESPUÉS de executeSend para que la
+        // columna "Recordatorio enviado" incluya lo que acaba de salir.
+        const overdueReport = await dispatchReport();
 
         // Actualizar timestamps de trazabilidad.
         await supabase.from('dunning_config').update({
@@ -299,12 +318,13 @@ async function cronRunHandler(req, res) {
                 summary: result.summary,
                 executed: result.executed,
                 multi_alert: multiAlert,
+                overdue_report: overdueReport,
             },
             is_test: !!config.test_mode,
             startedMs,
         });
 
-        res.json({ ok: true, ...result, multi_alert: multiAlert });
+        res.json({ ok: true, ...result, multi_alert: multiAlert, overdue_report: overdueReport });
     } catch (err) {
         console.error('[dunning] cron/run error:', err);
         await supabase.from('dunning_config').update({
@@ -940,6 +960,222 @@ async function maybeDispatchMultiAlert({ config, baseUrl, force = false }) {
     return { ...sendResult, snapshot, alerts_count: alerts.length };
 }
 
+// ── Reporte de facturas vencidas ────────────────────────────────────────
+// Devuelve la lista COMPLETA de facturas vencidas (>=1 día) con un cruce
+// contra dunning_reminders para saber si ha salido recordatorio real.
+async function computeOverdueReport({ config, now = Date.now() }) {
+    const [holdedInvoices, holdedContacts] = await Promise.all([
+        holdedFetch('/documents/invoice?paid=0'),
+        holdedFetch('/contacts').catch(() => []),
+    ]);
+    const invoices = Array.isArray(holdedInvoices) ? holdedInvoices : [];
+    const emailByContact = new Map();
+    for (const c of (Array.isArray(holdedContacts) ? holdedContacts : [])) {
+        if (c.id && c.email) emailByContact.set(c.id, c.email);
+    }
+
+    const overdue = [];
+    for (const inv of invoices) {
+        const dueMs = normalizeTimestamp(inv.dueDate);
+        if (!dueMs) continue;
+        const daysOverdue = Math.floor((now - dueMs) / 86_400_000);
+        if (daysOverdue < 1) continue;
+        const total = Number(inv.total || 0);
+        if (total < Number(config.min_amount || 0)) continue;
+        if ((config.excluded_contact_ids || []).includes(inv.contact)) continue;
+        overdue.push({
+            invoice_id: inv.id,
+            invoice_number: inv.docNumber || inv.num || '',
+            contact_id: inv.contact || '',
+            contact_name: inv.contactName || '',
+            contact_email: inv.contactEmail || inv.email || emailByContact.get(inv.contact) || '',
+            amount: total,
+            currency: inv.currency || 'EUR',
+            invoice_date: normalizeTimestamp(inv.date),
+            due_date: dueMs,
+            days_overdue: daysOverdue,
+        });
+    }
+    overdue.sort((a, b) => b.days_overdue - a.days_overdue);
+
+    // Cruce con dunning_reminders para saber si ya salió recordatorio real
+    // (no test) por factura. Guardamos el último enviado por invoice_id.
+    const invoiceIds = overdue.map(o => o.invoice_id);
+    const remindersByInvoice = new Map();
+    if (invoiceIds.length) {
+        const { data: rem } = await supabase
+            .from('dunning_reminders')
+            .select('invoice_id, level, sent_at, status')
+            .in('invoice_id', invoiceIds)
+            .eq('status', 'sent')
+            .eq('is_test', false)
+            .order('sent_at', { ascending: false });
+        for (const r of rem || []) {
+            if (!remindersByInvoice.has(r.invoice_id)) {
+                remindersByInvoice.set(r.invoice_id, r);
+            }
+        }
+    }
+    for (const o of overdue) {
+        const rem = remindersByInvoice.get(o.invoice_id);
+        o.reminder_sent = !!rem;
+        o.reminder_level = rem?.level || null;
+        o.reminder_sent_at = rem?.sent_at || null;
+    }
+
+    const critLevel = Number(config.level_3_days_min || 15);
+    return {
+        invoices: overdue,
+        total_count: overdue.length,
+        total_amount: overdue.reduce((s, o) => s + Number(o.amount || 0), 0),
+        critical_threshold: critLevel,
+    };
+}
+
+function renderOverdueReportEmail({ report, config, appUrl }) {
+    const fmt = (n) => new Intl.NumberFormat('es-ES', {
+        style: 'currency', currency: 'EUR', maximumFractionDigits: 2,
+    }).format(Number(n || 0));
+    const dateFmt = (ms) => {
+        if (!ms) return '—';
+        try { return new Date(ms).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
+        catch { return '—'; }
+    };
+    const critLevel = report.critical_threshold;
+
+    const rows = report.invoices.map(inv => {
+        const isCritical = inv.days_overdue >= critLevel;
+        const rowBg = isCritical ? '#fef2f2' : '#fffbeb';
+        const badgeBg = isCritical ? '#dc2626' : '#f59e0b';
+        const badgeLabel = isCritical ? 'CRÍTICO' : 'WARNING';
+        const reminderBadge = inv.reminder_sent
+            ? `<span style="display:inline-block;background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:999px;font-weight:600;font-size:11px;">Sí${inv.reminder_level ? ` · N${inv.reminder_level}` : ''}</span>`
+            : `<span style="display:inline-block;background:#f3f4f6;color:#6b7280;padding:2px 8px;border-radius:999px;font-weight:600;font-size:11px;">No</span>`;
+        return `
+            <tr style="background:${rowBg};">
+                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;">${escapeHtml(inv.contact_name || '(sin nombre)')}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-family:monospace;font-size:12px;">${escapeHtml(inv.invoice_number || '')}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:12px;">${dateFmt(inv.invoice_date)}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:12px;">${dateFmt(inv.due_date)}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;text-align:right;font-weight:600;">${fmt(inv.amount)}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;text-align:center;font-weight:700;">${inv.days_overdue}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center;">
+                    <span style="display:inline-block;background:${badgeBg};color:#fff;padding:2px 10px;border-radius:6px;font-weight:700;font-size:11px;">${badgeLabel}</span>
+                </td>
+                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center;">${reminderBadge}</td>
+            </tr>`;
+    }).join('');
+
+    const html = `<!doctype html>
+<html><body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#111827;">
+    <div style="max-width:1000px;margin:0 auto;padding:24px 16px;">
+        <div style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+            <div style="padding:20px 24px;border-bottom:1px solid #e5e7eb;">
+                <h1 style="margin:0;font-size:22px;font-weight:700;color:#111827;">📊 Reporte de Facturas Vencidas</h1>
+                <p style="margin:12px 0 0;color:#6b7280;font-size:13px;">
+                    Corte: ${new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
+                </p>
+            </div>
+            <div style="padding:16px 24px;background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+                <div style="font-size:14px;color:#374151;">
+                    <strong style="color:#111827;">Total Facturas:</strong> ${report.total_count}<br>
+                    <strong style="color:#111827;">Total Deuda:</strong> ${fmt(report.total_amount)}
+                </div>
+            </div>
+            <div style="padding:0;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="background:#1f2937;color:#fff;">
+                            <th style="padding:10px 12px;text-align:left;font-size:12px;">Cliente</th>
+                            <th style="padding:10px 12px;text-align:left;font-size:12px;">Nº Factura</th>
+                            <th style="padding:10px 12px;text-align:left;font-size:12px;">Emisión</th>
+                            <th style="padding:10px 12px;text-align:left;font-size:12px;">Vencimiento</th>
+                            <th style="padding:10px 12px;text-align:right;font-size:12px;">Monto</th>
+                            <th style="padding:10px 12px;text-align:center;font-size:12px;">Días</th>
+                            <th style="padding:10px 12px;text-align:center;font-size:12px;">Estado</th>
+                            <th style="padding:10px 12px;text-align:center;font-size:12px;">Recordatorio</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows || '<tr><td colspan="8" style="padding:24px;text-align:center;color:#6b7280;">Sin facturas vencidas ahora mismo.</td></tr>'}</tbody>
+                </table>
+            </div>
+            ${appUrl ? `
+            <div style="padding:16px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;text-align:center;">
+                <a href="${appUrl}" style="display:inline-block;background:#111827;color:#fff;padding:8px 16px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;">
+                    Abrir módulo Impagos
+                </a>
+            </div>` : ''}
+            <div style="padding:12px 24px;background:#111827;color:#9ca3af;font-size:11px;text-align:center;">
+                Reporte automático · Immoral Finance · Umbral crítico: ${critLevel}+ días
+            </div>
+        </div>
+    </div>
+</body></html>`;
+
+    const subject = `Relación de facturas vencidas · ${report.total_count} pendientes · ${fmt(report.total_amount)}`;
+    return { html, subject };
+}
+
+async function sendOverdueReportEmail({ report, config, baseUrl }) {
+    if (!process.env.SMTP_USER) return { skipped: true, reason: 'smtp-not-configured' };
+    const toEmail = (config.overdue_report_to || '').trim();
+    const ccList = sanitizeEmailList(config.overdue_report_cc_emails, toEmail);
+    if (!toEmail && ccList.length === 0) return { skipped: true, reason: 'no-recipients' };
+
+    const { html, subject } = renderOverdueReportEmail({
+        report, config,
+        appUrl: baseUrl ? `${baseUrl.replace(/\/+$/, '')}/payments/dunning` : null,
+    });
+    const info = await getTransporter().sendMail({
+        from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
+        to: toEmail || ccList[0],
+        cc: (toEmail && ccList.length ? ccList : (toEmail ? undefined : ccList.slice(1))) || undefined,
+        subject,
+        html,
+    });
+    return {
+        sent: true,
+        message_id: info.messageId || null,
+        to: toEmail || ccList[0],
+        cc: (toEmail ? ccList : ccList.slice(1)),
+        total_count: report.total_count,
+        total_amount: report.total_amount,
+    };
+}
+
+async function maybeDispatchOverdueReport({ config, baseUrl, force = false }) {
+    if (!config?.overdue_report_enabled) return { skipped: true, reason: 'disabled' };
+    const { weekday, hour } = currentTimeInTz(config);
+    const sendDays = Array.isArray(config.overdue_report_send_days) ? config.overdue_report_send_days : [];
+    const sendHour = Number(config.overdue_report_send_hour ?? 10);
+    const lastSent = config.overdue_report_last_sent_at ? new Date(config.overdue_report_last_sent_at).getTime() : 0;
+    const sentRecently = Date.now() - lastSent < 20 * 60 * 60 * 1000;
+
+    if (!force) {
+        if (!sendDays.includes(weekday)) return { skipped: true, reason: 'not-send-day', weekday };
+        if (hour !== sendHour) return { skipped: true, reason: 'not-send-hour', hour, expected: sendHour };
+        if (sentRecently) return { skipped: true, reason: 'sent-recently' };
+    }
+
+    const report = await computeOverdueReport({ config });
+    // Aunque no haya facturas se puede mandar (para dejar constancia "0 vencidas"),
+    // pero por defecto omitimos: es más útil silenciar el ruido.
+    if (report.total_count === 0 && !force) return { skipped: true, reason: 'no-overdue' };
+
+    const sendResult = await sendOverdueReportEmail({ report, config, baseUrl });
+    if (sendResult.sent) {
+        await supabase.from('dunning_config').update({
+            overdue_report_last_sent_at: new Date().toISOString(),
+            overdue_report_last_summary: {
+                total_count: report.total_count,
+                total_amount: report.total_amount,
+                with_reminder: report.invoices.filter(i => i.reminder_sent).length,
+            },
+        }).eq('id', 1);
+    }
+    return { ...sendResult, total_count: report.total_count };
+}
+
 async function runSyncPaid() {
     const { data: openCases, error } = await supabase
         .from('dunning_cases').select('*').eq('status', 'open');
@@ -1022,6 +1258,9 @@ router.put('/config', async (req, res) => {
             // Fase 4 — alerta de clientes con múltiples vencidas
             'multi_alert_enabled', 'multi_alert_threshold', 'multi_alert_to', 'multi_alert_cc_emails',
             'multi_alert_send_days', 'multi_alert_send_hour',
+            // Fase 4b — reporte periódico de vencidas
+            'overdue_report_enabled', 'overdue_report_to', 'overdue_report_cc_emails',
+            'overdue_report_send_days', 'overdue_report_send_hour',
             // Fase 3: marca + bancos + labels
             'brand_logo_text', 'brand_primary_color', 'brand_secondary_color',
             'signature_html', 'cta_stripe_label', 'cta_bank_prefix', 'status_label',
@@ -1089,6 +1328,38 @@ router.put('/config', async (req, res) => {
                 });
             }
             patch.multi_alert_send_hour = h;
+        }
+
+        // Reporte de vencidas: mismas validaciones que la alerta.
+        if ('overdue_report_cc_emails' in patch) {
+            const cleaned = sanitizeEmailList(patch.overdue_report_cc_emails);
+            if (Array.isArray(patch.overdue_report_cc_emails) && patch.overdue_report_cc_emails.some(v => v && !cleaned.includes(String(v).trim()))) {
+                return res.status(400).json({
+                    error: 'invalid-overdue-report-cc',
+                    hint: 'Alguna dirección de CC del reporte no es un email válido.',
+                });
+            }
+            patch.overdue_report_cc_emails = cleaned;
+        }
+        if ('overdue_report_to' in patch) {
+            const to = String(patch.overdue_report_to || '').trim();
+            if (to && !EMAIL_RE.test(to)) {
+                return res.status(400).json({
+                    error: 'invalid-overdue-report-to',
+                    hint: 'El destinatario principal del reporte no es un email válido.',
+                });
+            }
+            patch.overdue_report_to = to || null;
+        }
+        if ('overdue_report_send_hour' in patch) {
+            const h = Number(patch.overdue_report_send_hour);
+            if (!Number.isInteger(h) || h < 0 || h > 23) {
+                return res.status(400).json({
+                    error: 'invalid-overdue-report-send-hour',
+                    hint: 'La hora del reporte tiene que ser un entero entre 0 y 23.',
+                });
+            }
+            patch.overdue_report_send_hour = h;
         }
 
         patch.updated_at = new Date().toISOString();
@@ -1828,6 +2099,35 @@ router.get('/multi-overdue-history', async (req, res) => {
         res.json({ months_window: months, clients });
     } catch (err) {
         console.error('[dunning] multi-overdue-history error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /dunning/overdue-report/preview ───────────────────────────────────────
+// Devuelve el reporte que se enviaría por email ahora mismo (sin enviarlo).
+router.get('/overdue-report/preview', async (_req, res) => {
+    try {
+        const config = await getConfig();
+        const report = await computeOverdueReport({ config });
+        res.json({ ...report, enabled: !!config.overdue_report_enabled });
+    } catch (err) {
+        console.error('[dunning] overdue-report/preview error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /dunning/overdue-report/send ─────────────────────────────────────────
+// Fuerza el envío del reporte ignorando el schedule y el anti-spam. Para
+// probar destinatarios y formato tras configurar.
+router.post('/overdue-report/send', async (req, res) => {
+    try {
+        const config = await getConfig();
+        const result = await maybeDispatchOverdueReport({
+            config, baseUrl: computeBaseUrl(req), force: true,
+        });
+        res.json(result);
+    } catch (err) {
+        console.error('[dunning] overdue-report/send error:', err);
         res.status(500).json({ error: err.message });
     }
 });

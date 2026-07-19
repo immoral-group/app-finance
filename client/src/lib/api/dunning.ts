@@ -48,6 +48,14 @@ export interface DunningConfig {
     multi_alert_send_hour: number;
     multi_alert_last_sent_at: string | null;
     multi_alert_last_summary: Record<string, unknown>;
+    // Fase 4b: reporte periódico de vencidas
+    overdue_report_enabled: boolean;
+    overdue_report_to: string | null;
+    overdue_report_cc_emails: string[];
+    overdue_report_send_days: number[];
+    overdue_report_send_hour: number;
+    overdue_report_last_sent_at: string | null;
+    overdue_report_last_summary: Record<string, unknown>;
     updated_at: string;
     // Fase 3: marca y bancos
     brand_logo_text: string;
@@ -386,7 +394,40 @@ export const dunningApi = {
             `/dunning/multi-overdue-history?${qs.toString()}`
         );
     },
+
+    // ── Reporte periódico de vencidas ─────────────────────────────────
+    previewOverdueReport: () =>
+        fetchApi<OverdueReportPreview>('/dunning/overdue-report/preview'),
+
+    sendOverdueReport: () =>
+        fetchApi<{ sent?: boolean; reason?: string; total_count?: number; to?: string; cc?: string[] }>(
+            '/dunning/overdue-report/send',
+            { method: 'POST' }
+        ),
 };
+
+export interface OverdueReportRow {
+    invoice_id: string;
+    invoice_number: string;
+    contact_id: string;
+    contact_name: string;
+    contact_email: string;
+    amount: number;
+    currency: string;
+    invoice_date: number | null;
+    due_date: number;
+    days_overdue: number;
+    reminder_sent: boolean;
+    reminder_level: number | null;
+    reminder_sent_at: string | null;
+}
+export interface OverdueReportPreview {
+    invoices: OverdueReportRow[];
+    total_count: number;
+    total_amount: number;
+    critical_threshold: number;
+    enabled: boolean;
+}
 
 export interface MultiOverdueSnapshot {
     id: string;
