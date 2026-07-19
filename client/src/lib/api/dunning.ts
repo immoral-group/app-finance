@@ -45,6 +45,7 @@ export interface DunningConfig {
     multi_alert_to: string | null;
     multi_alert_cc_emails: string[];
     multi_alert_send_days: number[];
+    multi_alert_send_hour: number;
     multi_alert_last_sent_at: string | null;
     multi_alert_last_summary: Record<string, unknown>;
     updated_at: string;

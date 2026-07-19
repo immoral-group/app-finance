@@ -239,6 +239,7 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
     const [to, setTo] = useState(config.multi_alert_to || '');
     const [cc, setCc] = useState<string[]>(config.multi_alert_cc_emails || []);
     const [sendDays, setSendDays] = useState<number[]>(config.multi_alert_send_days || []);
+    const [sendHour, setSendHour] = useState<number>(config.multi_alert_send_hour ?? 9);
 
     useEffect(() => {
         setEnabled(config.multi_alert_enabled);
@@ -246,6 +247,7 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
         setTo(config.multi_alert_to || '');
         setCc(config.multi_alert_cc_emails || []);
         setSendDays(config.multi_alert_send_days || []);
+        setSendHour(config.multi_alert_send_hour ?? 9);
     }, [config.id, config.updated_at]);
 
     const toggleDay = (day: number) => {
@@ -261,13 +263,15 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
         multi_alert_to: to.trim() || null,
         multi_alert_cc_emails: cc,
         multi_alert_send_days: sendDays,
+        multi_alert_send_hour: sendHour,
     };
     const hasUnsavedChanges =
         (config.multi_alert_enabled !== enabled) ||
         (config.multi_alert_threshold !== threshold) ||
         ((config.multi_alert_to || '') !== to.trim()) ||
         (JSON.stringify(config.multi_alert_cc_emails || []) !== JSON.stringify(cc)) ||
-        (JSON.stringify(config.multi_alert_send_days || []) !== JSON.stringify(sendDays));
+        (JSON.stringify(config.multi_alert_send_days || []) !== JSON.stringify(sendDays)) ||
+        ((config.multi_alert_send_hour ?? 9) !== sendHour);
 
     // Preview: cuántos clientes cumplirían el umbral ahora mismo.
     const { data: preview, refetch: refetchPreview, isFetching: previewLoading } = useQuery({
@@ -293,7 +297,7 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
     useEffect(() => {
         if (sendMutation.isSuccess || sendMutation.isError) sendMutation.reset();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [enabled, threshold, to, JSON.stringify(cc), JSON.stringify(sendDays)]);
+    }, [enabled, threshold, to, JSON.stringify(cc), JSON.stringify(sendDays), sendHour]);
 
     const alerts = preview?.alerts || [];
     const canSend = enabled && (!!to.trim() || cc.length > 0);
@@ -310,7 +314,7 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
                         <p className="text-xs text-muted-foreground mt-1">
                             Cuando un mismo cliente acumule al menos <strong>{threshold}</strong> facturas vencidas, aparece
                             un modal bloqueante en toda la app para superadmins (una vez al día) y se envía un email a los
-                            destinatarios de abajo en los días que elijas. El historial se guarda a diario para métricas mensuales.
+                            destinatarios de abajo <strong>los días y hora que elijas</strong>. El historial se guarda a diario para métricas mensuales.
                         </p>
                     </div>
                     <button
@@ -354,29 +358,48 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
                     </p>
                 </div>
 
-                <div>
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
-                        Días en que se manda el email
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                        {DAY_LABELS.map((label, idx) => {
-                            const active = sendDays.includes(idx);
-                            return (
-                                <button key={idx} onClick={() => toggleDay(idx)}
-                                    type="button"
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                                        active ? 'bg-primary text-primary-foreground border-primary'
-                                              : 'bg-background text-foreground border-border hover:bg-muted'
-                                    }`}>
-                                    {label}
-                                </button>
-                            );
-                        })}
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-start">
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                            Días en que se manda el email
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                            {DAY_LABELS.map((label, idx) => {
+                                const active = sendDays.includes(idx);
+                                return (
+                                    <button key={idx} onClick={() => toggleDay(idx)}
+                                        type="button"
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                            active ? 'bg-primary text-primary-foreground border-primary'
+                                                  : 'bg-background text-foreground border-border hover:bg-muted'
+                                        }`}>
+                                        {label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-1.5">
+                            Elige uno o varios días de la semana. El modal en la app sigue apareciendo todos los días — esto controla solo el email.
+                            {sendDays.length === 0 && <span className="text-amber-600 dark:text-amber-400 font-semibold"> Sin días marcados no se enviará ningún email.</span>}
+                        </p>
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-1.5">
-                        Elige uno o varios días de la semana. El banner en la app sigue apareciendo todos los días — esto controla solo el email.
-                        {sendDays.length === 0 && <span className="text-amber-600 dark:text-amber-400 font-semibold"> Sin días marcados no se enviará ningún email.</span>}
-                    </p>
+                    <div className="min-w-[140px]">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                            Hora
+                        </label>
+                        <div className="flex items-center gap-1">
+                            <Input type="number" min={0} max={23} value={sendHour}
+                                onChange={e => {
+                                    const v = Number(e.target.value);
+                                    if (Number.isFinite(v)) setSendHour(Math.max(0, Math.min(23, Math.floor(v))));
+                                }}
+                                className="w-20" />
+                            <span className="text-sm text-muted-foreground">:00</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-1.5">
+                            Hora local ({config.timezone || 'Europe/Madrid'}).
+                        </p>
+                    </div>
                 </div>
 
                 <div className="rounded-lg border bg-muted/30 p-3 space-y-2">

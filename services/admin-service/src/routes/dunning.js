@@ -227,15 +227,26 @@ async function cronRunHandler(req, res) {
             });
         };
 
+        // La alerta multi-vencida es independiente del schedule de recordatorios:
+        // tiene su propio día/hora y su propio flag enabled. Se dispara aquí
+        // porque el cron 'run' es el único que corre a cada hora en punto.
+        let multiAlert = null;
+        try {
+            multiAlert = await maybeDispatchMultiAlert({ config, baseUrl: computeBaseUrl(req) });
+        } catch (mErr) {
+            console.warn('[dunning] multi-alert dispatch failed:', mErr.message);
+            multiAlert = { error: mErr.message };
+        }
+
         if (!config.enabled) {
-            await stampSkip('system-disabled');
-            return res.json({ skipped: true, reason: 'system-disabled' });
+            await stampSkip('system-disabled', { multi_alert: multiAlert });
+            return res.json({ skipped: true, reason: 'system-disabled', multi_alert: multiAlert });
         }
 
         const schedule = isCronScheduledNow(config);
         if (!schedule.ok) {
-            await stampSkip('not-scheduled', { schedule });
-            return res.json({ skipped: true, reason: 'not-scheduled', schedule });
+            await stampSkip('not-scheduled', { schedule, multi_alert: multiAlert });
+            return res.json({ skipped: true, reason: 'not-scheduled', schedule, multi_alert: multiAlert });
         }
 
         // Idempotencia: si ya se ejecutó hace menos de 30 minutos, saltar.
@@ -287,12 +298,13 @@ async function cronRunHandler(req, res) {
                 skipped: summarySkipped,
                 summary: result.summary,
                 executed: result.executed,
+                multi_alert: multiAlert,
             },
             is_test: !!config.test_mode,
             startedMs,
         });
 
-        res.json({ ok: true, ...result });
+        res.json({ ok: true, ...result, multi_alert: multiAlert });
     } catch (err) {
         console.error('[dunning] cron/run error:', err);
         await supabase.from('dunning_config').update({
@@ -324,48 +336,22 @@ async function cronSyncPaidHandler(req, res) {
             last_sync_paid_at: new Date().toISOString(),
         }).eq('id', 1);
 
+        // Snapshot diario del historial multi-vencida. Solo guarda, no envía —
+        // el envío lo dispara el cron horario `run` a la hora configurada.
         let multiAlert = { skipped: true, reason: 'disabled' };
         try {
             const { data: cfg } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
             if (cfg?.multi_alert_enabled) {
-                const { alerts, threshold } = await computeMultiOverdueAlerts({ config: cfg });
-                // Snapshot SIEMPRE que haya alertas, aunque hoy no toque email.
-                // Así el historial es diario y sirve para métricas mensuales.
-                let sendResult = null;
+                const { alerts } = await computeMultiOverdueAlerts({ config: cfg });
                 if (alerts.length) {
-                    const dow = currentWeekday(cfg);
-                    const sendDays = Array.isArray(cfg.multi_alert_send_days) ? cfg.multi_alert_send_days : [];
-                    const isSendDay = sendDays.includes(dow);
-                    const lastSent = cfg.multi_alert_last_sent_at ? new Date(cfg.multi_alert_last_sent_at).getTime() : 0;
-                    const sentRecently = Date.now() - lastSent < 20 * 60 * 60 * 1000;
-
-                    if (!isSendDay) {
-                        multiAlert = { skipped: true, reason: 'not-send-day', alerts_count: alerts.length, weekday: dow };
-                    } else if (sentRecently) {
-                        multiAlert = { skipped: true, reason: 'sent-recently', alerts_count: alerts.length };
-                    } else {
-                        sendResult = await sendMultiOverdueEmail({ alerts, config: cfg, baseUrl: computeBaseUrl(req) });
-                        multiAlert = sendResult;
-                        if (sendResult.sent) {
-                            await supabase.from('dunning_config').update({
-                                multi_alert_last_sent_at: new Date().toISOString(),
-                                multi_alert_last_summary: {
-                                    alerts_count: alerts.length,
-                                    threshold,
-                                    total_invoices: alerts.reduce((s, a) => s + a.invoice_count, 0),
-                                    total_amount: alerts.reduce((s, a) => s + Number(a.total_amount || 0), 0),
-                                },
-                            }).eq('id', 1);
-                        }
-                    }
-                    const snapshot = await snapshotMultiOverdueAlerts({ alerts, emailSent: !!sendResult?.sent });
-                    multiAlert = { ...multiAlert, snapshot };
+                    const snapshot = await snapshotMultiOverdueAlerts({ alerts, emailSent: false });
+                    multiAlert = { snapshot, alerts_count: alerts.length, note: 'snapshot-only' };
                 } else {
                     multiAlert = { skipped: true, reason: 'no-alerts' };
                 }
             }
         } catch (alertErr) {
-            console.warn('[dunning] multi-alert during cron failed:', alertErr.message);
+            console.warn('[dunning] multi-alert snapshot during cron failed:', alertErr.message);
             multiAlert = { error: alertErr.message };
         }
 
@@ -894,19 +880,64 @@ async function snapshotMultiOverdueAlerts({ alerts, emailSent = false }) {
     return count || rows.length;
 }
 
-// Devuelve el día de la semana (0=domingo … 6=sábado) según la zona horaria
-// del config. Se usa para respetar `multi_alert_send_days` de forma consistente
-// con lo que ven los usuarios en España.
-function currentWeekday(config, now = new Date()) {
+// Devuelve el día de la semana (0=domingo … 6=sábado) y hora actual en la
+// zona horaria del config. Se usa para respetar `multi_alert_send_days` y
+// `multi_alert_send_hour` de forma consistente con lo que ven los usuarios.
+function currentTimeInTz(config, now = new Date()) {
     try {
         const parts = new Intl.DateTimeFormat('en-US', {
             timeZone: config.timezone || 'Europe/Madrid',
             weekday: 'short',
+            hour: 'numeric',
+            hour12: false,
         }).formatToParts(now);
         const short = parts.find(p => p.type === 'weekday')?.value || '';
         const MAP = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-        return MAP[short] ?? now.getDay();
-    } catch { return now.getDay(); }
+        const weekday = MAP[short] ?? now.getDay();
+        const hour = Number(parts.find(p => p.type === 'hour')?.value ?? now.getHours());
+        return { weekday, hour };
+    } catch { return { weekday: now.getDay(), hour: now.getHours() }; }
+}
+
+// Compat: usado por otras funciones internas.
+function currentWeekday(config, now = new Date()) {
+    return currentTimeInTz(config, now).weekday;
+}
+
+// Verifica si toca disparar la alerta multi-vencida ahora, compone el envío y
+// persiste snapshot. Devuelve el resultado para logging. No lanza — cualquier
+// error se captura en el caller para no romper el resto del cron.
+async function maybeDispatchMultiAlert({ config, baseUrl, force = false }) {
+    if (!config?.multi_alert_enabled) return { skipped: true, reason: 'disabled' };
+    const { weekday, hour } = currentTimeInTz(config);
+    const sendDays = Array.isArray(config.multi_alert_send_days) ? config.multi_alert_send_days : [];
+    const sendHour = Number(config.multi_alert_send_hour ?? 9);
+    const lastSent = config.multi_alert_last_sent_at ? new Date(config.multi_alert_last_sent_at).getTime() : 0;
+    const sentRecently = Date.now() - lastSent < 20 * 60 * 60 * 1000;
+
+    if (!force) {
+        if (!sendDays.includes(weekday)) return { skipped: true, reason: 'not-send-day', weekday };
+        if (hour !== sendHour) return { skipped: true, reason: 'not-send-hour', hour, expected: sendHour };
+        if (sentRecently) return { skipped: true, reason: 'sent-recently' };
+    }
+
+    const { alerts, threshold } = await computeMultiOverdueAlerts({ config });
+    if (!alerts.length) return { skipped: true, reason: 'no-alerts' };
+
+    const sendResult = await sendMultiOverdueEmail({ alerts, config, baseUrl });
+    if (sendResult.sent) {
+        await supabase.from('dunning_config').update({
+            multi_alert_last_sent_at: new Date().toISOString(),
+            multi_alert_last_summary: {
+                alerts_count: alerts.length,
+                threshold,
+                total_invoices: alerts.reduce((s, a) => s + a.invoice_count, 0),
+                total_amount: alerts.reduce((s, a) => s + Number(a.total_amount || 0), 0),
+            },
+        }).eq('id', 1);
+    }
+    const snapshot = await snapshotMultiOverdueAlerts({ alerts, emailSent: !!sendResult.sent });
+    return { ...sendResult, snapshot, alerts_count: alerts.length };
 }
 
 async function runSyncPaid() {
@@ -990,7 +1021,7 @@ router.put('/config', async (req, res) => {
             'min_amount', 'excluded_contact_ids', 'bcc_email', 'cc_emails',
             // Fase 4 — alerta de clientes con múltiples vencidas
             'multi_alert_enabled', 'multi_alert_threshold', 'multi_alert_to', 'multi_alert_cc_emails',
-            'multi_alert_send_days',
+            'multi_alert_send_days', 'multi_alert_send_hour',
             // Fase 3: marca + bancos + labels
             'brand_logo_text', 'brand_primary_color', 'brand_secondary_color',
             'signature_html', 'cta_stripe_label', 'cta_bank_prefix', 'status_label',
@@ -1048,6 +1079,16 @@ router.put('/config', async (req, res) => {
                 });
             }
             patch.multi_alert_threshold = Math.floor(t);
+        }
+        if ('multi_alert_send_hour' in patch) {
+            const h = Number(patch.multi_alert_send_hour);
+            if (!Number.isInteger(h) || h < 0 || h > 23) {
+                return res.status(400).json({
+                    error: 'invalid-multi-alert-send-hour',
+                    hint: 'La hora tiene que ser un entero entre 0 y 23.',
+                });
+            }
+            patch.multi_alert_send_hour = h;
         }
 
         patch.updated_at = new Date().toISOString();
