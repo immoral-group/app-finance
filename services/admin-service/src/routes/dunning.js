@@ -35,6 +35,29 @@ function formatDate(ms) {
     } catch { return ''; }
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Normaliza una lista de emails: recorta, filtra vacíos/inválidos, quita
+// duplicados y opcionalmente excluye una dirección concreta (el destinatario
+// principal, para que no aparezca también en CC).
+function sanitizeEmailList(input, excludeEmail = null) {
+    if (!input) return [];
+    const arr = Array.isArray(input) ? input : String(input).split(/[,;\s]+/);
+    const exclude = excludeEmail ? String(excludeEmail).trim().toLowerCase() : null;
+    const seen = new Set();
+    const out = [];
+    for (const raw of arr) {
+        const email = String(raw || '').trim();
+        if (!email || !EMAIL_RE.test(email)) continue;
+        const lower = email.toLowerCase();
+        if (exclude && lower === exclude) continue;
+        if (seen.has(lower)) continue;
+        seen.add(lower);
+        out.push(email);
+    }
+    return out;
+}
+
 function invoiceVars(invoice, daysOverdue) {
     return {
         contact_name: invoice.contact_name || '',
@@ -204,30 +227,56 @@ async function cronRunHandler(req, res) {
             });
         };
 
+        // La alerta multi-vencida es independiente del schedule de recordatorios:
+        // tiene su propio día/hora y su propio flag enabled. Se dispara aquí
+        // porque el cron 'run' es el único que corre a cada hora en punto.
+        let multiAlert = null;
+        try {
+            multiAlert = await maybeDispatchMultiAlert({ config, baseUrl: computeBaseUrl(req) });
+        } catch (mErr) {
+            console.warn('[dunning] multi-alert dispatch failed:', mErr.message);
+            multiAlert = { error: mErr.message };
+        }
+
+        // Helper: dispatch del reporte de vencidas. Se invoca en cada camino
+        // (skip o envío) para que el reporte tenga su schedule independiente.
+        const dispatchReport = async () => {
+            try {
+                const { data: freshCfg } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
+                return await maybeDispatchOverdueReport({ config: freshCfg || config, baseUrl: computeBaseUrl(req) });
+            } catch (rErr) {
+                console.warn('[dunning] overdue-report dispatch failed:', rErr.message);
+                return { error: rErr.message };
+            }
+        };
+
         if (!config.enabled) {
-            await stampSkip('system-disabled');
-            return res.json({ skipped: true, reason: 'system-disabled' });
+            const overdueReport = await dispatchReport();
+            await stampSkip('system-disabled', { multi_alert: multiAlert, overdue_report: overdueReport });
+            return res.json({ skipped: true, reason: 'system-disabled', multi_alert: multiAlert, overdue_report: overdueReport });
         }
 
         const schedule = isCronScheduledNow(config);
         if (!schedule.ok) {
-            await stampSkip('not-scheduled', { schedule });
-            return res.json({ skipped: true, reason: 'not-scheduled', schedule });
+            const overdueReport = await dispatchReport();
+            await stampSkip('not-scheduled', { schedule, multi_alert: multiAlert, overdue_report: overdueReport });
+            return res.json({ skipped: true, reason: 'not-scheduled', schedule, multi_alert: multiAlert, overdue_report: overdueReport });
         }
 
         // Idempotencia: si ya se ejecutó hace menos de 30 minutos, saltar.
         if (config.last_cron_run_at) {
             const lastMs = new Date(config.last_cron_run_at).getTime();
             if (Date.now() - lastMs < 30 * 60 * 1000) {
+                const overdueReport = await dispatchReport();
                 await logCronRun({
                     endpoint: 'run',
                     status: 'skipped',
                     reason: 'ran-recently',
-                    summary: { source, last_cron_run_at: config.last_cron_run_at },
+                    summary: { source, last_cron_run_at: config.last_cron_run_at, overdue_report: overdueReport },
                     is_test: !!config.test_mode,
                     startedMs,
                 });
-                return res.json({ skipped: true, reason: 'ran-recently', last_cron_run_at: config.last_cron_run_at });
+                return res.json({ skipped: true, reason: 'ran-recently', last_cron_run_at: config.last_cron_run_at, overdue_report: overdueReport });
             }
         }
 
@@ -239,6 +288,10 @@ async function cronRunHandler(req, res) {
         const summarySent = result.executed.filter(r => r.status === 'sent').length;
         const summaryFailed = result.executed.filter(r => r.status === 'failed').length;
         const summarySkipped = result.executed.filter(r => r.status === 'skipped').length;
+
+        // Reporte de facturas vencidas — DESPUÉS de executeSend para que la
+        // columna "Recordatorio enviado" incluya lo que acaba de salir.
+        const overdueReport = await dispatchReport();
 
         // Actualizar timestamps de trazabilidad.
         await supabase.from('dunning_config').update({
@@ -264,12 +317,14 @@ async function cronRunHandler(req, res) {
                 skipped: summarySkipped,
                 summary: result.summary,
                 executed: result.executed,
+                multi_alert: multiAlert,
+                overdue_report: overdueReport,
             },
             is_test: !!config.test_mode,
             startedMs,
         });
 
-        res.json({ ok: true, ...result });
+        res.json({ ok: true, ...result, multi_alert: multiAlert, overdue_report: overdueReport });
     } catch (err) {
         console.error('[dunning] cron/run error:', err);
         await supabase.from('dunning_config').update({
@@ -290,6 +345,8 @@ router.get('/cron/run', requireCronSecret, cronRunHandler);
 router.post('/cron/run', requireCronSecret, cronRunHandler);
 
 // GET/POST /dunning/cron/sync-paid — sincroniza cobros diariamente.
+// Aprovecha la misma ejecución diaria para disparar la alerta de clientes
+// con múltiples facturas vencidas, con anti-spam de 24h.
 async function cronSyncPaidHandler(req, res) {
     const startedMs = Date.now();
     const source = detectCronSource(req);
@@ -298,13 +355,33 @@ async function cronSyncPaidHandler(req, res) {
         await supabase.from('dunning_config').update({
             last_sync_paid_at: new Date().toISOString(),
         }).eq('id', 1);
+
+        // Snapshot diario del historial multi-vencida. Solo guarda, no envía —
+        // el envío lo dispara el cron horario `run` a la hora configurada.
+        let multiAlert = { skipped: true, reason: 'disabled' };
+        try {
+            const { data: cfg } = await supabase.from('dunning_config').select('*').eq('id', 1).single();
+            if (cfg?.multi_alert_enabled) {
+                const { alerts } = await computeMultiOverdueAlerts({ config: cfg });
+                if (alerts.length) {
+                    const snapshot = await snapshotMultiOverdueAlerts({ alerts, emailSent: false });
+                    multiAlert = { snapshot, alerts_count: alerts.length, note: 'snapshot-only' };
+                } else {
+                    multiAlert = { skipped: true, reason: 'no-alerts' };
+                }
+            }
+        } catch (alertErr) {
+            console.warn('[dunning] multi-alert snapshot during cron failed:', alertErr.message);
+            multiAlert = { error: alertErr.message };
+        }
+
         await logCronRun({
             endpoint: 'sync-paid',
             status: 'ok',
-            summary: { source, ...result },
+            summary: { source, ...result, multi_alert: multiAlert },
             startedMs,
         });
-        res.json({ ok: true, ...result });
+        res.json({ ok: true, ...result, multi_alert: multiAlert });
     } catch (err) {
         console.error('[dunning] cron/sync-paid error:', err);
         await logCronRun({
@@ -382,8 +459,15 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
     for (const t of templates) if (t.active && !tplByLevel.has(t.level)) tplByLevel.set(t.level, t);
 
     const { data: overridesRows } = await supabase
-        .from('dunning_email_overrides').select('contact_id, override_email');
+        .from('dunning_email_overrides').select('contact_id, override_email, override_cc_emails');
     const overrideByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_email]));
+    const overrideCcByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_cc_emails || []]));
+
+    // CC globales del config (siempre visibles). En modo prueba los suprimimos
+    // — un email de test no debe copiar a terceros aunque estén configurados.
+    const globalCcEmails = activeConfig.test_mode
+        ? []
+        : sanitizeEmailList(activeConfig.cc_emails);
 
     const results = [];
     const toSend = plan.filter(p => p.action === 'send');
@@ -422,6 +506,13 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
             continue;
         }
         if (dryRun) {
+            const dryOverrideCcList = activeConfig.test_mode
+                ? []
+                : sanitizeEmailList(overrideCcByContact.get(item.invoice.contact_id));
+            const dryCcList = sanitizeEmailList(
+                [...globalCcEmails, ...dryOverrideCcList],
+                destEmail,
+            );
             results.push({
                 invoice_id: item.invoice.id,
                 invoice_number: item.invoice.invoice_number,
@@ -429,6 +520,7 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                 status: 'would-send',
                 level: item.level,
                 to: destEmail,
+                cc: dryCcList,
                 original_to: originalEmail,
                 redirect_reason,
             });
@@ -512,9 +604,21 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                 tracking_pixel_url: trackingPixelUrl,
             });
 
+            // CC efectivo: globales + los específicos del contacto, deduplicado
+            // y excluyendo la dirección destino para no dispararle dos copias.
+            // En modo prueba no metemos CC — solo debe llegar al email de test.
+            const overrideCcList = activeConfig.test_mode
+                ? []
+                : sanitizeEmailList(overrideCcByContact.get(item.invoice.contact_id));
+            const ccList = sanitizeEmailList(
+                [...globalCcEmails, ...overrideCcList],
+                destEmail,
+            );
+
             const info = await getTransporter().sendMail({
                 from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
                 to: destEmail,
+                cc: ccList.length ? ccList : undefined,
                 bcc: activeConfig.bcc_email || undefined,
                 subject: redirect_reason ? `[${redirect_reason === 'test_mode' ? 'PRUEBA' : 'REDIRIGIDO'}] ${rendered.subject}` : rendered.subject,
                 html: rendered.html,
@@ -528,6 +632,7 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                 template_id: template.id,
                 days_overdue: item.days_overdue,
                 sent_to: destEmail,
+                cc_emails: ccList,
                 subject: rendered.subject,
                 body_html_snapshot: rendered.html,
                 smtp_message_id: info.messageId || null,
@@ -552,6 +657,7 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
                 status: 'sent',
                 level: item.level,
                 to: destEmail,
+                cc: ccList,
                 original_to: originalEmail,
                 redirect_reason,
             });
@@ -588,6 +694,519 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
         summary: summarizePlan(plan),
         executed: results,
     };
+}
+
+// ── Alertas de clientes con múltiples facturas vencidas ────────────────
+// Agrupa las facturas vencidas por contacto y devuelve los que superan el
+// umbral (>=2 por defecto). Reutiliza la misma fuente (Holded live) que
+// /overdue-invoices para que app y email digan lo mismo.
+async function computeMultiOverdueAlerts({ config, now = Date.now() }) {
+    const [holdedInvoices, holdedContacts] = await Promise.all([
+        holdedFetch('/documents/invoice?paid=0'),
+        holdedFetch('/contacts').catch(err => { console.warn('[dunning] no /contacts:', err.message); return []; }),
+    ]);
+    const invoices = Array.isArray(holdedInvoices) ? holdedInvoices : [];
+    const emailByContact = new Map();
+    for (const c of (Array.isArray(holdedContacts) ? holdedContacts : [])) {
+        if (c.id && c.email) emailByContact.set(c.id, c.email);
+    }
+
+    const byContact = new Map();
+    for (const inv of invoices) {
+        const dueMs = normalizeTimestamp(inv.dueDate);
+        if (!dueMs) continue;
+        const daysOverdue = Math.floor((now - dueMs) / 86_400_000);
+        if (daysOverdue < 1) continue;
+        const total = Number(inv.total || 0);
+        if (total < Number(config.min_amount || 0)) continue;
+        if ((config.excluded_contact_ids || []).includes(inv.contact)) continue;
+
+        const key = inv.contact || inv.contactName || 'unknown';
+        if (!byContact.has(key)) {
+            byContact.set(key, {
+                contact_id: inv.contact || '',
+                contact_name: inv.contactName || '',
+                contact_email: inv.contactEmail || inv.email || emailByContact.get(inv.contact) || '',
+                invoices: [],
+                total_amount: 0,
+            });
+        }
+        const bucket = byContact.get(key);
+        bucket.invoices.push({
+            invoice_id: inv.id,
+            invoice_number: inv.docNumber || inv.num || '',
+            amount: total,
+            currency: inv.currency || 'EUR',
+            days_overdue: daysOverdue,
+            due_date: dueMs,
+        });
+        bucket.total_amount += total;
+    }
+
+    const threshold = Math.max(2, Number(config.multi_alert_threshold || 2));
+    const alerts = [];
+    for (const bucket of byContact.values()) {
+        if (bucket.invoices.length < threshold) continue;
+        bucket.invoices.sort((a, b) => b.days_overdue - a.days_overdue);
+        alerts.push({
+            ...bucket,
+            invoice_count: bucket.invoices.length,
+            max_days_overdue: bucket.invoices[0]?.days_overdue || 0,
+        });
+    }
+    alerts.sort((a, b) => b.invoice_count - a.invoice_count || b.total_amount - a.total_amount);
+    return { alerts, threshold };
+}
+
+function renderMultiOverdueEmail({ alerts, threshold, appUrl }) {
+    const fmt = (n, cur = 'EUR') => new Intl.NumberFormat('es-ES', {
+        style: 'currency', currency: cur, maximumFractionDigits: 2,
+    }).format(Number(n || 0));
+    const totalOverall = alerts.reduce((s, a) => s + Number(a.total_amount || 0), 0);
+    const totalInvoices = alerts.reduce((s, a) => s + a.invoice_count, 0);
+
+    const clientRows = alerts.map(a => `
+        <tr>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;">
+                ${escapeHtml(a.contact_name || '(sin nombre)')}
+                ${a.contact_email ? `<div style="font-weight:400;color:#6b7280;font-size:12px;">${escapeHtml(a.contact_email)}</div>` : ''}
+            </td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center;">
+                <span style="display:inline-block;background:#fee2e2;color:#b91c1c;padding:2px 10px;border-radius:999px;font-weight:700;font-size:13px;">
+                    ${a.invoice_count} facturas
+                </span>
+            </td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700;color:#111827;">
+                ${fmt(a.total_amount)}
+            </td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center;color:#b45309;font-weight:600;">
+                ${a.max_days_overdue} días
+            </td>
+        </tr>`).join('');
+
+    const html = `<!doctype html>
+<html><body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+    <div style="max-width:640px;margin:0 auto;padding:24px 16px;">
+        <div style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+            <div style="background:linear-gradient(135deg,#dc2626,#991b1b);padding:20px 24px;color:#fff;">
+                <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;opacity:0.85;">Alerta de impagos</div>
+                <div style="font-size:20px;font-weight:700;margin-top:4px;">
+                    ${alerts.length} cliente${alerts.length === 1 ? '' : 's'} con ${threshold}+ facturas vencidas
+                </div>
+                <div style="font-size:13px;opacity:0.9;margin-top:2px;">
+                    ${totalInvoices} facturas · ${fmt(totalOverall)} totales
+                </div>
+            </div>
+            <div style="padding:20px 24px;color:#374151;font-size:14px;line-height:1.5;">
+                <p style="margin:0 0 16px;">
+                    Los siguientes clientes acumulan ${threshold} o más facturas vencidas simultáneamente. Revisa el módulo Impagos para gestionar recordatorios y contactos:
+                </p>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="background:#f9fafb;">
+                            <th style="padding:8px 12px;text-align:left;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Cliente</th>
+                            <th style="padding:8px 12px;text-align:center;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Facturas</th>
+                            <th style="padding:8px 12px;text-align:right;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Deuda</th>
+                            <th style="padding:8px 12px;text-align:center;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Máx. vencido</th>
+                        </tr>
+                    </thead>
+                    <tbody>${clientRows}</tbody>
+                </table>
+                ${appUrl ? `
+                <div style="text-align:center;margin-top:24px;">
+                    <a href="${appUrl}" style="display:inline-block;background:#dc2626;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">
+                        Abrir módulo Impagos
+                    </a>
+                </div>` : ''}
+            </div>
+            <div style="padding:12px 24px;background:#f9fafb;color:#9ca3af;font-size:11px;text-align:center;">
+                Aviso automático de Immoral Finance · Umbral configurado: ${threshold}+ facturas por cliente
+            </div>
+        </div>
+    </div>
+</body></html>`;
+    // Asunto natural, sin corchetes ni tecnicismos, adaptado a si es un solo
+    // cliente o varios — así la bandeja de entrada se lee bien de un vistazo.
+    const subject = alerts.length === 1
+        ? `Alerta de impagos · ${alerts[0].contact_name || 'un cliente'} acumula ${alerts[0].invoice_count} facturas vencidas`
+        : `Alerta de impagos · ${alerts.length} clientes con facturas vencidas pendientes`;
+    return { html, subject };
+}
+
+function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[m]));
+}
+
+// Envía el email a los destinatarios configurados. Registra last_sent_at
+// y summary aunque falle parcialmente. No dispara si to+cc están vacíos.
+async function sendMultiOverdueEmail({ alerts, config, baseUrl }) {
+    if (!alerts.length) return { skipped: true, reason: 'no-alerts' };
+    if (!process.env.SMTP_USER) return { skipped: true, reason: 'smtp-not-configured' };
+
+    const toEmail = (config.multi_alert_to || '').trim();
+    const ccList = sanitizeEmailList(config.multi_alert_cc_emails, toEmail);
+    if (!toEmail && ccList.length === 0) {
+        return { skipped: true, reason: 'no-recipients' };
+    }
+
+    const { html, subject } = renderMultiOverdueEmail({
+        alerts,
+        threshold: Math.max(2, Number(config.multi_alert_threshold || 2)),
+        appUrl: baseUrl ? `${baseUrl.replace(/\/+$/, '')}/payments/dunning` : null,
+    });
+
+    const info = await getTransporter().sendMail({
+        from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
+        to: toEmail || ccList[0],
+        cc: (toEmail && ccList.length ? ccList : (toEmail ? undefined : ccList.slice(1))) || undefined,
+        subject,
+        html,
+    });
+    return {
+        sent: true,
+        message_id: info.messageId || null,
+        to: toEmail || ccList[0],
+        cc: (toEmail ? ccList : ccList.slice(1)),
+        alerts_count: alerts.length,
+    };
+}
+
+// Persiste un snapshot por cliente en dunning_multi_alert_history. Idempotente
+// gracias al índice único (contact_id, ran_date): si el cron corre dos veces
+// el mismo día, la segunda actualiza en vez de duplicar. `emailSent` marca
+// si el correo salió realmente (para no confundir "hubo alerta" con "hubo email").
+async function snapshotMultiOverdueAlerts({ alerts, emailSent = false }) {
+    if (!alerts.length) return 0;
+    const rows = alerts.map(a => ({
+        contact_id: a.contact_id || null,
+        contact_name: a.contact_name || null,
+        contact_email: a.contact_email || null,
+        invoice_count: a.invoice_count,
+        max_days_overdue: a.max_days_overdue,
+        total_amount: a.total_amount,
+        currency: a.invoices?.[0]?.currency || 'EUR',
+        invoices: a.invoices || [],
+        email_sent: !!emailSent,
+    }));
+    const { error, count } = await supabase
+        .from('dunning_multi_alert_history')
+        .upsert(rows, { onConflict: 'contact_id,ran_date', count: 'exact' });
+    if (error) {
+        console.warn('[dunning] snapshotMultiOverdueAlerts failed:', error.message);
+        return 0;
+    }
+    return count || rows.length;
+}
+
+// Devuelve el día de la semana (0=domingo … 6=sábado) y hora actual en la
+// zona horaria del config. Se usa para respetar `multi_alert_send_days` y
+// `multi_alert_send_hour` de forma consistente con lo que ven los usuarios.
+function currentTimeInTz(config, now = new Date()) {
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: config.timezone || 'Europe/Madrid',
+            weekday: 'short',
+            hour: 'numeric',
+            hour12: false,
+        }).formatToParts(now);
+        const short = parts.find(p => p.type === 'weekday')?.value || '';
+        const MAP = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        const weekday = MAP[short] ?? now.getDay();
+        const hour = Number(parts.find(p => p.type === 'hour')?.value ?? now.getHours());
+        return { weekday, hour };
+    } catch { return { weekday: now.getDay(), hour: now.getHours() }; }
+}
+
+// Compat: usado por otras funciones internas.
+function currentWeekday(config, now = new Date()) {
+    return currentTimeInTz(config, now).weekday;
+}
+
+// Verifica si toca disparar la alerta multi-vencida ahora, compone el envío y
+// persiste snapshot. Devuelve el resultado para logging. No lanza — cualquier
+// error se captura en el caller para no romper el resto del cron.
+async function maybeDispatchMultiAlert({ config, baseUrl, force = false }) {
+    if (!config?.multi_alert_enabled) return { skipped: true, reason: 'disabled' };
+    const { weekday, hour } = currentTimeInTz(config);
+    const sendDays = Array.isArray(config.multi_alert_send_days) ? config.multi_alert_send_days : [];
+    const sendHour = Number(config.multi_alert_send_hour ?? 9);
+    const lastSent = config.multi_alert_last_sent_at ? new Date(config.multi_alert_last_sent_at).getTime() : 0;
+    const sentRecently = Date.now() - lastSent < 20 * 60 * 60 * 1000;
+
+    if (!force) {
+        if (!sendDays.includes(weekday)) return { skipped: true, reason: 'not-send-day', weekday };
+        if (hour !== sendHour) return { skipped: true, reason: 'not-send-hour', hour, expected: sendHour };
+        if (sentRecently) return { skipped: true, reason: 'sent-recently' };
+    }
+
+    const { alerts, threshold } = await computeMultiOverdueAlerts({ config });
+    if (!alerts.length) return { skipped: true, reason: 'no-alerts' };
+
+    const sendResult = await sendMultiOverdueEmail({ alerts, config, baseUrl });
+    if (sendResult.sent) {
+        await supabase.from('dunning_config').update({
+            multi_alert_last_sent_at: new Date().toISOString(),
+            multi_alert_last_summary: {
+                alerts_count: alerts.length,
+                threshold,
+                total_invoices: alerts.reduce((s, a) => s + a.invoice_count, 0),
+                total_amount: alerts.reduce((s, a) => s + Number(a.total_amount || 0), 0),
+            },
+        }).eq('id', 1);
+    }
+    const snapshot = await snapshotMultiOverdueAlerts({ alerts, emailSent: !!sendResult.sent });
+    return { ...sendResult, snapshot, alerts_count: alerts.length };
+}
+
+// ── Reporte de facturas vencidas ────────────────────────────────────────
+// Devuelve la lista COMPLETA de facturas vencidas (>=1 día) con un cruce
+// contra dunning_reminders para saber si ha salido recordatorio real.
+async function computeOverdueReport({ config, now = Date.now() }) {
+    const [holdedInvoices, holdedContacts] = await Promise.all([
+        holdedFetch('/documents/invoice?paid=0'),
+        holdedFetch('/contacts').catch(() => []),
+    ]);
+    const invoices = Array.isArray(holdedInvoices) ? holdedInvoices : [];
+    const emailByContact = new Map();
+    for (const c of (Array.isArray(holdedContacts) ? holdedContacts : [])) {
+        if (c.id && c.email) emailByContact.set(c.id, c.email);
+    }
+
+    const overdue = [];
+    for (const inv of invoices) {
+        const dueMs = normalizeTimestamp(inv.dueDate);
+        if (!dueMs) continue;
+        const daysOverdue = Math.floor((now - dueMs) / 86_400_000);
+        if (daysOverdue < 1) continue;
+        const total = Number(inv.total || 0);
+        if (total < Number(config.min_amount || 0)) continue;
+        if ((config.excluded_contact_ids || []).includes(inv.contact)) continue;
+        overdue.push({
+            invoice_id: inv.id,
+            invoice_number: inv.docNumber || inv.num || '',
+            contact_id: inv.contact || '',
+            contact_name: inv.contactName || '',
+            contact_email: inv.contactEmail || inv.email || emailByContact.get(inv.contact) || '',
+            amount: total,
+            currency: inv.currency || 'EUR',
+            invoice_date: normalizeTimestamp(inv.date),
+            due_date: dueMs,
+            days_overdue: daysOverdue,
+        });
+    }
+    overdue.sort((a, b) => b.days_overdue - a.days_overdue);
+
+    // Cruce con dunning_reminders para saber si ya salió recordatorio real
+    // (no test) por factura. Guardamos el último enviado por invoice_id.
+    const invoiceIds = overdue.map(o => o.invoice_id);
+    const remindersByInvoice = new Map();
+    if (invoiceIds.length) {
+        const { data: rem } = await supabase
+            .from('dunning_reminders')
+            .select('invoice_id, level, sent_at, status')
+            .in('invoice_id', invoiceIds)
+            .eq('status', 'sent')
+            .eq('is_test', false)
+            .order('sent_at', { ascending: false });
+        for (const r of rem || []) {
+            if (!remindersByInvoice.has(r.invoice_id)) {
+                remindersByInvoice.set(r.invoice_id, r);
+            }
+        }
+    }
+    for (const o of overdue) {
+        const rem = remindersByInvoice.get(o.invoice_id);
+        o.reminder_sent = !!rem;
+        o.reminder_level = rem?.level || null;
+        o.reminder_sent_at = rem?.sent_at || null;
+    }
+
+    const critLevel = Number(config.level_3_days_min || 15);
+    return {
+        invoices: overdue,
+        total_count: overdue.length,
+        total_amount: overdue.reduce((s, o) => s + Number(o.amount || 0), 0),
+        critical_threshold: critLevel,
+    };
+}
+
+function renderOverdueReportEmail({ report, config, appUrl }) {
+    const fmt = (n) => new Intl.NumberFormat('es-ES', {
+        style: 'currency', currency: 'EUR', maximumFractionDigits: 2,
+    }).format(Number(n || 0));
+    const dateFmt = (ms) => {
+        if (!ms) return '—';
+        try { return new Date(ms).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit' }); }
+        catch { return '—'; }
+    };
+    const critLevel = report.critical_threshold;
+    const criticalCount = report.invoices.filter(i => i.days_overdue >= critLevel).length;
+    const warningCount = report.total_count - criticalCount;
+    const remindedCount = report.invoices.filter(i => i.reminder_sent).length;
+
+    // Filas compactas: padding vertical mínimo, tipografías uniformes.
+    // Objetivo: caben 20-25 filas sin scroll en pantalla estándar.
+    const rows = report.invoices.map((inv, idx) => {
+        const isCritical = inv.days_overdue >= critLevel;
+        const zebra = idx % 2 === 0 ? '#ffffff' : '#fafbfc';
+        const badgeBg = isCritical ? '#dc2626' : '#f59e0b';
+        const badgeLabel = isCritical ? 'CRÍTICO' : 'WARNING';
+        const daysColor = isCritical ? '#b91c1c' : '#b45309';
+        const reminderCell = inv.reminder_sent
+            ? `<span style="color:#059669;font-weight:600;">✓ Sí${inv.reminder_level ? ` · N${inv.reminder_level}` : ''}</span>`
+            : `<span style="color:#9ca3af;">No</span>`;
+        return `
+            <tr style="background:${zebra};">
+                <td style="padding:8px 14px;border-bottom:1px solid #f1f3f5;color:#111827;font-size:13px;font-weight:600;">${escapeHtml(inv.contact_name || '(sin nombre)')}</td>
+                <td style="padding:8px 12px;border-bottom:1px solid #f1f3f5;color:#4b5563;font-family:'SF Mono',Menlo,Monaco,Consolas,monospace;font-size:12.5px;white-space:nowrap;">${escapeHtml(inv.invoice_number || '')}</td>
+                <td style="padding:8px 12px;border-bottom:1px solid #f1f3f5;color:#6b7280;font-size:12.5px;white-space:nowrap;">${dateFmt(inv.invoice_date)}</td>
+                <td style="padding:8px 12px;border-bottom:1px solid #f1f3f5;color:#6b7280;font-size:12.5px;white-space:nowrap;">${dateFmt(inv.due_date)}</td>
+                <td style="padding:8px 14px;border-bottom:1px solid #f1f3f5;color:#111827;text-align:right;font-weight:700;font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;">${fmt(inv.amount)}</td>
+                <td style="padding:8px 10px;border-bottom:1px solid #f1f3f5;text-align:center;font-weight:800;font-size:14px;color:${daysColor};font-variant-numeric:tabular-nums;">${inv.days_overdue}</td>
+                <td style="padding:8px 10px;border-bottom:1px solid #f1f3f5;text-align:center;">
+                    <span style="display:inline-block;background:${badgeBg};color:#fff;padding:2px 8px;border-radius:4px;font-weight:700;font-size:10.5px;letter-spacing:0.4px;">${badgeLabel}</span>
+                </td>
+                <td style="padding:8px 12px;border-bottom:1px solid #f1f3f5;text-align:center;font-size:12.5px;">${reminderCell}</td>
+            </tr>`;
+    }).join('');
+
+    const html = `<!doctype html>
+<html><body style="margin:0;padding:0;background:#eef2f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#111827;">
+    <div style="max-width:1100px;margin:0 auto;padding:16px 12px;">
+        <div style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+
+            <!-- Header -->
+            <div style="padding:14px 20px 12px;border-bottom:1px solid #eef1f4;">
+                <div style="font-size:18px;font-weight:700;color:#111827;line-height:1.2;">Relación de facturas vencidas</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:2px;">Corte del ${new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+            </div>
+
+            <!-- KPIs en 4 columnas separadas -->
+            <div style="padding:14px 20px;background:#fafbfc;border-bottom:1px solid #eef1f4;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <tr>
+                        <td style="padding-right:20px;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;font-weight:600;margin-bottom:3px;">Total facturas</div>
+                            <div style="font-size:20px;font-weight:800;color:#111827;line-height:1;">${report.total_count}</div>
+                        </td>
+                        <td style="padding:0 20px;border-left:1px solid #e5e7eb;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;font-weight:600;margin-bottom:3px;">Total deuda</div>
+                            <div style="font-size:20px;font-weight:800;color:#111827;line-height:1;font-variant-numeric:tabular-nums;">${fmt(report.total_amount)}</div>
+                        </td>
+                        <td style="padding:0 20px;border-left:1px solid #e5e7eb;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;font-weight:600;margin-bottom:3px;">Estado</div>
+                            <div style="font-size:14px;line-height:1.2;color:#111827;">
+                                <span style="color:#dc2626;font-weight:700;">${criticalCount}</span> crítico${criticalCount === 1 ? '' : 's'} ·
+                                <span style="color:#b45309;font-weight:700;">${warningCount}</span> warning
+                            </div>
+                        </td>
+                        <td style="padding-left:20px;border-left:1px solid #e5e7eb;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;font-weight:600;margin-bottom:3px;">Con recordatorio</div>
+                            <div style="font-size:14px;line-height:1.2;color:#111827;">
+                                <span style="color:#059669;font-weight:700;">${remindedCount}</span> / ${report.total_count} enviados
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- Tabla densa -->
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="background:#1f2937;color:#fff;">
+                        <th style="padding:9px 14px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">Cliente</th>
+                        <th style="padding:9px 12px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;white-space:nowrap;">Nº Factura</th>
+                        <th style="padding:9px 12px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">Emisión</th>
+                        <th style="padding:9px 12px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">Venc.</th>
+                        <th style="padding:9px 14px;text-align:right;font-size:10.5px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">Monto</th>
+                        <th style="padding:9px 10px;text-align:center;font-size:10.5px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">Días</th>
+                        <th style="padding:9px 10px;text-align:center;font-size:10.5px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">Estado</th>
+                        <th style="padding:9px 12px;text-align:center;font-size:10.5px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">Recordat.</th>
+                    </tr>
+                </thead>
+                <tbody>${rows || '<tr><td colspan="8" style="padding:30px;text-align:center;color:#6b7280;font-size:13px;">Sin facturas vencidas ahora mismo.</td></tr>'}</tbody>
+            </table>
+
+            ${appUrl ? `
+            <!-- CTA -->
+            <div style="padding:16px 20px;background:#fafbfc;border-top:1px solid #eef1f4;text-align:center;">
+                <a href="${appUrl}" style="display:inline-block;background:#111827;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;letter-spacing:0.2px;">
+                    Abrir módulo Impagos →
+                </a>
+            </div>` : ''}
+
+            <!-- Footer -->
+            <div style="padding:8px 20px;background:#f3f4f6;border-top:1px solid #eef1f4;font-size:11px;color:#6b7280;text-align:center;">
+                Reporte automático · Immoral Finance · Umbral crítico ≥ ${critLevel} días
+            </div>
+        </div>
+    </div>
+</body></html>`;
+
+    const subject = `Relación de facturas vencidas · ${report.total_count} pendientes · ${fmt(report.total_amount)}`;
+    return { html, subject };
+}
+
+async function sendOverdueReportEmail({ report, config, baseUrl }) {
+    if (!process.env.SMTP_USER) return { skipped: true, reason: 'smtp-not-configured' };
+    const toEmail = (config.overdue_report_to || '').trim();
+    const ccList = sanitizeEmailList(config.overdue_report_cc_emails, toEmail);
+    if (!toEmail && ccList.length === 0) return { skipped: true, reason: 'no-recipients' };
+
+    const { html, subject } = renderOverdueReportEmail({
+        report, config,
+        appUrl: baseUrl ? `${baseUrl.replace(/\/+$/, '')}/payments/dunning` : null,
+    });
+    const info = await getTransporter().sendMail({
+        from: `"Immoral Finance" <${process.env.SMTP_USER}>`,
+        to: toEmail || ccList[0],
+        cc: (toEmail && ccList.length ? ccList : (toEmail ? undefined : ccList.slice(1))) || undefined,
+        subject,
+        html,
+    });
+    return {
+        sent: true,
+        message_id: info.messageId || null,
+        to: toEmail || ccList[0],
+        cc: (toEmail ? ccList : ccList.slice(1)),
+        total_count: report.total_count,
+        total_amount: report.total_amount,
+    };
+}
+
+async function maybeDispatchOverdueReport({ config, baseUrl, force = false }) {
+    if (!config?.overdue_report_enabled) return { skipped: true, reason: 'disabled' };
+    const { weekday, hour } = currentTimeInTz(config);
+    const sendDays = Array.isArray(config.overdue_report_send_days) ? config.overdue_report_send_days : [];
+    const sendHour = Number(config.overdue_report_send_hour ?? 10);
+    const lastSent = config.overdue_report_last_sent_at ? new Date(config.overdue_report_last_sent_at).getTime() : 0;
+    const sentRecently = Date.now() - lastSent < 20 * 60 * 60 * 1000;
+
+    if (!force) {
+        if (!sendDays.includes(weekday)) return { skipped: true, reason: 'not-send-day', weekday };
+        if (hour !== sendHour) return { skipped: true, reason: 'not-send-hour', hour, expected: sendHour };
+        if (sentRecently) return { skipped: true, reason: 'sent-recently' };
+    }
+
+    const report = await computeOverdueReport({ config });
+    // Aunque no haya facturas se puede mandar (para dejar constancia "0 vencidas"),
+    // pero por defecto omitimos: es más útil silenciar el ruido.
+    if (report.total_count === 0 && !force) return { skipped: true, reason: 'no-overdue' };
+
+    const sendResult = await sendOverdueReportEmail({ report, config, baseUrl });
+    if (sendResult.sent) {
+        await supabase.from('dunning_config').update({
+            overdue_report_last_sent_at: new Date().toISOString(),
+            overdue_report_last_summary: {
+                total_count: report.total_count,
+                total_amount: report.total_amount,
+                with_reminder: report.invoices.filter(i => i.reminder_sent).length,
+            },
+        }).eq('id', 1);
+    }
+    return { ...sendResult, total_count: report.total_count };
 }
 
 async function runSyncPaid() {
@@ -668,7 +1287,13 @@ router.put('/config', async (req, res) => {
             'level_1_days_min', 'level_1_days_max',
             'level_2_days_min', 'level_2_days_max', 'level_3_days_min',
             'level_3_repeat_every_days',
-            'min_amount', 'excluded_contact_ids', 'bcc_email',
+            'min_amount', 'excluded_contact_ids', 'bcc_email', 'cc_emails',
+            // Fase 4 — alerta de clientes con múltiples vencidas
+            'multi_alert_enabled', 'multi_alert_threshold', 'multi_alert_to', 'multi_alert_cc_emails',
+            'multi_alert_send_days', 'multi_alert_send_hour',
+            // Fase 4b — reporte periódico de vencidas
+            'overdue_report_enabled', 'overdue_report_to', 'overdue_report_cc_emails',
+            'overdue_report_send_days', 'overdue_report_send_hour',
             // Fase 3: marca + bancos + labels
             'brand_logo_text', 'brand_primary_color', 'brand_secondary_color',
             'signature_html', 'cta_stripe_label', 'cta_bank_prefix', 'status_label',
@@ -680,6 +1305,96 @@ router.put('/config', async (req, res) => {
         ];
         const patch = {};
         for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
+
+        // Los CC son visibles al cliente — no queremos guardar basura ahí.
+        // Normalizamos siempre: recortamos, filtramos inválidos y deduplicamos.
+        if ('cc_emails' in patch) {
+            const cleaned = sanitizeEmailList(patch.cc_emails);
+            if (Array.isArray(patch.cc_emails) && patch.cc_emails.some(v => v && !cleaned.includes(String(v).trim()))) {
+                // Al menos una dirección de entrada era inválida — respondemos error
+                // para que el usuario corrija en la UI en lugar de perder el dato.
+                return res.status(400).json({
+                    error: 'invalid-cc-emails',
+                    hint: 'Alguna dirección de CC no es un email válido.',
+                });
+            }
+            patch.cc_emails = cleaned;
+        }
+
+        // Alerta multi-vencida: mismos criterios de saneo.
+        if ('multi_alert_cc_emails' in patch) {
+            const cleaned = sanitizeEmailList(patch.multi_alert_cc_emails);
+            if (Array.isArray(patch.multi_alert_cc_emails) && patch.multi_alert_cc_emails.some(v => v && !cleaned.includes(String(v).trim()))) {
+                return res.status(400).json({
+                    error: 'invalid-multi-alert-cc',
+                    hint: 'Alguna dirección de CC de la alerta no es un email válido.',
+                });
+            }
+            patch.multi_alert_cc_emails = cleaned;
+        }
+        if ('multi_alert_to' in patch) {
+            const to = String(patch.multi_alert_to || '').trim();
+            if (to && !EMAIL_RE.test(to)) {
+                return res.status(400).json({
+                    error: 'invalid-multi-alert-to',
+                    hint: 'El destinatario principal de la alerta no es un email válido.',
+                });
+            }
+            patch.multi_alert_to = to || null;
+        }
+        if ('multi_alert_threshold' in patch) {
+            const t = Number(patch.multi_alert_threshold);
+            if (!Number.isFinite(t) || t < 2) {
+                return res.status(400).json({
+                    error: 'invalid-multi-alert-threshold',
+                    hint: 'El umbral tiene que ser un entero mayor o igual a 2.',
+                });
+            }
+            patch.multi_alert_threshold = Math.floor(t);
+        }
+        if ('multi_alert_send_hour' in patch) {
+            const h = Number(patch.multi_alert_send_hour);
+            if (!Number.isInteger(h) || h < 0 || h > 23) {
+                return res.status(400).json({
+                    error: 'invalid-multi-alert-send-hour',
+                    hint: 'La hora tiene que ser un entero entre 0 y 23.',
+                });
+            }
+            patch.multi_alert_send_hour = h;
+        }
+
+        // Reporte de vencidas: mismas validaciones que la alerta.
+        if ('overdue_report_cc_emails' in patch) {
+            const cleaned = sanitizeEmailList(patch.overdue_report_cc_emails);
+            if (Array.isArray(patch.overdue_report_cc_emails) && patch.overdue_report_cc_emails.some(v => v && !cleaned.includes(String(v).trim()))) {
+                return res.status(400).json({
+                    error: 'invalid-overdue-report-cc',
+                    hint: 'Alguna dirección de CC del reporte no es un email válido.',
+                });
+            }
+            patch.overdue_report_cc_emails = cleaned;
+        }
+        if ('overdue_report_to' in patch) {
+            const to = String(patch.overdue_report_to || '').trim();
+            if (to && !EMAIL_RE.test(to)) {
+                return res.status(400).json({
+                    error: 'invalid-overdue-report-to',
+                    hint: 'El destinatario principal del reporte no es un email válido.',
+                });
+            }
+            patch.overdue_report_to = to || null;
+        }
+        if ('overdue_report_send_hour' in patch) {
+            const h = Number(patch.overdue_report_send_hour);
+            if (!Number.isInteger(h) || h < 0 || h > 23) {
+                return res.status(400).json({
+                    error: 'invalid-overdue-report-send-hour',
+                    hint: 'La hora del reporte tiene que ser un entero entre 0 y 23.',
+                });
+            }
+            patch.overdue_report_send_hour = h;
+        }
+
         patch.updated_at = new Date().toISOString();
         patch.updated_by = req.userId;
 
@@ -808,9 +1523,12 @@ router.get('/overdue-invoices', async (_req, res) => {
         }
 
         // Cargar casos existentes en un solo query para cruzar.
+        // Ignoramos los casos marcados is_test=true: no queremos que envíos de
+        // prueba ensucien el "último recordatorio" de una factura viva. Los
+        // KPIs del dashboard filtran igual — así ambos sitios son coherentes.
         const ids = invoices.map(i => i.id).filter(Boolean);
         const { data: cases } = ids.length
-            ? await supabase.from('dunning_cases').select('*').in('invoice_id', ids)
+            ? await supabase.from('dunning_cases').select('*').in('invoice_id', ids).eq('is_test', false)
             : { data: [] };
         const caseByInvoice = new Map((cases || []).map(c => [c.invoice_id, c]));
 
@@ -819,7 +1537,11 @@ router.get('/overdue-invoices', async (_req, res) => {
             const dueMs = normalizeTimestamp(inv.dueDate);
             if (!dueMs) continue;
             const daysOverdue = daysBetween(dueMs, now);
-            if (daysOverdue < config.level_1_days_min) continue;
+            // Mostramos TODAS las vencidas (>=1 día). Las que aún no llegan al
+            // umbral del nivel 1 aparecen con suggested_level=0 ("Sin nivel"):
+            // se ven en la lista pero el motor no les envía recordatorio hasta
+            // que crucen level_1_days_min.
+            if (daysOverdue < 1) continue;
 
             // Filtros de configuración
             const total = Number(inv.total || 0);
@@ -970,7 +1692,7 @@ router.get('/reminders', async (req, res) => {
         const includeTest = req.query.include_test === '1' || req.query.include_test === 'true';
         let q = supabase
             .from('dunning_reminders')
-            .select('id, case_id, invoice_id, level, days_overdue, sent_at, sent_to, subject, smtp_message_id, status, error_message, is_test, first_opened_at, last_opened_at, open_count, stripe_payment_url')
+            .select('id, case_id, invoice_id, level, days_overdue, sent_at, sent_to, cc_emails, subject, smtp_message_id, status, error_message, is_test, first_opened_at, last_opened_at, open_count, stripe_payment_url')
             .order('sent_at', { ascending: false })
             .limit(limit);
         if (req.query.status) q = q.eq('status', String(req.query.status));
@@ -1018,8 +1740,13 @@ router.post('/preview-run', async (_req, res) => {
 
         // Resolvemos el destino final por item (respetando test_mode > override > cliente).
         const { data: overridesRows } = await supabase
-            .from('dunning_email_overrides').select('contact_id, override_email');
+            .from('dunning_email_overrides').select('contact_id, override_email, override_cc_emails');
         const overrideByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_email]));
+        const overrideCcByContact = new Map((overridesRows || []).map(o => [o.contact_id, o.override_cc_emails || []]));
+
+        // Los CC globales del config solo aplican fuera de modo prueba (igual
+        // que en executeSend: en test no queremos disparar copias a terceros).
+        const globalCcEmails = config.test_mode ? [] : sanitizeEmailList(config.cc_emails);
 
         const enrichedPlan = plan.map(item => {
             let dest_email = item.invoice.contact_email;
@@ -1031,7 +1758,14 @@ router.post('/preview-run', async (_req, res) => {
                 dest_email = overrideByContact.get(item.invoice.contact_id);
                 redirect_reason = 'override';
             }
-            return { ...item, dest_email, redirect_reason };
+            const overrideCc = config.test_mode
+                ? []
+                : sanitizeEmailList(overrideCcByContact.get(item.invoice.contact_id));
+            const dest_cc = sanitizeEmailList(
+                [...globalCcEmails, ...overrideCc],
+                dest_email,
+            );
+            return { ...item, dest_email, dest_cc, redirect_reason };
         });
 
         // Recalcular summary considerando el destino final (en test_mode no se blockea por no-email).
@@ -1136,16 +1870,25 @@ router.get('/overrides', async (_req, res) => {
 
 router.put('/overrides/:contact_id', async (req, res) => {
     try {
-        const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        const { override_email, contact_name, note } = req.body || {};
-        if (!override_email || !emailRe.test(override_email)) {
+        const { override_email, contact_name, note, override_cc_emails } = req.body || {};
+        if (!override_email || !EMAIL_RE.test(override_email)) {
             return res.status(400).json({ error: 'invalid-override_email' });
+        }
+        // Igual que en /config: si alguno de los CC no es un email válido,
+        // devolvemos error en lugar de tragárnoslo silenciosamente.
+        const cleanedCc = sanitizeEmailList(override_cc_emails);
+        if (Array.isArray(override_cc_emails) && override_cc_emails.some(v => v && !cleanedCc.includes(String(v).trim()))) {
+            return res.status(400).json({
+                error: 'invalid-override_cc_emails',
+                hint: 'Alguna dirección de CC no es un email válido.',
+            });
         }
         const { data, error } = await supabase
             .from('dunning_email_overrides')
             .upsert({
                 contact_id: req.params.contact_id,
                 override_email,
+                override_cc_emails: cleanedCc,
                 contact_name: contact_name || null,
                 note: note || null,
                 updated_at: new Date().toISOString(),
@@ -1240,6 +1983,184 @@ router.post('/reset-test-data', async (_req, res) => {
         });
     } catch (err) {
         console.error('[dunning] reset-test-data error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /dunning/multi-overdue-alerts ─────────────────────────────────────────
+// Devuelve la lista de clientes con >= threshold facturas vencidas ahora.
+// La consume el banner global de la app y también sirve para probar la
+// alerta desde la config.
+router.get('/multi-overdue-alerts', async (_req, res) => {
+    try {
+        const config = await getConfig();
+        const result = await computeMultiOverdueAlerts({ config });
+        res.json({
+            ...result,
+            enabled: !!config.multi_alert_enabled,
+            last_sent_at: config.multi_alert_last_sent_at || null,
+        });
+    } catch (err) {
+        console.error('[dunning] multi-overdue-alerts error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /dunning/multi-overdue-alerts/send ───────────────────────────────────
+// Fuerza el envío del email de alerta ignorando el anti-spam de 24h. Útil
+// para probar tras configurar los destinatarios.
+router.post('/multi-overdue-alerts/send', async (req, res) => {
+    try {
+        const config = await getConfig();
+        const { alerts } = await computeMultiOverdueAlerts({ config });
+        if (!alerts.length) {
+            return res.json({ sent: false, reason: 'no-alerts' });
+        }
+        const result = await sendMultiOverdueEmail({
+            alerts, config, baseUrl: computeBaseUrl(req),
+        });
+        if (result.sent) {
+            await supabase.from('dunning_config').update({
+                multi_alert_last_sent_at: new Date().toISOString(),
+                multi_alert_last_summary: {
+                    alerts_count: alerts.length,
+                    threshold: Math.max(2, Number(config.multi_alert_threshold || 2)),
+                    total_invoices: alerts.reduce((s, a) => s + a.invoice_count, 0),
+                    total_amount: alerts.reduce((s, a) => s + Number(a.total_amount || 0), 0),
+                    manual: true,
+                },
+            }).eq('id', 1);
+        }
+        // Snapshot manual: registramos el disparo también en el historial.
+        await snapshotMultiOverdueAlerts({ alerts, emailSent: !!result.sent });
+        res.json(result);
+    } catch (err) {
+        console.error('[dunning] multi-overdue-alerts/send error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /dunning/multi-overdue-history ────────────────────────────────────────
+// Historial de alertas por cliente. Dos modos:
+//   • Sin contact_id: resumen agregado por cliente y mes de los últimos 12
+//     meses — para el dashboard general de reincidentes.
+//   • Con contact_id: detalle día a día de ese cliente.
+router.get('/multi-overdue-history', async (req, res) => {
+    try {
+        const contactId = req.query.contact_id ? String(req.query.contact_id) : null;
+        const months = Math.max(1, Math.min(24, Number(req.query.months) || 12));
+        const sinceIso = new Date(Date.now() - months * 31 * 86_400_000).toISOString();
+
+        let q = supabase
+            .from('dunning_multi_alert_history')
+            .select('*')
+            .gte('ran_at', sinceIso)
+            .order('ran_at', { ascending: false });
+        if (contactId) q = q.eq('contact_id', contactId);
+        const { data, error } = await q;
+        if (error) throw new Error(error.message);
+        const rows = data || [];
+
+        if (contactId) {
+            return res.json({ contact_id: contactId, snapshots: rows });
+        }
+
+        // Agregación: por cliente, contar cuántos días distintos apareció
+        // en cada mes YYYY-MM. Devolvemos también el máximo de facturas y
+        // deuda media para poder ordenar por gravedad.
+        const byContactMonth = new Map();
+        for (const r of rows) {
+            const month = String(r.ran_date || '').slice(0, 7);
+            if (!month) continue;
+            const key = `${r.contact_id || r.contact_name}||${month}`;
+            let bucket = byContactMonth.get(key);
+            if (!bucket) {
+                bucket = {
+                    contact_id: r.contact_id,
+                    contact_name: r.contact_name,
+                    month,
+                    days_flagged: 0,
+                    max_invoice_count: 0,
+                    max_days_overdue: 0,
+                    peak_amount: 0,
+                };
+                byContactMonth.set(key, bucket);
+            }
+            bucket.days_flagged += 1;
+            if (r.invoice_count > bucket.max_invoice_count) bucket.max_invoice_count = r.invoice_count;
+            if (r.max_days_overdue > bucket.max_days_overdue) bucket.max_days_overdue = r.max_days_overdue;
+            if (Number(r.total_amount || 0) > bucket.peak_amount) bucket.peak_amount = Number(r.total_amount || 0);
+        }
+
+        const byMonth = Array.from(byContactMonth.values());
+
+        // Reagrupamos por cliente para tener una fila por cliente con la
+        // línea temporal de meses en los que ha tenido múltiples vencidas.
+        const byContact = new Map();
+        for (const b of byMonth) {
+            const key = b.contact_id || b.contact_name || 'unknown';
+            let c = byContact.get(key);
+            if (!c) {
+                c = {
+                    contact_id: b.contact_id,
+                    contact_name: b.contact_name,
+                    months_flagged: 0,
+                    total_days_flagged: 0,
+                    peak_invoice_count: 0,
+                    peak_amount: 0,
+                    months: [],
+                };
+                byContact.set(key, c);
+            }
+            c.months_flagged += 1;
+            c.total_days_flagged += b.days_flagged;
+            if (b.max_invoice_count > c.peak_invoice_count) c.peak_invoice_count = b.max_invoice_count;
+            if (b.peak_amount > c.peak_amount) c.peak_amount = b.peak_amount;
+            c.months.push({
+                month: b.month,
+                days_flagged: b.days_flagged,
+                max_invoice_count: b.max_invoice_count,
+                max_days_overdue: b.max_days_overdue,
+                peak_amount: b.peak_amount,
+            });
+        }
+
+        const clients = Array.from(byContact.values())
+            .map(c => ({ ...c, months: c.months.sort((a, b) => b.month.localeCompare(a.month)) }))
+            .sort((a, b) => b.months_flagged - a.months_flagged || b.peak_invoice_count - a.peak_invoice_count);
+
+        res.json({ months_window: months, clients });
+    } catch (err) {
+        console.error('[dunning] multi-overdue-history error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /dunning/overdue-report/preview ───────────────────────────────────────
+// Devuelve el reporte que se enviaría por email ahora mismo (sin enviarlo).
+router.get('/overdue-report/preview', async (_req, res) => {
+    try {
+        const config = await getConfig();
+        const report = await computeOverdueReport({ config });
+        res.json({ ...report, enabled: !!config.overdue_report_enabled });
+    } catch (err) {
+        console.error('[dunning] overdue-report/preview error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /dunning/overdue-report/send ─────────────────────────────────────────
+// Fuerza el envío del reporte ignorando el schedule y el anti-spam. Para
+// probar destinatarios y formato tras configurar.
+router.post('/overdue-report/send', async (req, res) => {
+    try {
+        const config = await getConfig();
+        const result = await maybeDispatchOverdueReport({
+            config, baseUrl: computeBaseUrl(req), force: true,
+        });
+        res.json(result);
+    } catch (err) {
+        console.error('[dunning] overdue-report/send error:', err);
         res.status(500).json({ error: err.message });
     }
 });

@@ -38,6 +38,24 @@ export interface DunningConfig {
     min_amount: number;
     excluded_contact_ids: string[];
     bcc_email: string | null;
+    cc_emails: string[];
+    // Fase 4: alerta cuando un cliente acumula >= threshold facturas vencidas
+    multi_alert_enabled: boolean;
+    multi_alert_threshold: number;
+    multi_alert_to: string | null;
+    multi_alert_cc_emails: string[];
+    multi_alert_send_days: number[];
+    multi_alert_send_hour: number;
+    multi_alert_last_sent_at: string | null;
+    multi_alert_last_summary: Record<string, unknown>;
+    // Fase 4b: reporte periódico de vencidas
+    overdue_report_enabled: boolean;
+    overdue_report_to: string | null;
+    overdue_report_cc_emails: string[];
+    overdue_report_send_days: number[];
+    overdue_report_send_hour: number;
+    overdue_report_last_sent_at: string | null;
+    overdue_report_last_summary: Record<string, unknown>;
     updated_at: string;
     // Fase 3: marca y bancos
     brand_logo_text: string;
@@ -64,6 +82,7 @@ export interface DunningEmailOverride {
     contact_id: string;
     contact_name: string | null;
     override_email: string;
+    override_cc_emails: string[];
     note: string | null;
     created_at: string;
     updated_at: string;
@@ -134,6 +153,7 @@ export interface DunningReminder {
     days_overdue: number;
     sent_at: string;
     sent_to: string;
+    cc_emails?: string[];
     subject: string | null;
     body_html_snapshot: string | null;
     smtp_message_id: string | null;
@@ -200,6 +220,7 @@ export interface PlanItem {
     has_email: boolean;
     // Enriquecido por preview-run: destino final y motivo de redirección si aplica.
     dest_email?: string;
+    dest_cc?: string[];
     redirect_reason?: 'test_mode' | 'override' | null;
 }
 
@@ -218,6 +239,7 @@ export interface RunResult {
     status: 'sent' | 'skipped' | 'failed' | 'would-send';
     level?: number;
     to?: string;
+    cc?: string[];
     original_to?: string;
     redirect_reason?: 'test_mode' | 'override' | null;
     reason?: string;
@@ -306,7 +328,7 @@ export const dunningApi = {
     listOverrides: () =>
         fetchApi<{ overrides: DunningEmailOverride[] }>('/dunning/overrides'),
 
-    upsertOverride: (contact_id: string, payload: { override_email: string; contact_name?: string; note?: string }) =>
+    upsertOverride: (contact_id: string, payload: { override_email: string; contact_name?: string; note?: string; override_cc_emails?: string[] }) =>
         fetchApi<{ override: DunningEmailOverride }>(`/dunning/overrides/${encodeURIComponent(contact_id)}`, {
             method: 'PUT',
             body: JSON.stringify(payload),
@@ -340,4 +362,117 @@ export const dunningApi = {
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         return fetchApi<{ reminders: DunningReminderRow[] }>(`/dunning/reminders${suffix}`);
     },
+
+    // ── Alerta multi-vencida (v9) ─────────────────────────────────────
+    listMultiOverdueAlerts: () =>
+        fetchApi<{
+            alerts: MultiOverdueAlert[];
+            threshold: number;
+            enabled: boolean;
+            last_sent_at: string | null;
+        }>('/dunning/multi-overdue-alerts'),
+
+    sendMultiOverdueAlert: () =>
+        fetchApi<{ sent?: boolean; reason?: string; alerts_count?: number; to?: string; cc?: string[] }>(
+            '/dunning/multi-overdue-alerts/send',
+            { method: 'POST' }
+        ),
+
+    getMultiOverdueHistory: (opts: { months?: number } = {}) => {
+        const qs = new URLSearchParams();
+        if (opts.months) qs.set('months', String(opts.months));
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return fetchApi<{ months_window: number; clients: MultiOverdueHistoryClient[] }>(
+            `/dunning/multi-overdue-history${suffix}`
+        );
+    },
+
+    getMultiOverdueContactHistory: (contactId: string, opts: { months?: number } = {}) => {
+        const qs = new URLSearchParams({ contact_id: contactId });
+        if (opts.months) qs.set('months', String(opts.months));
+        return fetchApi<{ contact_id: string; snapshots: MultiOverdueSnapshot[] }>(
+            `/dunning/multi-overdue-history?${qs.toString()}`
+        );
+    },
+
+    // ── Reporte periódico de vencidas ─────────────────────────────────
+    previewOverdueReport: () =>
+        fetchApi<OverdueReportPreview>('/dunning/overdue-report/preview'),
+
+    sendOverdueReport: () =>
+        fetchApi<{ sent?: boolean; reason?: string; total_count?: number; to?: string; cc?: string[] }>(
+            '/dunning/overdue-report/send',
+            { method: 'POST' }
+        ),
 };
+
+export interface OverdueReportRow {
+    invoice_id: string;
+    invoice_number: string;
+    contact_id: string;
+    contact_name: string;
+    contact_email: string;
+    amount: number;
+    currency: string;
+    invoice_date: number | null;
+    due_date: number;
+    days_overdue: number;
+    reminder_sent: boolean;
+    reminder_level: number | null;
+    reminder_sent_at: string | null;
+}
+export interface OverdueReportPreview {
+    invoices: OverdueReportRow[];
+    total_count: number;
+    total_amount: number;
+    critical_threshold: number;
+    enabled: boolean;
+}
+
+export interface MultiOverdueSnapshot {
+    id: string;
+    ran_at: string;
+    ran_date: string;
+    contact_id: string | null;
+    contact_name: string | null;
+    contact_email: string | null;
+    invoice_count: number;
+    max_days_overdue: number;
+    total_amount: number;
+    currency: string;
+    invoices: Array<{ invoice_id: string; invoice_number: string; amount: number; currency: string; days_overdue: number; due_date: number }>;
+    email_sent: boolean;
+}
+
+export interface MultiOverdueHistoryClient {
+    contact_id: string | null;
+    contact_name: string | null;
+    months_flagged: number;
+    total_days_flagged: number;
+    peak_invoice_count: number;
+    peak_amount: number;
+    months: Array<{
+        month: string;
+        days_flagged: number;
+        max_invoice_count: number;
+        max_days_overdue: number;
+        peak_amount: number;
+    }>;
+}
+
+export interface MultiOverdueAlert {
+    contact_id: string;
+    contact_name: string;
+    contact_email: string;
+    invoice_count: number;
+    max_days_overdue: number;
+    total_amount: number;
+    invoices: {
+        invoice_id: string;
+        invoice_number: string;
+        amount: number;
+        currency: string;
+        days_overdue: number;
+        due_date: number;
+    }[];
+}

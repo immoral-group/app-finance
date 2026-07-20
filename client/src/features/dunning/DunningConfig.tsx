@@ -18,7 +18,7 @@ import { DunningIntroPanel, TabGuide } from './DunningGuide';
 // Configuración de Impagos — Fase 3
 // ══════════════════════════════════════════════════════════════════════════════
 
-type Tab = 'rules' | 'schedule' | 'brand' | 'templates' | 'run' | 'history';
+type Tab = 'rules' | 'schedule' | 'brand' | 'templates' | 'run' | 'history' | 'reincidents';
 
 const TABS: { key: Tab; label: string; icon: any }[] = [
     { key: 'rules', label: 'Reglas', icon: Settings },
@@ -27,9 +27,94 @@ const TABS: { key: Tab; label: string; icon: any }[] = [
     { key: 'templates', label: 'Plantillas', icon: Mail },
     { key: 'run', label: 'Ejecutar', icon: Zap },
     { key: 'history', label: 'Historial', icon: Clock },
+    { key: 'reincidents', label: 'Reincidentes', icon: AlertTriangle },
 ];
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── Editor de listas de emails ────────────────────────────────────────────────
+// Se usa tanto para los CC globales del config como para los CC por override.
+// UX: escribes un email + Enter (o coma / espacio) para añadirlo como chip,
+// click en la X para quitarlo. Rechaza inválidos y duplicados sin romper el
+// input — solo hace shake para señalar que no se añadió.
+function EmailListEditor({
+    value, onChange, placeholder = 'nombre@dominio.com', disabled = false,
+}: {
+    value: string[];
+    onChange: (next: string[]) => void;
+    placeholder?: string;
+    disabled?: boolean;
+}) {
+    const [draft, setDraft] = useState('');
+    const [error, setError] = useState<string | null>(null);
+
+    const emails = Array.isArray(value) ? value : [];
+
+    const commit = (raw: string) => {
+        const email = raw.trim().replace(/[,;]+$/, '');
+        if (!email) return true;
+        if (!EMAIL_RE.test(email)) {
+            setError('No es un email válido');
+            return false;
+        }
+        if (emails.some(e => e.toLowerCase() === email.toLowerCase())) {
+            setError('Ya está en la lista');
+            return false;
+        }
+        onChange([...emails, email]);
+        setError(null);
+        return true;
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' || e.key === ',' || e.key === ';') {
+            e.preventDefault();
+            if (commit(draft)) setDraft('');
+        } else if (e.key === 'Backspace' && draft === '' && emails.length > 0) {
+            // Retroceso sobre input vacío quita el último chip — patrón habitual.
+            onChange(emails.slice(0, -1));
+        }
+    };
+
+    const handleBlur = () => {
+        if (draft.trim() && commit(draft)) setDraft('');
+    };
+
+    const remove = (idx: number) => onChange(emails.filter((_, i) => i !== idx));
+
+    return (
+        <div>
+            <div className={`flex flex-wrap gap-1.5 items-center min-h-[40px] w-full px-2 py-1.5 rounded border bg-background ${error ? 'border-red-400' : ''}`}>
+                {emails.map((email, idx) => (
+                    <span key={`${email}-${idx}`}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                        {email}
+                        {!disabled && (
+                            <button type="button" onClick={() => remove(idx)}
+                                className="hover:bg-primary/20 rounded-full p-0.5"
+                                aria-label={`Quitar ${email}`}>
+                                <X size={11} />
+                            </button>
+                        )}
+                    </span>
+                ))}
+                <input
+                    type="email"
+                    value={draft}
+                    onChange={e => { setDraft(e.target.value); if (error) setError(null); }}
+                    onKeyDown={handleKeyDown}
+                    onBlur={handleBlur}
+                    placeholder={emails.length === 0 ? placeholder : ''}
+                    disabled={disabled}
+                    className="flex-1 min-w-[160px] text-sm bg-transparent outline-none px-1 py-0.5"
+                />
+            </div>
+            {error && <p className="text-[11px] text-red-600 mt-1">{error}</p>}
+        </div>
+    );
+}
 
 // ── Tab: Reglas ────────────────────────────────────────────────────────────────
 
@@ -54,7 +139,8 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 <>Recomendado: <strong>Nivel 1</strong> del día 5 al 9, <strong>Nivel 2</strong> del 10 al 14, <strong>Nivel 3</strong> a partir del 15.</>,
                 <>La <strong>repetición del nivel 3</strong> hace que se reenvíe el aviso cada X días mientras la factura siga sin pagar.</>,
                 <>El <strong>importe mínimo</strong> filtra facturas pequeñas para no molestar por céntimos.</>,
-                <>El <strong>BCC</strong> pone en copia oculta a administración para que veas todos los envíos.</>,
+                <>El <strong>CC</strong> (copia visible) va a los emails que decidas poner en copia junto al cliente — típicamente comercial o gestor del cliente. Se pueden añadir aún más por cliente en Ejecutar → Overrides.</>,
+                <>El <strong>BCC</strong> (copia oculta) pone a administración en copia oculta para que veas todos los envíos sin que el cliente lo sepa.</>,
             ]}
         />
         <Card>
@@ -109,11 +195,24 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 </div>
 
                 <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Copia visible (CC) — se aplica a todos los recordatorios</label>
+                    <EmailListEditor
+                        value={form.cc_emails || []}
+                        onChange={next => setForm({ ...form, cc_emails: next })}
+                        placeholder="Añade emails y pulsa Enter…"
+                    />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                        Estas direcciones irán en CC de cada recordatorio (las verá el cliente). Ideal para poner al gestor
+                        del cliente, al comercial que lleva la cuenta o a administración. En modo prueba no se aplican.
+                    </p>
+                </div>
+
+                <div>
                     <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Copia oculta (BCC) opcional</label>
                     <Input type="email" placeholder="administracion@immoral.es"
                         value={form.bcc_email || ''}
                         onChange={e => setForm({ ...form, bcc_email: e.target.value })} />
-                    <p className="text-[11px] text-muted-foreground mt-1">Cada recordatorio incluirá esta dirección en BCC para tener visibilidad interna.</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Cada recordatorio incluirá esta dirección en BCC (no la ve el cliente) para tener visibilidad interna.</p>
                 </div>
 
                 <div className="flex justify-end pt-2 border-t">
@@ -124,7 +223,509 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 </div>
             </CardContent>
         </Card>
+        <MultiAlertCard config={config} onSave={onSave} saving={saving} />
+        <OverdueReportCard config={config} onSave={onSave} saving={saving} />
         </div>
+    );
+}
+
+// ── Sección: reporte periódico de facturas vencidas ──────────────────────────
+// Manda un email con la lista completa de vencidas + columna "recordatorio
+// enviado". Se dispara DESPUÉS de los recordatorios en el mismo cron horario.
+function OverdueReportCard({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+    const queryClient = useQueryClient();
+    const [enabled, setEnabled] = useState(config.overdue_report_enabled);
+    const [to, setTo] = useState(config.overdue_report_to || '');
+    const [cc, setCc] = useState<string[]>(config.overdue_report_cc_emails || []);
+    const [sendDays, setSendDays] = useState<number[]>(config.overdue_report_send_days || []);
+    const [sendHour, setSendHour] = useState<number>(config.overdue_report_send_hour ?? 10);
+
+    useEffect(() => {
+        setEnabled(config.overdue_report_enabled);
+        setTo(config.overdue_report_to || '');
+        setCc(config.overdue_report_cc_emails || []);
+        setSendDays(config.overdue_report_send_days || []);
+        setSendHour(config.overdue_report_send_hour ?? 10);
+    }, [config.id, config.updated_at]);
+
+    const toggleDay = (day: number) => {
+        const s = new Set(sendDays);
+        if (s.has(day)) s.delete(day); else s.add(day);
+        setSendDays(Array.from(s).sort());
+    };
+
+    const patch: Partial<DunningConfigType> = {
+        overdue_report_enabled: enabled,
+        overdue_report_to: to.trim() || null,
+        overdue_report_cc_emails: cc,
+        overdue_report_send_days: sendDays,
+        overdue_report_send_hour: sendHour,
+    };
+    const hasUnsavedChanges =
+        (config.overdue_report_enabled !== enabled) ||
+        ((config.overdue_report_to || '') !== to.trim()) ||
+        (JSON.stringify(config.overdue_report_cc_emails || []) !== JSON.stringify(cc)) ||
+        (JSON.stringify(config.overdue_report_send_days || []) !== JSON.stringify(sendDays)) ||
+        ((config.overdue_report_send_hour ?? 10) !== sendHour);
+
+    // Preview: qué se enviaría ahora (para orientar cuántas facturas caerán).
+    const { data: preview, refetch: refetchPreview, isFetching: previewLoading } = useQuery({
+        queryKey: ['dunning', 'overdue-report-preview'],
+        queryFn: () => dunningApi.previewOverdueReport(),
+    });
+
+    const sendMutation = useMutation({
+        mutationFn: async () => {
+            if (hasUnsavedChanges) {
+                await dunningApi.updateConfig(patch);
+                await queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] });
+            }
+            return dunningApi.sendOverdueReport();
+        },
+        onSuccess: () => refetchPreview(),
+    });
+
+    useEffect(() => {
+        if (sendMutation.isSuccess || sendMutation.isError) sendMutation.reset();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [enabled, to, JSON.stringify(cc), JSON.stringify(sendDays), sendHour]);
+
+    const canSend = enabled && (!!to.trim() || cc.length > 0);
+    const currencyFmt = (n: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n || 0);
+
+    return (
+        <Card>
+            <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <Mail className="text-blue-500" size={16} />
+                            Reporte periódico de facturas vencidas
+                        </CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            Manda por email la tabla completa de facturas vencidas ahora mismo (todas, cada una con estado
+                            WARNING/CRÍTICO y una columna que indica si ya se le envió recordatorio o no). Se dispara en el
+                            cron horario <strong>después de los recordatorios de pago</strong>, así el estado del recordatorio
+                            está siempre al día.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => setEnabled(!enabled)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                        role="switch"
+                        aria-checked={enabled}
+                    >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                        Destinatario principal (TO)
+                    </label>
+                    <Input type="email" value={to}
+                        onChange={e => setTo(e.target.value)}
+                        placeholder="administracion@immoral.es" />
+                </div>
+
+                <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                        En copia (CC)
+                    </label>
+                    <EmailListEditor value={cc} onChange={setCc} placeholder="Añade correos y pulsa Enter…" />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                        Puedes dejar TO vacío y usar solo CC (el primero pasa a TO automáticamente).
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-start">
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                            Días de envío
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                            {DAY_LABELS.map((label, idx) => {
+                                const active = sendDays.includes(idx);
+                                return (
+                                    <button key={idx} onClick={() => toggleDay(idx)}
+                                        type="button"
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                            active ? 'bg-primary text-primary-foreground border-primary'
+                                                  : 'bg-background text-foreground border-border hover:bg-muted'
+                                        }`}>
+                                        {label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-1.5">
+                            {sendDays.length === 0 && <span className="text-amber-600 dark:text-amber-400 font-semibold">Sin días marcados no se enviará ningún email.</span>}
+                        </p>
+                    </div>
+                    <div className="min-w-[140px]">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                            Hora
+                        </label>
+                        <div className="flex items-center gap-1">
+                            <Input type="number" min={0} max={23} value={sendHour}
+                                onChange={e => {
+                                    const v = Number(e.target.value);
+                                    if (Number.isFinite(v)) setSendHour(Math.max(0, Math.min(23, Math.floor(v))));
+                                }}
+                                className="w-20" />
+                            <span className="text-sm text-muted-foreground">:00</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-1.5">
+                            Hora local. Ideal: después de la hora de los recordatorios.
+                        </p>
+                    </div>
+                </div>
+
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-muted-foreground">
+                            <strong className="text-foreground">Estado actual: </strong>
+                            {previewLoading ? 'Calculando…' : preview
+                                ? `${preview.total_count} facturas vencidas por un total de ${currencyFmt(preview.total_amount)}.`
+                                : '—'}
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => refetchPreview()} disabled={previewLoading}>
+                            {previewLoading ? <Loader2 className="animate-spin mr-1.5" size={12} /> : <RefreshCw size={12} className="mr-1.5" />}
+                            Recalcular
+                        </Button>
+                    </div>
+                    {config.overdue_report_last_sent_at && (
+                        <p className="text-[11px] text-muted-foreground pt-1 border-t">
+                            Último envío: <strong>{new Date(config.overdue_report_last_sent_at).toLocaleString('es-ES')}</strong>
+                        </p>
+                    )}
+                </div>
+
+                {sendMutation.isSuccess && (
+                    sendMutation.data?.sent ? (
+                        <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-3 text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+                            <Check className="shrink-0 mt-0.5" size={14} />
+                            Reporte enviado a <strong>{sendMutation.data.to}</strong>
+                            {(sendMutation.data.cc || []).length ? ` (+${(sendMutation.data.cc || []).length} en CC)` : ''}
+                            {typeof sendMutation.data.total_count === 'number' && ` · ${sendMutation.data.total_count} facturas`}.
+                        </div>
+                    ) : (
+                        <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                            <AlertTriangle className="shrink-0 mt-0.5" size={14} />
+                            <div>
+                                {sendMutation.data?.reason === 'no-recipients' && <>No hay destinatarios guardados. Rellena TO o CC y guarda antes de reintentar.</>}
+                                {sendMutation.data?.reason === 'no-overdue' && <>No hay facturas vencidas ahora mismo.</>}
+                                {sendMutation.data?.reason === 'smtp-not-configured' && <>SMTP no configurado en el servidor.</>}
+                                {!['no-recipients', 'no-overdue', 'smtp-not-configured'].includes(sendMutation.data?.reason || '') && (
+                                    <>No se envió: {sendMutation.data?.reason || 'sin motivo'}.</>
+                                )}
+                            </div>
+                        </div>
+                    )
+                )}
+                {sendMutation.isError && (
+                    <div className="rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 p-3 text-xs text-red-900 dark:text-red-200 flex items-start gap-2">
+                        <AlertTriangle className="shrink-0 mt-0.5" size={14} />
+                        {String(sendMutation.error)}
+                    </div>
+                )}
+
+                {hasUnsavedChanges && (
+                    <div className="rounded-lg border border-blue-300 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800 p-2.5 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2">
+                        <Info size={14} className="shrink-0 mt-0.5" />
+                        <span>
+                            Tienes cambios sin guardar. Pulsa <em>Guardar reporte</em> o <em>Guardar y enviar</em> para persistirlos.
+                        </span>
+                    </div>
+                )}
+
+                <div className="flex justify-between items-center gap-2 pt-2 border-t">
+                    <Button variant="outline"
+                        onClick={() => sendMutation.mutate()}
+                        disabled={!canSend || sendMutation.isPending}
+                        title={!canSend ? 'Rellena TO o al menos un CC antes de enviar' : hasUnsavedChanges ? 'Guarda y envía el reporte con los cambios del formulario' : 'Envía el reporte ahora'}>
+                        {sendMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Send size={14} className="mr-2" />}
+                        {hasUnsavedChanges ? 'Guardar y enviar' : 'Enviar reporte ahora'}
+                    </Button>
+                    <Button onClick={() => onSave(patch)} disabled={saving || !hasUnsavedChanges}>
+                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                        Guardar reporte
+                    </Button>
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+// ── Sección: alerta de clientes con múltiples vencidas ────────────────────────
+// Config visible dentro de la pestaña "Reglas". Se guarda mediante el mismo
+// updateConfig que las reglas, así el usuario no tiene que dar dos "Guardar".
+
+function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+    const queryClient = useQueryClient();
+    const [enabled, setEnabled] = useState(config.multi_alert_enabled);
+    const [threshold, setThreshold] = useState(config.multi_alert_threshold);
+    const [to, setTo] = useState(config.multi_alert_to || '');
+    const [cc, setCc] = useState<string[]>(config.multi_alert_cc_emails || []);
+    const [sendDays, setSendDays] = useState<number[]>(config.multi_alert_send_days || []);
+    const [sendHour, setSendHour] = useState<number>(config.multi_alert_send_hour ?? 9);
+
+    useEffect(() => {
+        setEnabled(config.multi_alert_enabled);
+        setThreshold(config.multi_alert_threshold);
+        setTo(config.multi_alert_to || '');
+        setCc(config.multi_alert_cc_emails || []);
+        setSendDays(config.multi_alert_send_days || []);
+        setSendHour(config.multi_alert_send_hour ?? 9);
+    }, [config.id, config.updated_at]);
+
+    const toggleDay = (day: number) => {
+        const s = new Set(sendDays);
+        if (s.has(day)) s.delete(day); else s.add(day);
+        setSendDays(Array.from(s).sort());
+    };
+
+    // Detecta cambios sin guardar comparando formulario vs config persistida.
+    const patch: Partial<DunningConfigType> = {
+        multi_alert_enabled: enabled,
+        multi_alert_threshold: threshold,
+        multi_alert_to: to.trim() || null,
+        multi_alert_cc_emails: cc,
+        multi_alert_send_days: sendDays,
+        multi_alert_send_hour: sendHour,
+    };
+    const hasUnsavedChanges =
+        (config.multi_alert_enabled !== enabled) ||
+        (config.multi_alert_threshold !== threshold) ||
+        ((config.multi_alert_to || '') !== to.trim()) ||
+        (JSON.stringify(config.multi_alert_cc_emails || []) !== JSON.stringify(cc)) ||
+        (JSON.stringify(config.multi_alert_send_days || []) !== JSON.stringify(sendDays)) ||
+        ((config.multi_alert_send_hour ?? 9) !== sendHour);
+
+    // Preview: cuántos clientes cumplirían el umbral ahora mismo.
+    const { data: preview, refetch: refetchPreview, isFetching: previewLoading } = useQuery({
+        queryKey: ['dunning', 'multi-alerts-config-preview'],
+        queryFn: () => dunningApi.listMultiOverdueAlerts(),
+    });
+
+    // "Enviar alerta ahora": si hay cambios sin guardar, guarda primero para
+    // que el backend lea el estado correcto. Después dispara el envío.
+    const sendMutation = useMutation({
+        mutationFn: async () => {
+            if (hasUnsavedChanges) {
+                await dunningApi.updateConfig(patch);
+                await queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] });
+            }
+            return dunningApi.sendMultiOverdueAlert();
+        },
+        onSuccess: () => refetchPreview(),
+    });
+
+    // Cualquier edición del formulario limpia el resultado del envío anterior
+    // para que no se muestre un mensaje obsoleto ("no-recipients" antiguo).
+    useEffect(() => {
+        if (sendMutation.isSuccess || sendMutation.isError) sendMutation.reset();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [enabled, threshold, to, JSON.stringify(cc), JSON.stringify(sendDays), sendHour]);
+
+    const alerts = preview?.alerts || [];
+    const canSend = enabled && (!!to.trim() || cc.length > 0);
+
+    return (
+        <Card>
+            <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <AlertTriangle className="text-red-500" size={16} />
+                            Alerta: clientes con múltiples facturas vencidas
+                        </CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            Cuando un mismo cliente acumule al menos <strong>{threshold}</strong> facturas vencidas, aparece
+                            un modal bloqueante en toda la app para superadmins (una vez al día) y se envía un email a los
+                            destinatarios de abajo <strong>los días y hora que elijas</strong>. El historial se guarda a diario para métricas mensuales.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => setEnabled(!enabled)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                        role="switch"
+                        aria-checked={enabled}
+                    >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                            Umbral (nº de facturas vencidas por cliente)
+                        </label>
+                        <Input type="number" min={2} value={threshold}
+                            onChange={e => setThreshold(Math.max(2, Number(e.target.value) || 2))} />
+                        <p className="text-[11px] text-muted-foreground mt-1">Mínimo 2. Por defecto salta con 2 o más.</p>
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                            Destinatario principal (TO)
+                        </label>
+                        <Input type="email" value={to}
+                            onChange={e => setTo(e.target.value)}
+                            placeholder="administracion@immoral.es" />
+                        <p className="text-[11px] text-muted-foreground mt-1">Recibe el email como destinatario principal.</p>
+                    </div>
+                </div>
+
+                <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                        En copia (CC)
+                    </label>
+                    <EmailListEditor value={cc} onChange={setCc} placeholder="Añade correos y pulsa Enter…" />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                        Todos los que estén aquí recibirán la alerta en copia visible. Puedes dejar TO vacío y usar solo CC (el primero de la lista pasa a TO).
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-start">
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                            Días en que se manda el email
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                            {DAY_LABELS.map((label, idx) => {
+                                const active = sendDays.includes(idx);
+                                return (
+                                    <button key={idx} onClick={() => toggleDay(idx)}
+                                        type="button"
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                            active ? 'bg-primary text-primary-foreground border-primary'
+                                                  : 'bg-background text-foreground border-border hover:bg-muted'
+                                        }`}>
+                                        {label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-1.5">
+                            Elige uno o varios días de la semana. El modal en la app sigue apareciendo todos los días — esto controla solo el email.
+                            {sendDays.length === 0 && <span className="text-amber-600 dark:text-amber-400 font-semibold"> Sin días marcados no se enviará ningún email.</span>}
+                        </p>
+                    </div>
+                    <div className="min-w-[140px]">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                            Hora
+                        </label>
+                        <div className="flex items-center gap-1">
+                            <Input type="number" min={0} max={23} value={sendHour}
+                                onChange={e => {
+                                    const v = Number(e.target.value);
+                                    if (Number.isFinite(v)) setSendHour(Math.max(0, Math.min(23, Math.floor(v))));
+                                }}
+                                className="w-20" />
+                            <span className="text-sm text-muted-foreground">:00</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-1.5">
+                            Hora local ({config.timezone || 'Europe/Madrid'}).
+                        </p>
+                    </div>
+                </div>
+
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-muted-foreground">
+                            <strong className="text-foreground">Estado actual: </strong>
+                            {previewLoading ? 'Calculando…' : alerts.length === 0
+                                ? `Ningún cliente supera el umbral de ${preview?.threshold ?? threshold}.`
+                                : `${alerts.length} cliente${alerts.length === 1 ? '' : 's'} con ${preview?.threshold ?? threshold}+ facturas vencidas.`}
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => refetchPreview()} disabled={previewLoading}>
+                            {previewLoading ? <Loader2 className="animate-spin mr-1.5" size={12} /> : <RefreshCw size={12} className="mr-1.5" />}
+                            Recalcular
+                        </Button>
+                    </div>
+                    {alerts.length > 0 && (
+                        <ul className="text-[11px] text-muted-foreground space-y-0.5 pl-1">
+                            {alerts.slice(0, 5).map(a => (
+                                <li key={a.contact_id || a.contact_name}>
+                                    · <strong className="text-foreground">{a.contact_name || '(sin nombre)'}</strong>: {a.invoice_count} facturas, máx {a.max_days_overdue} días vencido
+                                </li>
+                            ))}
+                            {alerts.length > 5 && <li>… y {alerts.length - 5} más</li>}
+                        </ul>
+                    )}
+                    {config.multi_alert_last_sent_at && (
+                        <p className="text-[11px] text-muted-foreground pt-1 border-t">
+                            Último email enviado: <strong>{new Date(config.multi_alert_last_sent_at).toLocaleString('es-ES')}</strong>
+                        </p>
+                    )}
+                </div>
+
+                {sendMutation.isSuccess && (
+                    sendMutation.data?.sent ? (
+                        <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-3 text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+                            <Check className="shrink-0 mt-0.5" size={14} />
+                            Alerta enviada a <strong>{sendMutation.data.to}</strong>
+                            {(sendMutation.data.cc || []).length ? ` (+${(sendMutation.data.cc || []).length} en CC)` : ''}.
+                        </div>
+                    ) : (
+                        <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                            <AlertTriangle className="shrink-0 mt-0.5" size={14} />
+                            <div>
+                                {sendMutation.data?.reason === 'no-recipients' && (
+                                    <>No se envió porque <strong>no hay destinatarios guardados</strong> en la base de datos. Rellena TO o al menos un CC y pulsa <em>Guardar alerta</em> antes de reintentar.</>
+                                )}
+                                {sendMutation.data?.reason === 'no-alerts' && (
+                                    <>Ningún cliente supera el umbral en este momento.</>
+                                )}
+                                {sendMutation.data?.reason === 'smtp-not-configured' && (
+                                    <>SMTP no está configurado en el servidor. Contacta con administración.</>
+                                )}
+                                {!['no-recipients', 'no-alerts', 'smtp-not-configured'].includes(sendMutation.data?.reason || '') && (
+                                    <>No se envió: {sendMutation.data?.reason || 'sin motivo'}.</>
+                                )}
+                            </div>
+                        </div>
+                    )
+                )}
+                {sendMutation.isError && (
+                    <div className="rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 p-3 text-xs text-red-900 dark:text-red-200 flex items-start gap-2">
+                        <AlertTriangle className="shrink-0 mt-0.5" size={14} />
+                        {String(sendMutation.error)}
+                    </div>
+                )}
+
+                {hasUnsavedChanges && (
+                    <div className="rounded-lg border border-blue-300 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800 p-2.5 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2">
+                        <Info size={14} className="shrink-0 mt-0.5" />
+                        <span>
+                            Tienes cambios sin guardar. Pulsa <em>Guardar alerta</em> para persistirlos.
+                            Si le das a <em>Enviar alerta ahora</em>, se guardarán automáticamente antes de enviar.
+                        </span>
+                    </div>
+                )}
+
+                <div className="flex justify-between items-center gap-2 pt-2 border-t">
+                    <Button variant="outline"
+                        onClick={() => sendMutation.mutate()}
+                        disabled={!canSend || sendMutation.isPending || alerts.length === 0}
+                        title={
+                            !canSend ? 'Rellena TO o al menos un CC antes de enviar' :
+                            alerts.length === 0 ? 'Ningún cliente supera el umbral ahora mismo' :
+                            hasUnsavedChanges ? 'Guardará los cambios del formulario y enviará el email' :
+                            'Envía el email a los destinatarios guardados'
+                        }>
+                        {sendMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Send size={14} className="mr-2" />}
+                        {hasUnsavedChanges ? 'Guardar y enviar' : 'Enviar alerta ahora'}
+                    </Button>
+                    <Button onClick={() => onSave(patch)} disabled={saving || !hasUnsavedChanges}>
+                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                        Guardar alerta
+                    </Button>
+                </div>
+            </CardContent>
+        </Card>
     );
 }
 
@@ -747,7 +1348,7 @@ function PreviewModal({ plan, summary, testMode, testModeEmail, onClose }: {
                                         <tr key={p.invoice.id}>
                                             <td className="py-1.5 px-2 font-mono">{p.invoice.invoice_number || p.invoice.id.slice(0, 6)}</td>
                                             <td className="py-1.5 px-2">{p.invoice.contact_name}</td>
-                                            <td className="py-1.5 px-2 truncate max-w-[220px]">
+                                            <td className="py-1.5 px-2 truncate max-w-[260px]">
                                                 <span className={p.redirect_reason ? 'text-amber-600 font-medium' : 'text-muted-foreground'}>
                                                     {p.dest_email}
                                                 </span>
@@ -758,6 +1359,11 @@ function PreviewModal({ plan, summary, testMode, testModeEmail, onClose }: {
                                                 )}
                                                 {p.redirect_reason && p.invoice.contact_email && (
                                                     <div className="text-[10px] text-muted-foreground line-through">{p.invoice.contact_email}</div>
+                                                )}
+                                                {(p.dest_cc || []).length > 0 && (
+                                                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                                                        <span className="font-semibold">CC:</span> {(p.dest_cc || []).join(', ')}
+                                                    </div>
                                                 )}
                                             </td>
                                             <td className="py-1.5 px-2 text-center font-semibold">{p.days_overdue}</td>
@@ -916,6 +1522,11 @@ function RunResultsModal({ results, dryRun, onClose }: { results: RunResult[]; d
                                                             [{r.redirect_reason === 'test_mode' ? 'PRUEBA' : 'OVERRIDE'}]
                                                         </span>
                                                     )}
+                                                    {(r.cc || []).length > 0 && (
+                                                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                                                            <span className="font-semibold">CC:</span> {(r.cc || []).join(', ')}
+                                                        </div>
+                                                    )}
                                                 </>
                                             ) : '—'}
                                         </td>
@@ -1001,14 +1612,33 @@ function OverridesPanel() {
     const [contactId, setContactId] = useState('');
     const [contactName, setContactName] = useState('');
     const [overrideEmail, setOverrideEmail] = useState('');
+    const [overrideCc, setOverrideCc] = useState<string[]>([]);
     const [note, setNote] = useState('');
 
     const addMutation = useMutation({
-        mutationFn: () => dunningApi.upsertOverride(contactId, { override_email: overrideEmail, contact_name: contactName, note }),
+        mutationFn: () => dunningApi.upsertOverride(contactId, {
+            override_email: overrideEmail,
+            contact_name: contactName,
+            note,
+            override_cc_emails: overrideCc,
+        }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['dunning', 'overrides'] });
-            setContactId(''); setContactName(''); setOverrideEmail(''); setNote('');
+            setContactId(''); setContactName(''); setOverrideEmail(''); setOverrideCc([]); setNote('');
         },
+    });
+
+    // Actualizar el CC de un override ya guardado sin abrir el formulario de alta.
+    // Se conservan los demás campos re-enviándolos en el upsert.
+    const updateCcMutation = useMutation({
+        mutationFn: ({ o, cc }: { o: typeof overrides[number]; cc: string[] }) =>
+            dunningApi.upsertOverride(o.contact_id, {
+                override_email: o.override_email,
+                contact_name: o.contact_name || undefined,
+                note: o.note || undefined,
+                override_cc_emails: cc,
+            }),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'overrides'] }),
     });
 
     const deleteMutation = useMutation({
@@ -1023,34 +1653,48 @@ function OverridesPanel() {
             <CardHeader>
                 <CardTitle className="text-base">Overrides por cliente</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                    Redirigir los recordatorios de un contacto concreto a otro email. Útil si el email en Holded es incorrecto o si quieres testear un caso específico sin activar el modo prueba global.
+                    Redirigir los recordatorios de un contacto concreto a otro email, o añadir CC específicos para ese cliente
+                    (además de los CC globales del config). Útil cuando el gestor concreto tiene que estar en copia.
                 </p>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
-                    <div className="md:col-span-1">
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Contact ID (Holded)</label>
-                        <Input value={contactId} onChange={e => setContactId(e.target.value)} placeholder="6123abc…" />
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <div>
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Contact ID (Holded)</label>
+                            <Input value={contactId} onChange={e => setContactId(e.target.value)} placeholder="6123abc…" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nombre (opcional)</label>
+                            <Input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Cliente XYZ SL" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Email destino</label>
+                            <Input type="email" value={overrideEmail} onChange={e => setOverrideEmail(e.target.value)} placeholder="nuevo@email.com" />
+                        </div>
                     </div>
                     <div>
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nombre (opcional)</label>
-                        <Input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Cliente XYZ SL" />
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">CC extra para este cliente (opcional)</label>
+                        <EmailListEditor
+                            value={overrideCc}
+                            onChange={setOverrideCc}
+                            placeholder="Añade emails y pulsa Enter…"
+                        />
+                        <p className="text-[11px] text-muted-foreground mt-1">Se suman a los CC globales del config, no los reemplazan.</p>
                     </div>
-                    <div>
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Email destino</label>
-                        <Input type="email" value={overrideEmail} onChange={e => setOverrideEmail(e.target.value)} placeholder="nuevo@email.com" />
+                    <div className="flex items-end gap-2">
+                        <div className="flex-1">
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nota (opcional)</label>
+                            <Input value={note} onChange={e => setNote(e.target.value)} placeholder="Motivo del override" />
+                        </div>
+                        <Button
+                            onClick={() => addMutation.mutate()}
+                            disabled={!contactId || !overrideEmail || addMutation.isPending}
+                        >
+                            {addMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Plus size={14} className="mr-2" />}
+                            Guardar override
+                        </Button>
                     </div>
-                    <Button
-                        onClick={() => addMutation.mutate()}
-                        disabled={!contactId || !overrideEmail || addMutation.isPending}
-                    >
-                        {addMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Plus size={14} className="mr-2" />}
-                        Añadir
-                    </Button>
-                </div>
-                <div>
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Nota (opcional)</label>
-                    <Input value={note} onChange={e => setNote(e.target.value)} placeholder="Motivo del override" />
                 </div>
 
                 {overrides.length === 0 ? (
@@ -1063,6 +1707,7 @@ function OverridesPanel() {
                                     <th className="text-left py-2 px-2">Contact ID</th>
                                     <th className="text-left py-2 px-2">Cliente</th>
                                     <th className="text-left py-2 px-2">Email destino</th>
+                                    <th className="text-left py-2 px-2 min-w-[260px]">CC extra</th>
                                     <th className="text-left py-2 px-2">Nota</th>
                                     <th className="text-right py-2 px-2"></th>
                                 </tr>
@@ -1073,6 +1718,14 @@ function OverridesPanel() {
                                         <td className="py-1.5 px-2 font-mono text-muted-foreground truncate max-w-[120px]">{o.contact_id}</td>
                                         <td className="py-1.5 px-2">{o.contact_name || '—'}</td>
                                         <td className="py-1.5 px-2 font-medium text-primary">{o.override_email}</td>
+                                        <td className="py-1.5 px-2">
+                                            <EmailListEditor
+                                                value={o.override_cc_emails || []}
+                                                onChange={cc => updateCcMutation.mutate({ o, cc })}
+                                                placeholder="Añadir CC…"
+                                                disabled={updateCcMutation.isPending}
+                                            />
+                                        </td>
                                         <td className="py-1.5 px-2 text-muted-foreground italic">{o.note || '—'}</td>
                                         <td className="py-1.5 px-2 text-right">
                                             <button onClick={() => deleteMutation.mutate(o.contact_id)} className="p-1 rounded hover:bg-red-50 text-red-500">
@@ -1418,6 +2071,13 @@ function RemindersSection() {
                                         <td className="px-3 py-2 text-xs">
                                             {r.sent_to}
                                             {r.is_test && <span className="ml-1 text-[10px] text-amber-600 font-semibold">·PRUEBA</span>}
+                                            {(r.cc_emails || []).length > 0 && (
+                                                <div className="text-[10px] text-muted-foreground mt-0.5" title={(r.cc_emails || []).join(', ')}>
+                                                    <span className="font-semibold">CC:</span> {(r.cc_emails || []).length === 1
+                                                        ? r.cc_emails![0]
+                                                        : `${r.cc_emails![0]} +${r.cc_emails!.length - 1}`}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="px-3 py-2 whitespace-nowrap">
                                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-semibold ${statusChipClass(r.status)}`}>
@@ -1446,6 +2106,110 @@ function RemindersSection() {
                 )}
             </CardContent>
         </Card>
+    );
+}
+
+function ReincidentsTab() {
+    const [months, setMonths] = useState(12);
+    const { data, isLoading, refetch, isFetching } = useQuery({
+        queryKey: ['dunning', 'multi-history', months],
+        queryFn: () => dunningApi.getMultiOverdueHistory({ months }),
+        refetchOnWindowFocus: false,
+    });
+
+    const clients = data?.clients || [];
+    const currency = (n: number) => new Intl.NumberFormat('es-ES', {
+        style: 'currency', currency: 'EUR', maximumFractionDigits: 0,
+    }).format(Number(n || 0));
+    const monthLabel = (ym: string) => {
+        const [y, m] = ym.split('-').map(Number);
+        if (!y || !m) return ym;
+        return new Date(y, m - 1, 1).toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+    };
+
+    return (
+        <div className="space-y-4">
+            <Card>
+                <CardHeader className="flex flex-row items-start justify-between gap-4">
+                    <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <AlertTriangle size={16} /> Clientes reincidentes en impagos
+                        </CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            Cliente por cliente: en cuántos meses ha superado el umbral de facturas vencidas.
+                            Útil al cierre del mes para saber a quién no darle más crédito o revisar antes de emitir factura nueva.
+                            El registro se guarda cada día que el cron detecta la situación.
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <select value={months} onChange={e => setMonths(Number(e.target.value))}
+                            className="text-xs px-2 py-1.5 rounded border bg-background">
+                            <option value={3}>Últimos 3 meses</option>
+                            <option value={6}>Últimos 6 meses</option>
+                            <option value={12}>Últimos 12 meses</option>
+                            <option value={24}>Últimos 24 meses</option>
+                        </select>
+                        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+                            <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
+                        </Button>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {isLoading ? (
+                        <div className="flex items-center justify-center py-8 text-muted-foreground">
+                            <Loader2 className="animate-spin mr-2" size={16} /> Cargando…
+                        </div>
+                    ) : clients.length === 0 ? (
+                        <div className="text-center py-8 text-sm text-muted-foreground">
+                            Sin registros todavía. El histórico se rellena cada día que el cron detecta clientes por encima del umbral.
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                                    <tr>
+                                        <th className="text-left px-3 py-2 font-semibold">Cliente</th>
+                                        <th className="text-center px-3 py-2 font-semibold" title="Nº de meses distintos en los que ha superado el umbral">Meses afectados</th>
+                                        <th className="text-center px-3 py-2 font-semibold" title="Días totales en los que ha estado por encima del umbral">Días acumulados</th>
+                                        <th className="text-center px-3 py-2 font-semibold">Pico facturas</th>
+                                        <th className="text-right px-3 py-2 font-semibold">Pico deuda</th>
+                                        <th className="text-left px-3 py-2 font-semibold">Línea de tiempo</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {clients.map(c => (
+                                        <tr key={c.contact_id || c.contact_name || Math.random()} className="hover:bg-muted/30">
+                                            <td className="px-3 py-2 font-semibold text-foreground">
+                                                {c.contact_name || <span className="text-muted-foreground italic">(sin nombre)</span>}
+                                            </td>
+                                            <td className="px-3 py-2 text-center">
+                                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${c.months_flagged >= 3 ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200' : c.months_flagged >= 2 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}>
+                                                    {c.months_flagged}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-2 text-center text-xs">{c.total_days_flagged}</td>
+                                            <td className="px-3 py-2 text-center text-xs font-semibold">{c.peak_invoice_count}</td>
+                                            <td className="px-3 py-2 text-right font-semibold">{currency(c.peak_amount)}</td>
+                                            <td className="px-3 py-2">
+                                                <div className="flex flex-wrap gap-1">
+                                                    {c.months.slice(0, 12).map(m => (
+                                                        <span key={m.month}
+                                                            title={`${m.days_flagged} día(s) · pico ${m.max_invoice_count} facturas · ${currency(m.peak_amount)}`}
+                                                            className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${m.max_invoice_count >= 3 ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200'}`}>
+                                                            {monthLabel(m.month)}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+        </div>
     );
 }
 
@@ -1532,6 +2296,7 @@ export default function DunningConfig() {
                     {tab === 'templates' && <TemplatesTab config={config} />}
                     {tab === 'run' && <RunTab config={config} />}
                     {tab === 'history' && <HistoryTab />}
+                    {tab === 'reincidents' && <ReincidentsTab />}
                 </>
             )}
         </div>

@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { AIChatWidget } from '@/components/shared/AIChatWidget';
 import { OnboardingTour } from '@/components/shared/OnboardingTour';
+import { MultiOverdueAlertBanner } from '@/features/dunning/MultiOverdueAlertBanner';
 import { useAuth } from '@/context/AuthContext';
 
 export function Layout() {
@@ -21,6 +22,7 @@ export function Layout() {
             <Sidebar isOpen={isMobileOpen} onClose={() => setIsMobileOpen(false)} />
             <div className="md:pl-64 flex flex-col min-h-[100dvh] w-full transition-all">
                 <Header onMenuToggle={() => setIsMobileOpen(!isMobileOpen)} />
+                <MultiOverdueAlertBanner />
                 <main className="flex-1 p-4 md:p-6 overflow-x-hidden md:overflow-x-auto w-full max-w-[100vw]">
                     <div className="mx-auto w-full max-w-7xl animate-in fade-in zoom-in duration-300">
                         <Outlet />
