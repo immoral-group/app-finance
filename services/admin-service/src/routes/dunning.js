@@ -315,8 +315,10 @@ async function cronRunHandler(req, res) {
                 sent: summarySent,
                 failed: summaryFailed,
                 skipped: summarySkipped,
+                plan_will_skip: (result.plan_skipped || []).length,
                 summary: result.summary,
                 executed: result.executed,
+                plan_skipped: result.plan_skipped || [],
                 multi_alert: multiAlert,
                 overdue_report: overdueReport,
             },
@@ -689,10 +691,25 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
         }
     }
 
+    // También devolvemos los items del plan que se saltaron con su motivo, para
+    // que la UI y el log expliquen POR QUÉ solo se enviaron N de M vencidas.
+    // Antes solo llegaban al summary agregado ("will_skip: 10") sin detalle.
+    const skippedItems = plan
+        .filter(p => p.action === 'skip')
+        .map(p => ({
+            invoice_id: p.invoice.id,
+            invoice_number: p.invoice.invoice_number,
+            contact_name: p.invoice.contact_name,
+            level: p.level,
+            days_overdue: p.days_overdue,
+            reason: p.reason,
+        }));
+
     return {
         dry_run: dryRun,
         summary: summarizePlan(plan),
         executed: results,
+        plan_skipped: skippedItems,
     };
 }
 

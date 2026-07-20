@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     dunningApi, DunningBank, DunningConfig as DunningConfigType, DunningTemplate,
-    PlanItem, PlanSummary, RunResult, DunningCronRun, DunningReminderRow,
+    PlanItem, PlanSummary, RunResult, PlanSkipItem, DunningCronRun, DunningReminderRow,
 } from '@/lib/api/dunning';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -1468,13 +1468,14 @@ function TestSendModal({ onClose }: { onClose: () => void }) {
     );
 }
 
-function RunResultsModal({ results, dryRun, onClose }: { results: RunResult[]; dryRun: boolean; onClose: () => void }) {
+function RunResultsModal({ results, planSkipped, dryRun, onClose }: { results: RunResult[]; planSkipped?: PlanSkipItem[]; dryRun: boolean; onClose: () => void }) {
     const sent = results.filter(r => r.status === 'sent').length;
     const failed = results.filter(r => r.status === 'failed').length;
     const skipped = results.filter(r => r.status === 'skipped').length;
+    const notInPlan = planSkipped || [];
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-card rounded-xl border shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="bg-card rounded-xl border shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
                 <div className="px-5 py-3 border-b flex items-center justify-between">
                     <div>
                         <h3 className="text-base font-bold text-foreground">
@@ -1482,64 +1483,102 @@ function RunResultsModal({ results, dryRun, onClose }: { results: RunResult[]; d
                         </h3>
                         <p className="text-xs text-muted-foreground">
                             {dryRun ? `${results.length} envíos simulados` : `${sent} enviados · ${failed} fallidos · ${skipped} omitidos`}
+                            {notInPlan.length > 0 && ` · ${notInPlan.length} descartadas por el plan`}
                         </p>
                     </div>
                     <button onClick={onClose} className="p-1 rounded hover:bg-muted"><X size={16} /></button>
                 </div>
-                <div className="overflow-y-auto flex-1 p-4">
-                    {results.length === 0 ? (
+                <div className="overflow-y-auto flex-1 p-4 space-y-4">
+                    {results.length === 0 && notInPlan.length === 0 ? (
                         <p className="text-center text-sm text-muted-foreground py-8">No había nada que enviar.</p>
                     ) : (
-                        <table className="w-full text-xs">
-                            <thead className="text-[11px] uppercase text-muted-foreground border-b">
-                                <tr>
-                                    <th className="text-left py-1.5 px-2 w-8"></th>
-                                    <th className="text-left py-1.5 px-2">Cliente</th>
-                                    <th className="text-left py-1.5 px-2">Factura</th>
-                                    <th className="text-center py-1.5 px-2">Nivel</th>
-                                    <th className="text-left py-1.5 px-2">Destino</th>
-                                    <th className="text-left py-1.5 px-2">Detalle</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border/40">
-                                {results.map((r, i) => (
-                                    <tr key={i}>
-                                        <td className="py-1.5 px-2">
-                                            {r.status === 'sent' && <Check size={14} className="text-emerald-500" />}
-                                            {r.status === 'would-send' && <Play size={14} className="text-blue-500" />}
-                                            {r.status === 'failed' && <X size={14} className="text-red-500" />}
-                                            {r.status === 'skipped' && <Info size={14} className="text-muted-foreground" />}
-                                        </td>
-                                        <td className="py-1.5 px-2 font-medium">{r.contact_name || <span className="text-muted-foreground font-mono text-[10px]">{r.invoice_id.slice(0, 10)}</span>}</td>
-                                        <td className="py-1.5 px-2 font-mono text-[11px]">{r.invoice_number || '—'}</td>
-                                        <td className="py-1.5 px-2 text-center">{r.level ? <span className="inline-flex px-1.5 rounded bg-primary/10 text-primary font-semibold">N{r.level}</span> : '—'}</td>
-                                        <td className="py-1.5 px-2">
-                                            {r.to ? (
-                                                <>
-                                                    <span className={r.redirect_reason ? 'text-amber-600 font-medium' : ''}>{r.to}</span>
-                                                    {r.redirect_reason && (
-                                                        <span className="ml-1 text-[10px] uppercase text-amber-500">
-                                                            [{r.redirect_reason === 'test_mode' ? 'PRUEBA' : 'OVERRIDE'}]
-                                                        </span>
-                                                    )}
-                                                    {(r.cc || []).length > 0 && (
-                                                        <div className="text-[10px] text-muted-foreground mt-0.5">
-                                                            <span className="font-semibold">CC:</span> {(r.cc || []).join(', ')}
-                                                        </div>
-                                                    )}
-                                                </>
-                                            ) : '—'}
-                                        </td>
-                                        <td className="py-1.5 px-2">
-                                            {r.reason && <span className="text-muted-foreground italic">{humanizeReason(r.reason)}</span>}
-                                            {r.error && <span className="text-red-600">{r.error}</span>}
-                                            {r.status === 'sent' && !r.error && <span className="text-emerald-600">Enviado</span>}
-                                            {r.status === 'would-send' && <span className="text-blue-600">Iría a este destino</span>}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                        <>
+                            {results.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Procesadas ({results.length})</p>
+                                    <table className="w-full text-xs">
+                                        <thead className="text-[11px] uppercase text-muted-foreground border-b">
+                                            <tr>
+                                                <th className="text-left py-1.5 px-2 w-8"></th>
+                                                <th className="text-left py-1.5 px-2">Cliente</th>
+                                                <th className="text-left py-1.5 px-2">Factura</th>
+                                                <th className="text-center py-1.5 px-2">Nivel</th>
+                                                <th className="text-left py-1.5 px-2">Destino</th>
+                                                <th className="text-left py-1.5 px-2">Detalle</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-border/40">
+                                            {results.map((r, i) => (
+                                                <tr key={i}>
+                                                    <td className="py-1.5 px-2">
+                                                        {r.status === 'sent' && <Check size={14} className="text-emerald-500" />}
+                                                        {r.status === 'would-send' && <Play size={14} className="text-blue-500" />}
+                                                        {r.status === 'failed' && <X size={14} className="text-red-500" />}
+                                                        {r.status === 'skipped' && <Info size={14} className="text-muted-foreground" />}
+                                                    </td>
+                                                    <td className="py-1.5 px-2 font-medium">{r.contact_name || <span className="text-muted-foreground font-mono text-[10px]">{r.invoice_id.slice(0, 10)}</span>}</td>
+                                                    <td className="py-1.5 px-2 font-mono text-[11px]">{r.invoice_number || '—'}</td>
+                                                    <td className="py-1.5 px-2 text-center">{r.level ? <span className="inline-flex px-1.5 rounded bg-primary/10 text-primary font-semibold">N{r.level}</span> : '—'}</td>
+                                                    <td className="py-1.5 px-2">
+                                                        {r.to ? (
+                                                            <>
+                                                                <span className={r.redirect_reason ? 'text-amber-600 font-medium' : ''}>{r.to}</span>
+                                                                {r.redirect_reason && (
+                                                                    <span className="ml-1 text-[10px] uppercase text-amber-500">
+                                                                        [{r.redirect_reason === 'test_mode' ? 'PRUEBA' : 'OVERRIDE'}]
+                                                                    </span>
+                                                                )}
+                                                                {(r.cc || []).length > 0 && (
+                                                                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                                                                        <span className="font-semibold">CC:</span> {(r.cc || []).join(', ')}
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        ) : '—'}
+                                                    </td>
+                                                    <td className="py-1.5 px-2">
+                                                        {r.reason && <span className="text-muted-foreground italic">{humanizeReason(r.reason)}</span>}
+                                                        {r.error && <span className="text-red-600">{r.error}</span>}
+                                                        {r.status === 'sent' && !r.error && <span className="text-emerald-600">Enviado</span>}
+                                                        {r.status === 'would-send' && <span className="text-blue-600">Iría a este destino</span>}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                            {notInPlan.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Descartadas antes de enviar ({notInPlan.length})</p>
+                                    <p className="text-[11px] text-muted-foreground mb-2">
+                                        Facturas vencidas para las que el motor decidió no enviar recordatorio en esta ejecución (ya se envió antes, se espera al siguiente ciclo, etc).
+                                    </p>
+                                    <table className="w-full text-xs">
+                                        <thead className="text-[11px] uppercase text-muted-foreground border-b">
+                                            <tr>
+                                                <th className="text-left py-1.5 px-2">Cliente</th>
+                                                <th className="text-left py-1.5 px-2">Factura</th>
+                                                <th className="text-center py-1.5 px-2">Nivel</th>
+                                                <th className="text-center py-1.5 px-2">Días</th>
+                                                <th className="text-left py-1.5 px-2">Motivo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-border/40">
+                                            {notInPlan.map((p, i) => (
+                                                <tr key={i}>
+                                                    <td className="py-1.5 px-2 text-muted-foreground">{p.contact_name || '—'}</td>
+                                                    <td className="py-1.5 px-2 font-mono text-[11px] text-muted-foreground">{p.invoice_number || p.invoice_id.slice(0, 8)}</td>
+                                                    <td className="py-1.5 px-2 text-center">{p.level ? <span className="inline-flex px-1.5 rounded bg-muted text-muted-foreground font-semibold">N{p.level}</span> : '—'}</td>
+                                                    <td className="py-1.5 px-2 text-center text-muted-foreground">{p.days_overdue}</td>
+                                                    <td className="py-1.5 px-2 text-muted-foreground italic">{humanizeReason(p.reason)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
             </div>
@@ -1746,7 +1785,7 @@ function OverridesPanel() {
 function RunTab({ config }: { config: DunningConfigType }) {
     const [preview, setPreview] = useState<{ plan: PlanItem[]; summary: PlanSummary; testMode: boolean; testModeEmail: string | null } | null>(null);
     const [showTestSend, setShowTestSend] = useState(false);
-    const [runResults, setRunResults] = useState<{ results: RunResult[]; dryRun: boolean } | null>(null);
+    const [runResults, setRunResults] = useState<{ results: RunResult[]; planSkipped?: PlanSkipItem[]; dryRun: boolean } | null>(null);
 
     const previewMutation = useMutation({
         mutationFn: () => dunningApi.previewRun(),
@@ -1760,7 +1799,7 @@ function RunTab({ config }: { config: DunningConfigType }) {
 
     const runMutation = useMutation({
         mutationFn: (dryRun: boolean) => dunningApi.run({ dry_run: dryRun, force: !config.enabled }),
-        onSuccess: (data) => setRunResults({ results: data.executed, dryRun: data.dry_run }),
+        onSuccess: (data) => setRunResults({ results: data.executed, planSkipped: data.plan_skipped, dryRun: data.dry_run }),
     });
 
     const syncMutation = useMutation({ mutationFn: () => dunningApi.syncPaid() });
@@ -1876,7 +1915,7 @@ function RunTab({ config }: { config: DunningConfigType }) {
 
             {preview && <PreviewModal plan={preview.plan} summary={preview.summary} testMode={preview.testMode} testModeEmail={preview.testModeEmail} onClose={() => setPreview(null)} />}
             {showTestSend && <TestSendModal onClose={() => setShowTestSend(false)} />}
-            {runResults && <RunResultsModal results={runResults.results} dryRun={runResults.dryRun} onClose={() => setRunResults(null)} />}
+            {runResults && <RunResultsModal results={runResults.results} planSkipped={runResults.planSkipped} dryRun={runResults.dryRun} onClose={() => setRunResults(null)} />}
         </div>
     );
 }

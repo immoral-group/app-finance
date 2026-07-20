@@ -100,9 +100,15 @@ export async function buildDunningPlan({ supabase, now = Date.now() }) {
     const caseByInvoice = new Map((cases || []).map(c => [c.invoice_id, c]));
 
     const caseIds = (cases || []).map(c => c.id);
+    // IMPORTANTE: solo los recordatorios REALES (no test) cuentan para decidir
+    // si una factura ya fue avisada. Si el usuario hizo pruebas en modo prueba,
+    // esos reminders quedan con is_test=true en BD y NO deben bloquear el envío
+    // real del cron. Antes se cargaban todos y el motor las skipeaba con
+    // waiting-repeat / level-X-already-sent.
     const { data: reminders } = caseIds.length
         ? await supabase.from('dunning_reminders')
             .select('*').in('case_id', caseIds)
+            .eq('is_test', false)
             .order('sent_at', { ascending: false })
         : { data: [] };
     const remindersByCase = new Map();
