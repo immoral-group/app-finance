@@ -1973,3 +1973,107 @@ ALTER TABLE dunning_config
 
 Todas las migraciones son aditivas — se pueden aplicar en cualquier orden sin perder datos. Consultar los archivos v8-v12 en `database/migrations/` para el SQL completo con RLS y índices.
 
+---
+
+### 2026-07-20 — Rama `fix/impagosnoenviadas`: bugs post-despliegue de `fix/impagoscc`
+
+**Rama:** `fix/impagosnoenviadas` (creada desde `main` tras el merge de `fix/impagoscc`)
+
+Dos bugs detectados en producción y una mejora transversal de UX. Sin migraciones nuevas.
+
+---
+
+#### Bug 1 — El motor no enviaba a facturas que solo tenían recordatorios de prueba
+
+**Síntoma:** de 14 facturas vencidas, solo se enviaron 4. Las 10 de N3 con más días vencidas (66, 66, 56, 35×6, 25 días) quedaron en `will_skip: 10` sin motivo visible en el summary. En el dashboard aparecían con "0 recordatorios / Nunca".
+
+**Causa raíz:** `buildDunningPlan` en `services/admin-service/src/lib/dunningWorker.js` cargaba **todos** los `dunning_reminders` sin filtrar `is_test`. `decideAction` los usaba para decidir si ya se había avisado a esa factura y devolvía `level-3-already-sent` o `waiting-repeat-X/7`. Como el usuario había probado el sistema en modo prueba anteriormente, esas facturas tenían recordatorios fantasma con `is_test=true` que bloqueaban el envío real.
+
+Es exactamente el mismo bug que arregló `fix/impagoscc` para el dashboard de Impagos (endpoint `/overdue-invoices` cruzaba con casos `is_test=true`), pero el motor de envío seguía con la fuga.
+
+**Fix:**
+
+- `dunningWorker.js:103-113`: añadido `.eq('is_test', false)` al select de reminders en `buildDunningPlan`. Los envíos de prueba dejan de contar para decisiones reales.
+- Comentario nuevo explicando la razón: si el usuario prueba el sistema en modo prueba, esos reminders quedan con `is_test=true` en BD y NO deben bloquear el envío real del cron.
+
+**Consecuencia:** tras desplegar, la próxima ejecución del cron `run` a la hora configurada considera esas 10 facturas como "primera vez" (porque no tienen ningún reminder real) y les envía el nivel correspondiente.
+
+---
+
+#### Bug 2 — El envío manual bloqueaba el envío automático de las siguientes 20h
+
+**Síntoma:** el reporte periódico de facturas vencidas nunca se envía automáticamente. Manualmente sí funciona. Igual con la alerta multi-vencida.
+
+**Causa raíz:** el endpoint `POST /overdue-report/send` (envío manual) actualizaba `overdue_report_last_sent_at` con el timestamp actual. `maybeDispatchOverdueReport` tiene anti-spam de 20h leyendo ese campo. Resultado: cualquier envío manual (típicamente para probar destinatarios) bloqueaba el próximo envío automático dentro de la ventana de 20h — 22:53 del día anterior + 09:00 del día siguiente = ~10h de diferencia → `sent-recently` skip.
+
+Idéntico bug para `multi_alert_last_sent_at` en el endpoint `POST /multi-overdue-alerts/send`.
+
+**Fix:**
+
+- `maybeDispatchOverdueReport` y `maybeDispatchMultiAlert`: ya no actualizan `*_last_sent_at` cuando se llaman con `force=true`. Solo los envíos automáticos del cron tocan ese campo — el anti-spam solo cuenta ejecuciones programadas.
+- Endpoint `POST /multi-overdue-alerts/send`: refactor. En lugar de llamar directamente a `sendMultiOverdueEmail` + duplicar el `update`, ahora pasa por `maybeDispatchMultiAlert({ force: true })`. Con eso el snapshot del histórico se registra igual y el `last_sent_at` no se contamina.
+- Endpoint `POST /overdue-report/send`: ya usaba `maybeDispatchOverdueReport({ force: true })` — solo necesitaba el fix del helper.
+
+**Consecuencia:** puedes disparar los envíos manuales todas las veces que quieras sin bloquear los automáticos. `last_sent_at` refleja solo la última ejecución programada, que es lo que el anti-spam necesita.
+
+---
+
+#### Mejora — Feedback estándar de guardado en todos los formularios de config
+
+**Motivo:** al pulsar "Guardar" en cualquier sección de la configuración de Impagos no había manera de saber si el guardado había funcionado. Solo el spinner del botón cuando estaba en curso.
+
+**Solución:** nuevo componente `SaveIndicator` reutilizable en `DunningConfig.tsx`:
+
+- Recibe `status: 'idle' | 'pending' | 'success' | 'error'` y opcionalmente un `error` y un `successLabel`.
+- Pinta:
+  - `'Guardando…'` con spinner (persistente mientras dura la mutación).
+  - `'<successLabel> ✓'` en verde con auto-hide de 3s tras éxito.
+  - `'Error: <mensaje>'` en rojo, persistente hasta que se reintente.
+
+**Refactor:** eliminado el `saveMutation` centralizado de `DunningConfig`. Cada tarjeta con botón "Guardar" ahora gestiona su propia mutación local con `queryClient.invalidateQueries` en el éxito y renderiza el `SaveIndicator` a la izquierda del botón.
+
+Tarjetas cubiertas y su etiqueta de éxito:
+
+| Tarjeta | Etiqueta |
+|---|---|
+| `RulesTab` | "Reglas guardadas" |
+| `ScheduleTab` | "Programación guardada" (reemplaza el `justSaved` local antiguo) |
+| `BrandTab` | "Marca guardada" |
+| `TemplateEditorV2` | "Plantilla guardada" |
+| `MultiAlertCard` | "Alerta guardada" |
+| `OverdueReportCard` | "Reporte guardado" |
+
+**Ventaja lateral:** el feedback siempre aparece en el contexto de lo que se acaba de guardar. Antes, si guardabas en "Reglas" y navegabas a "Programación", no había garantía de que el estado del mutation no interfiriera. Ahora cada tarjeta es su propia isla.
+
+---
+
+#### Transparencia — Ver qué facturas se descartaron y por qué
+
+**Motivo:** cuando el resultado del cron dice `will_send: 4, will_skip: 10`, el usuario no puede saber por qué se saltaron 10 sin bajar a los logs de Vercel.
+
+**Cambios:**
+
+- `executeSend` en `dunning.js` devuelve un nuevo campo `plan_skipped[]` con cada factura descartada por el motor: `{ invoice_id, invoice_number, contact_name, level, days_overdue, reason }`. Antes solo llegaba el conteo agregado.
+- `logCronRun` persiste el array completo en `dunning_cron_runs.summary.plan_skipped` — visible en Configuración → Historial → detalle de la ejecución.
+- El endpoint `POST /dunning/run` devuelve `plan_skipped` en el body.
+- Frontend: `RunResult` y `PlanSkipItem` añadidos a `client/src/lib/api/dunning.ts`.
+- `RunResultsModal` renderiza dos tablas:
+  1. **"Procesadas"** — las que se intentaron enviar (sent / failed / would-send / skipped).
+  2. **"Descartadas antes de enviar"** — las que el motor decidió no enviar en esta ejecución, con motivo humanizado por `humanizeReason` (`level-3-already-sent`, `waiting-repeat-3/7`, `no-email`, `already-paid`, etc).
+
+Con esto ya no queda duda de por qué se envían N de M en cada tick.
+
+---
+
+#### Archivos tocados
+
+**Backend:**
+- `services/admin-service/src/lib/dunningWorker.js` — filtro `is_test=false` en el select de reminders.
+- `services/admin-service/src/routes/dunning.js` — `plan_skipped` en `executeSend` + log; refactor de `maybeDispatchOverdueReport` y `maybeDispatchMultiAlert` para no tocar `last_sent_at` en `force=true`; endpoint `/multi-overdue-alerts/send` delega en el helper.
+
+**Frontend:**
+- `client/src/lib/api/dunning.ts` — nueva interface `PlanSkipItem`; retorno de `run` incluye `plan_skipped`.
+- `client/src/features/dunning/DunningConfig.tsx` — componente `SaveIndicator`; refactor de RulesTab / ScheduleTab / BrandTab / TemplateEditorV2 / MultiAlertCard / OverdueReportCard con mutación local + feedback; `RunResultsModal` con dos tablas.
+
+Sin cambios de BD. Los deploys aplican los fixes al próximo tick del cron horario.
+

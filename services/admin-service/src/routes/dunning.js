@@ -315,8 +315,10 @@ async function cronRunHandler(req, res) {
                 sent: summarySent,
                 failed: summaryFailed,
                 skipped: summarySkipped,
+                plan_will_skip: (result.plan_skipped || []).length,
                 summary: result.summary,
                 executed: result.executed,
+                plan_skipped: result.plan_skipped || [],
                 multi_alert: multiAlert,
                 overdue_report: overdueReport,
             },
@@ -689,10 +691,25 @@ async function executeSend({ dryRun = false, forcedConfig = null, baseUrl = null
         }
     }
 
+    // También devolvemos los items del plan que se saltaron con su motivo, para
+    // que la UI y el log expliquen POR QUÉ solo se enviaron N de M vencidas.
+    // Antes solo llegaban al summary agregado ("will_skip: 10") sin detalle.
+    const skippedItems = plan
+        .filter(p => p.action === 'skip')
+        .map(p => ({
+            invoice_id: p.invoice.id,
+            invoice_number: p.invoice.invoice_number,
+            contact_name: p.invoice.contact_name,
+            level: p.level,
+            days_overdue: p.days_overdue,
+            reason: p.reason,
+        }));
+
     return {
         dry_run: dryRun,
         summary: summarizePlan(plan),
         executed: results,
+        plan_skipped: skippedItems,
     };
 }
 
@@ -945,7 +962,10 @@ async function maybeDispatchMultiAlert({ config, baseUrl, force = false }) {
     if (!alerts.length) return { skipped: true, reason: 'no-alerts' };
 
     const sendResult = await sendMultiOverdueEmail({ alerts, config, baseUrl });
-    if (sendResult.sent) {
+    // El anti-spam solo cuenta envíos automáticos. Un envío manual (force) no
+    // debe bloquear el próximo tick del cron — si el usuario prueba a las 22h,
+    // el auto de las 9h del día siguiente debe seguir saliendo.
+    if (sendResult.sent && !force) {
         await supabase.from('dunning_config').update({
             multi_alert_last_sent_at: new Date().toISOString(),
             multi_alert_last_summary: {
@@ -1196,7 +1216,9 @@ async function maybeDispatchOverdueReport({ config, baseUrl, force = false }) {
     if (report.total_count === 0 && !force) return { skipped: true, reason: 'no-overdue' };
 
     const sendResult = await sendOverdueReportEmail({ report, config, baseUrl });
-    if (sendResult.sent) {
+    // Anti-spam solo para envíos automáticos. Un manual (force) no debe
+    // bloquear el próximo tick del cron.
+    if (sendResult.sent && !force) {
         await supabase.from('dunning_config').update({
             overdue_report_last_sent_at: new Date().toISOString(),
             overdue_report_last_summary: {
@@ -2012,27 +2034,13 @@ router.get('/multi-overdue-alerts', async (_req, res) => {
 router.post('/multi-overdue-alerts/send', async (req, res) => {
     try {
         const config = await getConfig();
-        const { alerts } = await computeMultiOverdueAlerts({ config });
-        if (!alerts.length) {
-            return res.json({ sent: false, reason: 'no-alerts' });
-        }
-        const result = await sendMultiOverdueEmail({
-            alerts, config, baseUrl: computeBaseUrl(req),
+        // Delegamos en maybeDispatchMultiAlert con force=true — así:
+        //   1) el envío manual NO actualiza multi_alert_last_sent_at (el
+        //      anti-spam del cron no se contamina con pruebas del usuario).
+        //   2) el snapshot del histórico se registra igual.
+        const result = await maybeDispatchMultiAlert({
+            config, baseUrl: computeBaseUrl(req), force: true,
         });
-        if (result.sent) {
-            await supabase.from('dunning_config').update({
-                multi_alert_last_sent_at: new Date().toISOString(),
-                multi_alert_last_summary: {
-                    alerts_count: alerts.length,
-                    threshold: Math.max(2, Number(config.multi_alert_threshold || 2)),
-                    total_invoices: alerts.reduce((s, a) => s + a.invoice_count, 0),
-                    total_amount: alerts.reduce((s, a) => s + Number(a.total_amount || 0), 0),
-                    manual: true,
-                },
-            }).eq('id', 1);
-        }
-        // Snapshot manual: registramos el disparo también en el historial.
-        await snapshotMultiOverdueAlerts({ alerts, emailSent: !!result.sent });
         res.json(result);
     } catch (err) {
         console.error('[dunning] multi-overdue-alerts/send error:', err);

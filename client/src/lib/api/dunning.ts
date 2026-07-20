@@ -232,6 +232,15 @@ export interface PlanSummary {
     by_level: Record<'1' | '2' | '3', number>;
 }
 
+export interface PlanSkipItem {
+    invoice_id: string;
+    invoice_number?: string;
+    contact_name?: string;
+    level: 0 | 1 | 2 | 3;
+    days_overdue: number;
+    reason: string;
+}
+
 export interface RunResult {
     invoice_id: string;
     invoice_number?: string;
@@ -315,7 +324,12 @@ export const dunningApi = {
         }),
 
     run: (payload: { dry_run?: boolean; force?: boolean } = {}) =>
-        fetchApi<{ dry_run: boolean; summary: PlanSummary; executed: RunResult[] }>('/dunning/run', {
+        fetchApi<{
+            dry_run: boolean;
+            summary: PlanSummary;
+            executed: RunResult[];
+            plan_skipped?: PlanSkipItem[];
+        }>('/dunning/run', {
             method: 'POST',
             body: JSON.stringify(payload),
         }),

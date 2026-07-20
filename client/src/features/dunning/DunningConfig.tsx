@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     dunningApi, DunningBank, DunningConfig as DunningConfigType, DunningTemplate,
-    PlanItem, PlanSummary, RunResult, DunningCronRun, DunningReminderRow,
+    PlanItem, PlanSummary, RunResult, PlanSkipItem, DunningCronRun, DunningReminderRow,
 } from '@/lib/api/dunning';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -33,6 +33,53 @@ const TABS: { key: Tab; label: string; icon: any }[] = [
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── Feedback estándar de guardado ────────────────────────────────────────────
+// Cada tarjeta con botón "Guardar" pinta este indicador. Aparece a la
+// izquierda del botón con auto-hide de 3s tras éxito. En error, se queda
+// hasta que el usuario reintente.
+function SaveIndicator({
+    status, error, successLabel = 'Guardado',
+}: {
+    status: 'idle' | 'pending' | 'success' | 'error';
+    error?: unknown;
+    successLabel?: string;
+}) {
+    const [visible, setVisible] = useState(false);
+    useEffect(() => {
+        if (status === 'success') {
+            setVisible(true);
+            const t = setTimeout(() => setVisible(false), 3000);
+            return () => clearTimeout(t);
+        }
+        if (status === 'error' || status === 'pending') setVisible(true);
+    }, [status]);
+
+    if (!visible || status === 'idle') return null;
+
+    if (status === 'pending') {
+        return (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="animate-spin" size={12} /> Guardando…
+            </span>
+        );
+    }
+    if (status === 'success') {
+        return (
+            <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-semibold animate-in fade-in">
+                <Check size={13} /> {successLabel}
+            </span>
+        );
+    }
+    // error
+    const msg = (error as any)?.message || String(error || 'Error desconocido');
+    return (
+        <span className="inline-flex items-start gap-1.5 text-xs text-red-600 dark:text-red-400 max-w-[300px]">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+            <span className="line-clamp-2">Error: {msg}</span>
+        </span>
+    );
+}
 
 // ── Editor de listas de emails ────────────────────────────────────────────────
 // Se usa tanto para los CC globales del config como para los CC por override.
@@ -118,9 +165,15 @@ function EmailListEditor({
 
 // ── Tab: Reglas ────────────────────────────────────────────────────────────────
 
-function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function RulesTab({ config }: { config: DunningConfigType }) {
+    const queryClient = useQueryClient();
     const [form, setForm] = useState(config);
     useEffect(() => setForm(config), [config]);
+
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
 
     return (
         <div className="space-y-4">
@@ -215,16 +268,21 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                     <p className="text-[11px] text-muted-foreground mt-1">Cada recordatorio incluirá esta dirección en BCC (no la ve el cliente) para tener visibilidad interna.</p>
                 </div>
 
-                <div className="flex justify-end pt-2 border-t">
-                    <Button onClick={() => onSave(form)} disabled={saving}>
-                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                <div className="flex justify-end items-center gap-3 pt-2 border-t">
+                    <SaveIndicator
+                        status={saveMutation.status}
+                        error={saveMutation.error}
+                        successLabel="Reglas guardadas"
+                    />
+                    <Button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
+                        {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
                         Guardar reglas
                     </Button>
                 </div>
             </CardContent>
         </Card>
-        <MultiAlertCard config={config} onSave={onSave} saving={saving} />
-        <OverdueReportCard config={config} onSave={onSave} saving={saving} />
+        <MultiAlertCard config={config} />
+        <OverdueReportCard config={config} />
         </div>
     );
 }
@@ -232,8 +290,12 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
 // ── Sección: reporte periódico de facturas vencidas ──────────────────────────
 // Manda un email con la lista completa de vencidas + columna "recordatorio
 // enviado". Se dispara DESPUÉS de los recordatorios en el mismo cron horario.
-function OverdueReportCard({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function OverdueReportCard({ config }: { config: DunningConfigType }) {
     const queryClient = useQueryClient();
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
     const [enabled, setEnabled] = useState(config.overdue_report_enabled);
     const [to, setTo] = useState(config.overdue_report_to || '');
     const [cc, setCc] = useState<string[]>(config.overdue_report_cc_emails || []);
@@ -448,10 +510,17 @@ function OverdueReportCard({ config, onSave, saving }: { config: DunningConfigTy
                         {sendMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Send size={14} className="mr-2" />}
                         {hasUnsavedChanges ? 'Guardar y enviar' : 'Enviar reporte ahora'}
                     </Button>
-                    <Button onClick={() => onSave(patch)} disabled={saving || !hasUnsavedChanges}>
-                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
-                        Guardar reporte
-                    </Button>
+                    <div className="flex items-center gap-3">
+                        <SaveIndicator
+                            status={saveMutation.status}
+                            error={saveMutation.error}
+                            successLabel="Reporte guardado"
+                        />
+                        <Button onClick={() => saveMutation.mutate(patch)} disabled={saveMutation.isPending || !hasUnsavedChanges}>
+                            {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                            Guardar reporte
+                        </Button>
+                    </div>
                 </div>
             </CardContent>
         </Card>
@@ -462,8 +531,12 @@ function OverdueReportCard({ config, onSave, saving }: { config: DunningConfigTy
 // Config visible dentro de la pestaña "Reglas". Se guarda mediante el mismo
 // updateConfig que las reglas, así el usuario no tiene que dar dos "Guardar".
 
-function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function MultiAlertCard({ config }: { config: DunningConfigType }) {
     const queryClient = useQueryClient();
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
     const [enabled, setEnabled] = useState(config.multi_alert_enabled);
     const [threshold, setThreshold] = useState(config.multi_alert_threshold);
     const [to, setTo] = useState(config.multi_alert_to || '');
@@ -719,10 +792,17 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
                         {sendMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Send size={14} className="mr-2" />}
                         {hasUnsavedChanges ? 'Guardar y enviar' : 'Enviar alerta ahora'}
                     </Button>
-                    <Button onClick={() => onSave(patch)} disabled={saving || !hasUnsavedChanges}>
-                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
-                        Guardar alerta
-                    </Button>
+                    <div className="flex items-center gap-3">
+                        <SaveIndicator
+                            status={saveMutation.status}
+                            error={saveMutation.error}
+                            successLabel="Alerta guardada"
+                        />
+                        <Button onClick={() => saveMutation.mutate(patch)} disabled={saveMutation.isPending || !hasUnsavedChanges}>
+                            {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                            Guardar alerta
+                        </Button>
+                    </div>
                 </div>
             </CardContent>
         </Card>
@@ -731,10 +811,15 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
 
 // ── Tab: Programación ─────────────────────────────────────────────────────────
 
-function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function ScheduleTab({ config }: { config: DunningConfigType }) {
+    const queryClient = useQueryClient();
     const [form, setForm] = useState(config);
-    const [justSaved, setJustSaved] = useState(false);
     useEffect(() => setForm(config), [config]);
+
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
 
     const toggleDay = (day: number) => {
         const set = new Set(form.send_days || []);
@@ -742,11 +827,7 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
         setForm({ ...form, send_days: Array.from(set).sort() });
     };
 
-    const handleSave = () => {
-        onSave(form);
-        setJustSaved(true);
-        setTimeout(() => setJustSaved(false), 3000);
-    };
+    const handleSave = () => saveMutation.mutate(form);
 
     // Resumen del estado ACTUALMENTE GUARDADO (leído de config, no de form).
     const savedDaysLabel = (config.send_days || []).length === 0
@@ -905,13 +986,13 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
                 </div>
 
                 <div className="flex justify-end items-center gap-3 pt-2 border-t">
-                    {justSaved && !saving && (
-                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1 animate-in fade-in">
-                            <Check size={14} /> Guardado
-                        </span>
-                    )}
-                    <Button onClick={handleSave} disabled={saving}>
-                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                    <SaveIndicator
+                        status={saveMutation.status}
+                        error={saveMutation.error}
+                        successLabel="Programación guardada"
+                    />
+                    <Button onClick={handleSave} disabled={saveMutation.isPending}>
+                        {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
                         Guardar programación
                     </Button>
                 </div>
@@ -923,9 +1004,15 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
 
 // ── Tab: Marca y bancos ───────────────────────────────────────────────────────
 
-function BrandTab({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function BrandTab({ config }: { config: DunningConfigType }) {
+    const queryClient = useQueryClient();
     const [form, setForm] = useState(config);
     useEffect(() => setForm(config), [config]);
+
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
 
     const updateBank = (idx: number, patch: Partial<DunningBank>) => {
         const banks = [...(form.banks || [])];
@@ -1085,9 +1172,14 @@ function BrandTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 </CardContent>
             </Card>
 
-            <div className="flex justify-end">
-                <Button onClick={() => onSave(form)} disabled={saving}>
-                    {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+            <div className="flex justify-end items-center gap-3">
+                <SaveIndicator
+                    status={saveMutation.status}
+                    error={saveMutation.error}
+                    successLabel="Marca guardada"
+                />
+                <Button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
+                    {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
                     Guardar marca y bancos
                 </Button>
             </div>
@@ -1160,10 +1252,17 @@ function TemplateEditorV2({ template, config, onSaved }: { template: DunningTemp
                         {previewMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Eye size={14} className="mr-2" />}
                         Previsualizar
                     </Button>
-                    <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
-                        {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : saveMutation.isSuccess ? <Check size={14} className="mr-2" /> : <Save size={14} className="mr-2" />}
-                        Guardar plantilla
-                    </Button>
+                    <div className="flex items-center gap-3">
+                        <SaveIndicator
+                            status={saveMutation.status}
+                            error={saveMutation.error}
+                            successLabel="Plantilla guardada"
+                        />
+                        <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+                            {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                            Guardar plantilla
+                        </Button>
+                    </div>
                 </div>
             </div>
 
@@ -1468,13 +1567,14 @@ function TestSendModal({ onClose }: { onClose: () => void }) {
     );
 }
 
-function RunResultsModal({ results, dryRun, onClose }: { results: RunResult[]; dryRun: boolean; onClose: () => void }) {
+function RunResultsModal({ results, planSkipped, dryRun, onClose }: { results: RunResult[]; planSkipped?: PlanSkipItem[]; dryRun: boolean; onClose: () => void }) {
     const sent = results.filter(r => r.status === 'sent').length;
     const failed = results.filter(r => r.status === 'failed').length;
     const skipped = results.filter(r => r.status === 'skipped').length;
+    const notInPlan = planSkipped || [];
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-card rounded-xl border shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="bg-card rounded-xl border shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
                 <div className="px-5 py-3 border-b flex items-center justify-between">
                     <div>
                         <h3 className="text-base font-bold text-foreground">
@@ -1482,64 +1582,102 @@ function RunResultsModal({ results, dryRun, onClose }: { results: RunResult[]; d
                         </h3>
                         <p className="text-xs text-muted-foreground">
                             {dryRun ? `${results.length} envíos simulados` : `${sent} enviados · ${failed} fallidos · ${skipped} omitidos`}
+                            {notInPlan.length > 0 && ` · ${notInPlan.length} descartadas por el plan`}
                         </p>
                     </div>
                     <button onClick={onClose} className="p-1 rounded hover:bg-muted"><X size={16} /></button>
                 </div>
-                <div className="overflow-y-auto flex-1 p-4">
-                    {results.length === 0 ? (
+                <div className="overflow-y-auto flex-1 p-4 space-y-4">
+                    {results.length === 0 && notInPlan.length === 0 ? (
                         <p className="text-center text-sm text-muted-foreground py-8">No había nada que enviar.</p>
                     ) : (
-                        <table className="w-full text-xs">
-                            <thead className="text-[11px] uppercase text-muted-foreground border-b">
-                                <tr>
-                                    <th className="text-left py-1.5 px-2 w-8"></th>
-                                    <th className="text-left py-1.5 px-2">Cliente</th>
-                                    <th className="text-left py-1.5 px-2">Factura</th>
-                                    <th className="text-center py-1.5 px-2">Nivel</th>
-                                    <th className="text-left py-1.5 px-2">Destino</th>
-                                    <th className="text-left py-1.5 px-2">Detalle</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border/40">
-                                {results.map((r, i) => (
-                                    <tr key={i}>
-                                        <td className="py-1.5 px-2">
-                                            {r.status === 'sent' && <Check size={14} className="text-emerald-500" />}
-                                            {r.status === 'would-send' && <Play size={14} className="text-blue-500" />}
-                                            {r.status === 'failed' && <X size={14} className="text-red-500" />}
-                                            {r.status === 'skipped' && <Info size={14} className="text-muted-foreground" />}
-                                        </td>
-                                        <td className="py-1.5 px-2 font-medium">{r.contact_name || <span className="text-muted-foreground font-mono text-[10px]">{r.invoice_id.slice(0, 10)}</span>}</td>
-                                        <td className="py-1.5 px-2 font-mono text-[11px]">{r.invoice_number || '—'}</td>
-                                        <td className="py-1.5 px-2 text-center">{r.level ? <span className="inline-flex px-1.5 rounded bg-primary/10 text-primary font-semibold">N{r.level}</span> : '—'}</td>
-                                        <td className="py-1.5 px-2">
-                                            {r.to ? (
-                                                <>
-                                                    <span className={r.redirect_reason ? 'text-amber-600 font-medium' : ''}>{r.to}</span>
-                                                    {r.redirect_reason && (
-                                                        <span className="ml-1 text-[10px] uppercase text-amber-500">
-                                                            [{r.redirect_reason === 'test_mode' ? 'PRUEBA' : 'OVERRIDE'}]
-                                                        </span>
-                                                    )}
-                                                    {(r.cc || []).length > 0 && (
-                                                        <div className="text-[10px] text-muted-foreground mt-0.5">
-                                                            <span className="font-semibold">CC:</span> {(r.cc || []).join(', ')}
-                                                        </div>
-                                                    )}
-                                                </>
-                                            ) : '—'}
-                                        </td>
-                                        <td className="py-1.5 px-2">
-                                            {r.reason && <span className="text-muted-foreground italic">{humanizeReason(r.reason)}</span>}
-                                            {r.error && <span className="text-red-600">{r.error}</span>}
-                                            {r.status === 'sent' && !r.error && <span className="text-emerald-600">Enviado</span>}
-                                            {r.status === 'would-send' && <span className="text-blue-600">Iría a este destino</span>}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                        <>
+                            {results.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Procesadas ({results.length})</p>
+                                    <table className="w-full text-xs">
+                                        <thead className="text-[11px] uppercase text-muted-foreground border-b">
+                                            <tr>
+                                                <th className="text-left py-1.5 px-2 w-8"></th>
+                                                <th className="text-left py-1.5 px-2">Cliente</th>
+                                                <th className="text-left py-1.5 px-2">Factura</th>
+                                                <th className="text-center py-1.5 px-2">Nivel</th>
+                                                <th className="text-left py-1.5 px-2">Destino</th>
+                                                <th className="text-left py-1.5 px-2">Detalle</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-border/40">
+                                            {results.map((r, i) => (
+                                                <tr key={i}>
+                                                    <td className="py-1.5 px-2">
+                                                        {r.status === 'sent' && <Check size={14} className="text-emerald-500" />}
+                                                        {r.status === 'would-send' && <Play size={14} className="text-blue-500" />}
+                                                        {r.status === 'failed' && <X size={14} className="text-red-500" />}
+                                                        {r.status === 'skipped' && <Info size={14} className="text-muted-foreground" />}
+                                                    </td>
+                                                    <td className="py-1.5 px-2 font-medium">{r.contact_name || <span className="text-muted-foreground font-mono text-[10px]">{r.invoice_id.slice(0, 10)}</span>}</td>
+                                                    <td className="py-1.5 px-2 font-mono text-[11px]">{r.invoice_number || '—'}</td>
+                                                    <td className="py-1.5 px-2 text-center">{r.level ? <span className="inline-flex px-1.5 rounded bg-primary/10 text-primary font-semibold">N{r.level}</span> : '—'}</td>
+                                                    <td className="py-1.5 px-2">
+                                                        {r.to ? (
+                                                            <>
+                                                                <span className={r.redirect_reason ? 'text-amber-600 font-medium' : ''}>{r.to}</span>
+                                                                {r.redirect_reason && (
+                                                                    <span className="ml-1 text-[10px] uppercase text-amber-500">
+                                                                        [{r.redirect_reason === 'test_mode' ? 'PRUEBA' : 'OVERRIDE'}]
+                                                                    </span>
+                                                                )}
+                                                                {(r.cc || []).length > 0 && (
+                                                                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                                                                        <span className="font-semibold">CC:</span> {(r.cc || []).join(', ')}
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        ) : '—'}
+                                                    </td>
+                                                    <td className="py-1.5 px-2">
+                                                        {r.reason && <span className="text-muted-foreground italic">{humanizeReason(r.reason)}</span>}
+                                                        {r.error && <span className="text-red-600">{r.error}</span>}
+                                                        {r.status === 'sent' && !r.error && <span className="text-emerald-600">Enviado</span>}
+                                                        {r.status === 'would-send' && <span className="text-blue-600">Iría a este destino</span>}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                            {notInPlan.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Descartadas antes de enviar ({notInPlan.length})</p>
+                                    <p className="text-[11px] text-muted-foreground mb-2">
+                                        Facturas vencidas para las que el motor decidió no enviar recordatorio en esta ejecución (ya se envió antes, se espera al siguiente ciclo, etc).
+                                    </p>
+                                    <table className="w-full text-xs">
+                                        <thead className="text-[11px] uppercase text-muted-foreground border-b">
+                                            <tr>
+                                                <th className="text-left py-1.5 px-2">Cliente</th>
+                                                <th className="text-left py-1.5 px-2">Factura</th>
+                                                <th className="text-center py-1.5 px-2">Nivel</th>
+                                                <th className="text-center py-1.5 px-2">Días</th>
+                                                <th className="text-left py-1.5 px-2">Motivo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-border/40">
+                                            {notInPlan.map((p, i) => (
+                                                <tr key={i}>
+                                                    <td className="py-1.5 px-2 text-muted-foreground">{p.contact_name || '—'}</td>
+                                                    <td className="py-1.5 px-2 font-mono text-[11px] text-muted-foreground">{p.invoice_number || p.invoice_id.slice(0, 8)}</td>
+                                                    <td className="py-1.5 px-2 text-center">{p.level ? <span className="inline-flex px-1.5 rounded bg-muted text-muted-foreground font-semibold">N{p.level}</span> : '—'}</td>
+                                                    <td className="py-1.5 px-2 text-center text-muted-foreground">{p.days_overdue}</td>
+                                                    <td className="py-1.5 px-2 text-muted-foreground italic">{humanizeReason(p.reason)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
             </div>
@@ -1746,7 +1884,7 @@ function OverridesPanel() {
 function RunTab({ config }: { config: DunningConfigType }) {
     const [preview, setPreview] = useState<{ plan: PlanItem[]; summary: PlanSummary; testMode: boolean; testModeEmail: string | null } | null>(null);
     const [showTestSend, setShowTestSend] = useState(false);
-    const [runResults, setRunResults] = useState<{ results: RunResult[]; dryRun: boolean } | null>(null);
+    const [runResults, setRunResults] = useState<{ results: RunResult[]; planSkipped?: PlanSkipItem[]; dryRun: boolean } | null>(null);
 
     const previewMutation = useMutation({
         mutationFn: () => dunningApi.previewRun(),
@@ -1760,7 +1898,7 @@ function RunTab({ config }: { config: DunningConfigType }) {
 
     const runMutation = useMutation({
         mutationFn: (dryRun: boolean) => dunningApi.run({ dry_run: dryRun, force: !config.enabled }),
-        onSuccess: (data) => setRunResults({ results: data.executed, dryRun: data.dry_run }),
+        onSuccess: (data) => setRunResults({ results: data.executed, planSkipped: data.plan_skipped, dryRun: data.dry_run }),
     });
 
     const syncMutation = useMutation({ mutationFn: () => dunningApi.syncPaid() });
@@ -1876,7 +2014,7 @@ function RunTab({ config }: { config: DunningConfigType }) {
 
             {preview && <PreviewModal plan={preview.plan} summary={preview.summary} testMode={preview.testMode} testModeEmail={preview.testModeEmail} onClose={() => setPreview(null)} />}
             {showTestSend && <TestSendModal onClose={() => setShowTestSend(false)} />}
-            {runResults && <RunResultsModal results={runResults.results} dryRun={runResults.dryRun} onClose={() => setRunResults(null)} />}
+            {runResults && <RunResultsModal results={runResults.results} planSkipped={runResults.planSkipped} dryRun={runResults.dryRun} onClose={() => setRunResults(null)} />}
         </div>
     );
 }
@@ -2241,19 +2379,11 @@ function HistoryTab() {
 
 
 export default function DunningConfig() {
-    const queryClient = useQueryClient();
     const [tab, setTab] = useState<Tab>('rules');
 
     const { data, isLoading } = useQuery({
         queryKey: ['dunning', 'config'],
         queryFn: () => dunningApi.getConfig(),
-    });
-
-    const saveMutation = useMutation({
-        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] });
-        },
     });
 
     const config = data?.config;
@@ -2290,9 +2420,9 @@ export default function DunningConfig() {
                 </div>
             ) : (
                 <>
-                    {tab === 'rules' && <RulesTab config={config} onSave={p => saveMutation.mutate(p)} saving={saveMutation.isPending} />}
-                    {tab === 'schedule' && <ScheduleTab config={config} onSave={p => saveMutation.mutate(p)} saving={saveMutation.isPending} />}
-                    {tab === 'brand' && <BrandTab config={config} onSave={p => saveMutation.mutate(p)} saving={saveMutation.isPending} />}
+                    {tab === 'rules' && <RulesTab config={config} />}
+                    {tab === 'schedule' && <ScheduleTab config={config} />}
+                    {tab === 'brand' && <BrandTab config={config} />}
                     {tab === 'templates' && <TemplatesTab config={config} />}
                     {tab === 'run' && <RunTab config={config} />}
                     {tab === 'history' && <HistoryTab />}
