@@ -1077,27 +1077,36 @@ function renderOverdueReportEmail({ report, config, appUrl }) {
     <div style="max-width:1100px;margin:0 auto;padding:16px 12px;">
         <div style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
 
-            <!-- Header + KPIs compactos en una banda -->
-            <div style="padding:14px 20px;border-bottom:1px solid #eef1f4;">
+            <!-- Header -->
+            <div style="padding:14px 20px 12px;border-bottom:1px solid #eef1f4;">
+                <div style="font-size:18px;font-weight:700;color:#111827;line-height:1.2;">Relación de facturas vencidas</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:2px;">Corte del ${new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+            </div>
+
+            <!-- KPIs en 4 columnas separadas -->
+            <div style="padding:14px 20px;background:#fafbfc;border-bottom:1px solid #eef1f4;">
                 <table style="width:100%;border-collapse:collapse;">
                     <tr>
-                        <td style="vertical-align:middle;">
-                            <div style="font-size:16px;font-weight:700;color:#111827;line-height:1.2;">Relación de facturas vencidas</div>
-                            <div style="font-size:11.5px;color:#6b7280;margin-top:2px;">Corte del ${new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+                        <td style="padding-right:20px;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;font-weight:600;margin-bottom:3px;">Total facturas</div>
+                            <div style="font-size:20px;font-weight:800;color:#111827;line-height:1;">${report.total_count}</div>
                         </td>
-                        <td style="vertical-align:middle;text-align:right;white-space:nowrap;">
-                            <span style="display:inline-block;margin-left:16px;font-size:12px;color:#6b7280;">
-                                <strong style="color:#111827;font-size:15px;">${report.total_count}</strong> facturas
-                            </span>
-                            <span style="display:inline-block;margin-left:16px;font-size:12px;color:#6b7280;">
-                                <strong style="color:#111827;font-size:15px;font-variant-numeric:tabular-nums;">${fmt(report.total_amount)}</strong>
-                            </span>
-                            <span style="display:inline-block;margin-left:16px;font-size:12px;color:#6b7280;">
-                                <strong style="color:#dc2626;">${criticalCount}</strong> crít · <strong style="color:#b45309;">${warningCount}</strong> warn
-                            </span>
-                            <span style="display:inline-block;margin-left:16px;font-size:12px;color:#6b7280;">
-                                <strong style="color:#059669;">${remindedCount}/${report.total_count}</strong> con recordatorio
-                            </span>
+                        <td style="padding:0 20px;border-left:1px solid #e5e7eb;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;font-weight:600;margin-bottom:3px;">Total deuda</div>
+                            <div style="font-size:20px;font-weight:800;color:#111827;line-height:1;font-variant-numeric:tabular-nums;">${fmt(report.total_amount)}</div>
+                        </td>
+                        <td style="padding:0 20px;border-left:1px solid #e5e7eb;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;font-weight:600;margin-bottom:3px;">Estado</div>
+                            <div style="font-size:14px;line-height:1.2;color:#111827;">
+                                <span style="color:#dc2626;font-weight:700;">${criticalCount}</span> crítico${criticalCount === 1 ? '' : 's'} ·
+                                <span style="color:#b45309;font-weight:700;">${warningCount}</span> warning
+                            </div>
+                        </td>
+                        <td style="padding-left:20px;border-left:1px solid #e5e7eb;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;font-weight:600;margin-bottom:3px;">Con recordatorio</div>
+                            <div style="font-size:14px;line-height:1.2;color:#111827;">
+                                <span style="color:#059669;font-weight:700;">${remindedCount}</span> / ${report.total_count} enviados
+                            </div>
                         </td>
                     </tr>
                 </table>
@@ -1120,10 +1129,17 @@ function renderOverdueReportEmail({ report, config, appUrl }) {
                 <tbody>${rows || '<tr><td colspan="8" style="padding:30px;text-align:center;color:#6b7280;font-size:13px;">Sin facturas vencidas ahora mismo.</td></tr>'}</tbody>
             </table>
 
-            <!-- Footer una línea -->
-            <div style="padding:10px 20px;background:#fafbfc;border-top:1px solid #eef1f4;font-size:11px;color:#6b7280;display:flex;justify-content:space-between;">
-                <span>Umbral crítico ≥ ${critLevel} días · Immoral Finance</span>
-                ${appUrl ? `<a href="${appUrl}" style="color:#111827;font-weight:600;text-decoration:none;">Abrir módulo Impagos →</a>` : ''}
+            ${appUrl ? `
+            <!-- CTA -->
+            <div style="padding:16px 20px;background:#fafbfc;border-top:1px solid #eef1f4;text-align:center;">
+                <a href="${appUrl}" style="display:inline-block;background:#111827;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;letter-spacing:0.2px;">
+                    Abrir módulo Impagos →
+                </a>
+            </div>` : ''}
+
+            <!-- Footer -->
+            <div style="padding:8px 20px;background:#f3f4f6;border-top:1px solid #eef1f4;font-size:11px;color:#6b7280;text-align:center;">
+                Reporte automático · Immoral Finance · Umbral crítico ≥ ${critLevel} días
             </div>
         </div>
     </div>
