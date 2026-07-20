@@ -34,6 +34,53 @@ const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// ── Feedback estándar de guardado ────────────────────────────────────────────
+// Cada tarjeta con botón "Guardar" pinta este indicador. Aparece a la
+// izquierda del botón con auto-hide de 3s tras éxito. En error, se queda
+// hasta que el usuario reintente.
+function SaveIndicator({
+    status, error, successLabel = 'Guardado',
+}: {
+    status: 'idle' | 'pending' | 'success' | 'error';
+    error?: unknown;
+    successLabel?: string;
+}) {
+    const [visible, setVisible] = useState(false);
+    useEffect(() => {
+        if (status === 'success') {
+            setVisible(true);
+            const t = setTimeout(() => setVisible(false), 3000);
+            return () => clearTimeout(t);
+        }
+        if (status === 'error' || status === 'pending') setVisible(true);
+    }, [status]);
+
+    if (!visible || status === 'idle') return null;
+
+    if (status === 'pending') {
+        return (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="animate-spin" size={12} /> Guardando…
+            </span>
+        );
+    }
+    if (status === 'success') {
+        return (
+            <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-semibold animate-in fade-in">
+                <Check size={13} /> {successLabel}
+            </span>
+        );
+    }
+    // error
+    const msg = (error as any)?.message || String(error || 'Error desconocido');
+    return (
+        <span className="inline-flex items-start gap-1.5 text-xs text-red-600 dark:text-red-400 max-w-[300px]">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+            <span className="line-clamp-2">Error: {msg}</span>
+        </span>
+    );
+}
+
 // ── Editor de listas de emails ────────────────────────────────────────────────
 // Se usa tanto para los CC globales del config como para los CC por override.
 // UX: escribes un email + Enter (o coma / espacio) para añadirlo como chip,
@@ -118,9 +165,15 @@ function EmailListEditor({
 
 // ── Tab: Reglas ────────────────────────────────────────────────────────────────
 
-function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function RulesTab({ config }: { config: DunningConfigType }) {
+    const queryClient = useQueryClient();
     const [form, setForm] = useState(config);
     useEffect(() => setForm(config), [config]);
+
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
 
     return (
         <div className="space-y-4">
@@ -215,16 +268,21 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                     <p className="text-[11px] text-muted-foreground mt-1">Cada recordatorio incluirá esta dirección en BCC (no la ve el cliente) para tener visibilidad interna.</p>
                 </div>
 
-                <div className="flex justify-end pt-2 border-t">
-                    <Button onClick={() => onSave(form)} disabled={saving}>
-                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                <div className="flex justify-end items-center gap-3 pt-2 border-t">
+                    <SaveIndicator
+                        status={saveMutation.status}
+                        error={saveMutation.error}
+                        successLabel="Reglas guardadas"
+                    />
+                    <Button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
+                        {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
                         Guardar reglas
                     </Button>
                 </div>
             </CardContent>
         </Card>
-        <MultiAlertCard config={config} onSave={onSave} saving={saving} />
-        <OverdueReportCard config={config} onSave={onSave} saving={saving} />
+        <MultiAlertCard config={config} />
+        <OverdueReportCard config={config} />
         </div>
     );
 }
@@ -232,8 +290,12 @@ function RulesTab({ config, onSave, saving }: { config: DunningConfigType; onSav
 // ── Sección: reporte periódico de facturas vencidas ──────────────────────────
 // Manda un email con la lista completa de vencidas + columna "recordatorio
 // enviado". Se dispara DESPUÉS de los recordatorios en el mismo cron horario.
-function OverdueReportCard({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function OverdueReportCard({ config }: { config: DunningConfigType }) {
     const queryClient = useQueryClient();
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
     const [enabled, setEnabled] = useState(config.overdue_report_enabled);
     const [to, setTo] = useState(config.overdue_report_to || '');
     const [cc, setCc] = useState<string[]>(config.overdue_report_cc_emails || []);
@@ -448,10 +510,17 @@ function OverdueReportCard({ config, onSave, saving }: { config: DunningConfigTy
                         {sendMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Send size={14} className="mr-2" />}
                         {hasUnsavedChanges ? 'Guardar y enviar' : 'Enviar reporte ahora'}
                     </Button>
-                    <Button onClick={() => onSave(patch)} disabled={saving || !hasUnsavedChanges}>
-                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
-                        Guardar reporte
-                    </Button>
+                    <div className="flex items-center gap-3">
+                        <SaveIndicator
+                            status={saveMutation.status}
+                            error={saveMutation.error}
+                            successLabel="Reporte guardado"
+                        />
+                        <Button onClick={() => saveMutation.mutate(patch)} disabled={saveMutation.isPending || !hasUnsavedChanges}>
+                            {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                            Guardar reporte
+                        </Button>
+                    </div>
                 </div>
             </CardContent>
         </Card>
@@ -462,8 +531,12 @@ function OverdueReportCard({ config, onSave, saving }: { config: DunningConfigTy
 // Config visible dentro de la pestaña "Reglas". Se guarda mediante el mismo
 // updateConfig que las reglas, así el usuario no tiene que dar dos "Guardar".
 
-function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function MultiAlertCard({ config }: { config: DunningConfigType }) {
     const queryClient = useQueryClient();
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
     const [enabled, setEnabled] = useState(config.multi_alert_enabled);
     const [threshold, setThreshold] = useState(config.multi_alert_threshold);
     const [to, setTo] = useState(config.multi_alert_to || '');
@@ -719,10 +792,17 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
                         {sendMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Send size={14} className="mr-2" />}
                         {hasUnsavedChanges ? 'Guardar y enviar' : 'Enviar alerta ahora'}
                     </Button>
-                    <Button onClick={() => onSave(patch)} disabled={saving || !hasUnsavedChanges}>
-                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
-                        Guardar alerta
-                    </Button>
+                    <div className="flex items-center gap-3">
+                        <SaveIndicator
+                            status={saveMutation.status}
+                            error={saveMutation.error}
+                            successLabel="Alerta guardada"
+                        />
+                        <Button onClick={() => saveMutation.mutate(patch)} disabled={saveMutation.isPending || !hasUnsavedChanges}>
+                            {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                            Guardar alerta
+                        </Button>
+                    </div>
                 </div>
             </CardContent>
         </Card>
@@ -731,10 +811,15 @@ function MultiAlertCard({ config, onSave, saving }: { config: DunningConfigType;
 
 // ── Tab: Programación ─────────────────────────────────────────────────────────
 
-function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function ScheduleTab({ config }: { config: DunningConfigType }) {
+    const queryClient = useQueryClient();
     const [form, setForm] = useState(config);
-    const [justSaved, setJustSaved] = useState(false);
     useEffect(() => setForm(config), [config]);
+
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
 
     const toggleDay = (day: number) => {
         const set = new Set(form.send_days || []);
@@ -742,11 +827,7 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
         setForm({ ...form, send_days: Array.from(set).sort() });
     };
 
-    const handleSave = () => {
-        onSave(form);
-        setJustSaved(true);
-        setTimeout(() => setJustSaved(false), 3000);
-    };
+    const handleSave = () => saveMutation.mutate(form);
 
     // Resumen del estado ACTUALMENTE GUARDADO (leído de config, no de form).
     const savedDaysLabel = (config.send_days || []).length === 0
@@ -905,13 +986,13 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
                 </div>
 
                 <div className="flex justify-end items-center gap-3 pt-2 border-t">
-                    {justSaved && !saving && (
-                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1 animate-in fade-in">
-                            <Check size={14} /> Guardado
-                        </span>
-                    )}
-                    <Button onClick={handleSave} disabled={saving}>
-                        {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                    <SaveIndicator
+                        status={saveMutation.status}
+                        error={saveMutation.error}
+                        successLabel="Programación guardada"
+                    />
+                    <Button onClick={handleSave} disabled={saveMutation.isPending}>
+                        {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
                         Guardar programación
                     </Button>
                 </div>
@@ -923,9 +1004,15 @@ function ScheduleTab({ config, onSave, saving }: { config: DunningConfigType; on
 
 // ── Tab: Marca y bancos ───────────────────────────────────────────────────────
 
-function BrandTab({ config, onSave, saving }: { config: DunningConfigType; onSave: (patch: Partial<DunningConfigType>) => void; saving: boolean }) {
+function BrandTab({ config }: { config: DunningConfigType }) {
+    const queryClient = useQueryClient();
     const [form, setForm] = useState(config);
     useEffect(() => setForm(config), [config]);
+
+    const saveMutation = useMutation({
+        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] }),
+    });
 
     const updateBank = (idx: number, patch: Partial<DunningBank>) => {
         const banks = [...(form.banks || [])];
@@ -1085,9 +1172,14 @@ function BrandTab({ config, onSave, saving }: { config: DunningConfigType; onSav
                 </CardContent>
             </Card>
 
-            <div className="flex justify-end">
-                <Button onClick={() => onSave(form)} disabled={saving}>
-                    {saving ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+            <div className="flex justify-end items-center gap-3">
+                <SaveIndicator
+                    status={saveMutation.status}
+                    error={saveMutation.error}
+                    successLabel="Marca guardada"
+                />
+                <Button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
+                    {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
                     Guardar marca y bancos
                 </Button>
             </div>
@@ -1160,10 +1252,17 @@ function TemplateEditorV2({ template, config, onSaved }: { template: DunningTemp
                         {previewMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Eye size={14} className="mr-2" />}
                         Previsualizar
                     </Button>
-                    <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
-                        {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : saveMutation.isSuccess ? <Check size={14} className="mr-2" /> : <Save size={14} className="mr-2" />}
-                        Guardar plantilla
-                    </Button>
+                    <div className="flex items-center gap-3">
+                        <SaveIndicator
+                            status={saveMutation.status}
+                            error={saveMutation.error}
+                            successLabel="Plantilla guardada"
+                        />
+                        <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+                            {saveMutation.isPending ? <Loader2 className="animate-spin mr-2" size={14} /> : <Save size={14} className="mr-2" />}
+                            Guardar plantilla
+                        </Button>
+                    </div>
                 </div>
             </div>
 
@@ -2280,19 +2379,11 @@ function HistoryTab() {
 
 
 export default function DunningConfig() {
-    const queryClient = useQueryClient();
     const [tab, setTab] = useState<Tab>('rules');
 
     const { data, isLoading } = useQuery({
         queryKey: ['dunning', 'config'],
         queryFn: () => dunningApi.getConfig(),
-    });
-
-    const saveMutation = useMutation({
-        mutationFn: (patch: Partial<DunningConfigType>) => dunningApi.updateConfig(patch),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['dunning', 'config'] });
-        },
     });
 
     const config = data?.config;
@@ -2329,9 +2420,9 @@ export default function DunningConfig() {
                 </div>
             ) : (
                 <>
-                    {tab === 'rules' && <RulesTab config={config} onSave={p => saveMutation.mutate(p)} saving={saveMutation.isPending} />}
-                    {tab === 'schedule' && <ScheduleTab config={config} onSave={p => saveMutation.mutate(p)} saving={saveMutation.isPending} />}
-                    {tab === 'brand' && <BrandTab config={config} onSave={p => saveMutation.mutate(p)} saving={saveMutation.isPending} />}
+                    {tab === 'rules' && <RulesTab config={config} />}
+                    {tab === 'schedule' && <ScheduleTab config={config} />}
+                    {tab === 'brand' && <BrandTab config={config} />}
                     {tab === 'templates' && <TemplatesTab config={config} />}
                     {tab === 'run' && <RunTab config={config} />}
                     {tab === 'history' && <HistoryTab />}
