@@ -1048,25 +1048,25 @@ function renderOverdueReportEmail({ report, config, appUrl }) {
 
     const rows = report.invoices.map((inv, idx) => {
         const isCritical = inv.days_overdue >= critLevel;
-        const zebra = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+        const zebra = idx % 2 === 0 ? '#ffffff' : '#f9fafb';
         const badgeBg = isCritical ? '#dc2626' : '#f59e0b';
         const badgeLabel = isCritical ? 'CRÍTICO' : 'WARNING';
         const daysColor = isCritical ? '#b91c1c' : '#b45309';
         const reminderBadge = inv.reminder_sent
-            ? `<span style="display:inline-block;background:#d1fae5;color:#065f46;padding:5px 12px;border-radius:999px;font-weight:600;font-size:12px;letter-spacing:0.2px;">✓ Sí${inv.reminder_level ? ` · N${inv.reminder_level}` : ''}</span>`
-            : `<span style="display:inline-block;background:#f3f4f6;color:#6b7280;padding:5px 12px;border-radius:999px;font-weight:600;font-size:12px;letter-spacing:0.2px;">— No</span>`;
+            ? `<span style="display:inline-block;background:#d1fae5;color:#065f46;padding:6px 14px;border-radius:999px;font-weight:600;font-size:13px;">✓ Sí${inv.reminder_level ? ` · N${inv.reminder_level}` : ''}</span>`
+            : `<span style="display:inline-block;background:#f3f4f6;color:#6b7280;padding:6px 14px;border-radius:999px;font-weight:600;font-size:13px;">— No</span>`;
         return `
             <tr style="background:${zebra};">
-                <td style="padding:18px 20px;border-bottom:1px solid #eef1f4;color:#111827;font-size:14px;font-weight:500;line-height:1.4;">${escapeHtml(inv.contact_name || '(sin nombre)')}</td>
-                <td style="padding:18px 16px;border-bottom:1px solid #eef1f4;color:#4b5563;font-family:'SF Mono',Menlo,Monaco,Consolas,monospace;font-size:12.5px;white-space:nowrap;">${escapeHtml(inv.invoice_number || '')}</td>
-                <td style="padding:18px 16px;border-bottom:1px solid #eef1f4;color:#4b5563;font-size:13px;white-space:nowrap;">${dateFmt(inv.invoice_date)}</td>
-                <td style="padding:18px 16px;border-bottom:1px solid #eef1f4;color:#4b5563;font-size:13px;white-space:nowrap;">${dateFmt(inv.due_date)}</td>
-                <td style="padding:18px 20px;border-bottom:1px solid #eef1f4;color:#111827;text-align:right;font-weight:700;font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap;">${fmt(inv.amount)}</td>
-                <td style="padding:18px 12px;border-bottom:1px solid #eef1f4;text-align:center;font-weight:800;font-size:16px;color:${daysColor};font-variant-numeric:tabular-nums;">${inv.days_overdue}</td>
-                <td style="padding:18px 12px;border-bottom:1px solid #eef1f4;text-align:center;">
-                    <span style="display:inline-block;background:${badgeBg};color:#fff;padding:6px 12px;border-radius:6px;font-weight:700;font-size:11px;letter-spacing:0.5px;">${badgeLabel}</span>
+                <td style="padding:14px 20px;border-bottom:1px solid #eef1f4;color:#111827;font-size:15px;font-weight:600;line-height:1.4;">${escapeHtml(inv.contact_name || '(sin nombre)')}</td>
+                <td style="padding:14px 16px;border-bottom:1px solid #eef1f4;color:#374151;font-family:'SF Mono',Menlo,Monaco,Consolas,monospace;font-size:14px;font-weight:500;white-space:nowrap;">${escapeHtml(inv.invoice_number || '')}</td>
+                <td style="padding:14px 16px;border-bottom:1px solid #eef1f4;color:#4b5563;font-size:14px;white-space:nowrap;">${dateFmt(inv.invoice_date)}</td>
+                <td style="padding:14px 16px;border-bottom:1px solid #eef1f4;color:#4b5563;font-size:14px;white-space:nowrap;">${dateFmt(inv.due_date)}</td>
+                <td style="padding:14px 20px;border-bottom:1px solid #eef1f4;color:#111827;text-align:right;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap;">${fmt(inv.amount)}</td>
+                <td style="padding:14px 12px;border-bottom:1px solid #eef1f4;text-align:center;font-weight:800;font-size:20px;color:${daysColor};font-variant-numeric:tabular-nums;line-height:1;">${inv.days_overdue}</td>
+                <td style="padding:14px 12px;border-bottom:1px solid #eef1f4;text-align:center;">
+                    <span style="display:inline-block;background:${badgeBg};color:#fff;padding:6px 14px;border-radius:6px;font-weight:700;font-size:12px;letter-spacing:0.6px;">${badgeLabel}</span>
                 </td>
-                <td style="padding:18px 16px;border-bottom:1px solid #eef1f4;text-align:center;">${reminderBadge}</td>
+                <td style="padding:14px 16px;border-bottom:1px solid #eef1f4;text-align:center;">${reminderBadge}</td>
             </tr>`;
     }).join('');
 
@@ -1076,36 +1076,35 @@ function renderOverdueReportEmail({ report, config, appUrl }) {
         <div style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);">
 
             <!-- Header -->
-            <div style="padding:32px 40px 28px;border-bottom:1px solid #eef1f4;">
-                <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#6b7280;font-weight:600;margin-bottom:10px;">Reporte de impagos</div>
-                <h1 style="margin:0;font-size:26px;font-weight:700;color:#111827;letter-spacing:-0.3px;">📊 Relación de facturas vencidas</h1>
-                <p style="margin:10px 0 0;color:#6b7280;font-size:14px;">
+            <div style="padding:28px 32px 20px;border-bottom:1px solid #eef1f4;">
+                <h1 style="margin:0;font-size:24px;font-weight:700;color:#111827;letter-spacing:-0.3px;">📊 Relación de facturas vencidas</h1>
+                <p style="margin:8px 0 0;color:#6b7280;font-size:14px;">
                     Corte del ${new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
                 </p>
             </div>
 
             <!-- KPIs -->
-            <div style="padding:28px 40px;background:#fafbfc;border-bottom:1px solid #eef1f4;">
+            <div style="padding:20px 32px;background:#fafbfc;border-bottom:1px solid #eef1f4;">
                 <table style="width:100%;border-collapse:collapse;">
                     <tr>
                         <td style="padding-right:16px;">
-                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:600;margin-bottom:6px;">Total facturas</div>
-                            <div style="font-size:28px;font-weight:800;color:#111827;line-height:1;">${report.total_count}</div>
+                            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;font-weight:600;margin-bottom:6px;">Total facturas</div>
+                            <div style="font-size:26px;font-weight:800;color:#111827;line-height:1;">${report.total_count}</div>
                         </td>
                         <td style="padding:0 16px;border-left:1px solid #e5e7eb;">
-                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:600;margin-bottom:6px;">Total deuda</div>
-                            <div style="font-size:28px;font-weight:800;color:#111827;line-height:1;font-variant-numeric:tabular-nums;">${fmt(report.total_amount)}</div>
+                            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;font-weight:600;margin-bottom:6px;">Total deuda</div>
+                            <div style="font-size:26px;font-weight:800;color:#111827;line-height:1;font-variant-numeric:tabular-nums;">${fmt(report.total_amount)}</div>
                         </td>
                         <td style="padding:0 16px;border-left:1px solid #e5e7eb;">
-                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:600;margin-bottom:6px;">Estado</div>
-                            <div style="font-size:14px;line-height:1.5;color:#111827;">
+                            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;font-weight:600;margin-bottom:6px;">Estado</div>
+                            <div style="font-size:15px;line-height:1.4;color:#111827;font-weight:500;">
                                 <span style="color:#dc2626;font-weight:700;">${criticalCount}</span> crítico${criticalCount === 1 ? '' : 's'} ·
                                 <span style="color:#b45309;font-weight:700;">${warningCount}</span> warning
                             </div>
                         </td>
                         <td style="padding-left:16px;border-left:1px solid #e5e7eb;">
-                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:600;margin-bottom:6px;">Con recordatorio</div>
-                            <div style="font-size:14px;line-height:1.5;color:#111827;">
+                            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;font-weight:600;margin-bottom:6px;">Con recordatorio</div>
+                            <div style="font-size:15px;line-height:1.4;color:#111827;font-weight:500;">
                                 <span style="color:#059669;font-weight:700;">${remindedCount}</span> / ${report.total_count} enviados
                             </div>
                         </td>
@@ -1117,14 +1116,14 @@ function renderOverdueReportEmail({ report, config, appUrl }) {
             <table style="width:100%;border-collapse:collapse;">
                 <thead>
                     <tr style="background:#1f2937;color:#fff;">
-                        <th style="padding:14px 20px;text-align:left;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Cliente</th>
-                        <th style="padding:14px 16px;text-align:left;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;white-space:nowrap;">Nº Factura</th>
-                        <th style="padding:14px 16px;text-align:left;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Emisión</th>
-                        <th style="padding:14px 16px;text-align:left;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Vencimiento</th>
-                        <th style="padding:14px 20px;text-align:right;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Monto</th>
-                        <th style="padding:14px 12px;text-align:center;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Días</th>
-                        <th style="padding:14px 12px;text-align:center;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Estado</th>
-                        <th style="padding:14px 16px;text-align:center;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Recordatorio</th>
+                        <th style="padding:14px 20px;text-align:left;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Cliente</th>
+                        <th style="padding:14px 16px;text-align:left;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;white-space:nowrap;">Nº Factura</th>
+                        <th style="padding:14px 16px;text-align:left;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Emisión</th>
+                        <th style="padding:14px 16px;text-align:left;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Vencimiento</th>
+                        <th style="padding:14px 20px;text-align:right;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Monto</th>
+                        <th style="padding:14px 12px;text-align:center;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Días</th>
+                        <th style="padding:14px 12px;text-align:center;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Estado</th>
+                        <th style="padding:14px 16px;text-align:center;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;">Recordatorio</th>
                     </tr>
                 </thead>
                 <tbody>${rows || '<tr><td colspan="8" style="padding:40px;text-align:center;color:#6b7280;font-size:14px;">Sin facturas vencidas ahora mismo.</td></tr>'}</tbody>
