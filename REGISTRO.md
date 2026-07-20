@@ -1677,3 +1677,299 @@ Es orientativo, no auditoría. Sirve para señalar clientes que aparentemente no
 **Migración a aplicar en Supabase**
 
 `database/migrations/add_dunning_v7.sql` (aditiva, sin borrado).
+
+---
+
+### 2026-07-20 — Rama `fix/impagoscc`: CC, visibilidad total de vencidas, alertas y reporte
+
+**Rama:** `fix/impagoscc` (creada desde `main`)
+
+Bloque grande de mejoras sobre el módulo de Impagos. Cinco bloques funcionales independientes, todos aditivos. Se resumen aquí en orden lógico; cada uno con su migración numerada.
+
+---
+
+#### Bloque 1 — CC en los recordatorios (v8)
+
+**Motivo:** los recordatorios de impago se enviaban solo al cliente. Se pedía poder añadir personas en copia visible (CC) — típicamente el gestor del cliente, el comercial que lleva la cuenta o administración interna.
+
+**Migración `add_dunning_v8.sql`** — aditiva:
+- `dunning_config.cc_emails text[]` → CC globales que aplican a todos los recordatorios.
+- `dunning_email_overrides.override_cc_emails text[]` → CC específicos por cliente Holded (se suman a los globales, no los reemplazan).
+- `dunning_reminders.cc_emails text[]` → snapshot del CC realmente enviado (auditoría).
+
+**Backend (`services/admin-service/src/routes/dunning.js`):**
+- Helper `sanitizeEmailList(input, excludeEmail)` — valida, deduplica y excluye la dirección destino para no dispararle dos copias.
+- `executeSend`: calcula `ccList = globales + override` (deduplicado, excluyendo `destEmail`), lo inyecta en `nodemailer.sendMail({ cc })` y lo persiste en `dunning_reminders.cc_emails`.
+- **Modo prueba:** el CC no se aplica (el email de test no debe copiar a terceros).
+- `PUT /config`: validación de `cc_emails` — si alguna dirección no es válida devuelve `400 invalid-cc-emails`.
+- `PUT /overrides/:contact_id`: idem con `override_cc_emails` → `400 invalid-override_cc_emails`.
+- `preview-run` y `dry-run` devuelven el `cc` efectivo para que la UI lo enseñe antes de enviar.
+- `GET /reminders` incluye `cc_emails` en el select.
+
+**Frontend:**
+- `client/src/lib/api/dunning.ts` — añadidos `cc_emails`, `override_cc_emails`, `cc?` en `RunResult`, `PlanItem.dest_cc?`, `DunningReminder.cc_emails?`.
+- `client/src/features/dunning/DunningConfig.tsx`:
+  - Componente `EmailListEditor` — chips con validación inline; Enter/coma/backspace para gestionar entradas; rechaza inválidos y duplicados sin romper el input.
+  - **Reglas** → nueva sección "Copia visible (CC)" con `EmailListEditor` justo antes del BCC. Guía explicando la diferencia CC (visible) vs BCC (oculta).
+  - **Overrides** → input CC en el alta + edición inline por fila (chips en la propia tabla, `updateCcMutation` con re-upsert conservando el resto de campos).
+  - PreviewModal y RunResultsModal muestran los CC por envío.
+  - Sección Historial → muestra los CC que llevó cada recordatorio (compacto: `email +N` si hay varios).
+
+---
+
+#### Bloque 2 — Visibilidad total de facturas vencidas + buscador
+
+**Motivo:** en el módulo Impagos solo aparecían las facturas que ya estaban en algún nivel (≥5 días vencidas por defecto). Las de 1-4 días quedaban invisibles. Además faltaba filtrar por cliente.
+
+**Backend:**
+- `GET /overdue-invoices`: filtro cambiado de `if (daysOverdue < config.level_1_days_min)` a `if (daysOverdue < 1)`. Ahora aparecen todas las vencidas (≥1 día). Las que aún no llegan al nivel 1 se devuelven con `suggested_level: 0`.
+- El motor de envío (`buildDunningPlan.decideAction`) sigue devolviendo `skip: not-overdue-enough` para nivel 0 → **no envía** recordatorios a esas facturas. Solo cambia la visibilidad.
+- Cruce con `dunning_cases` ahora filtra `is_test=false`: los envíos de prueba no ensucian el `last_reminder_at` de la fila real. Consistente con los KPIs del dashboard que ya filtraban prueba.
+
+**Frontend (`DunningDashboard.tsx`):**
+- Buscador en el header de la tabla — filtro cliente por nombre, email o número de factura. Contador "X de Y facturas" cuando hay filtro activo.
+- Badge "Sin nivel" (gris) para las de nivel 0 — ya lo pintaba `levelBadge(0)`, ahora sí llega a mostrarse.
+- Nota nueva en el header aclarando que los envíos de prueba se ignoran.
+
+**Consecuencia importante:** desaparece la contradicción "0 recordatorios enviados en KPI pero fila con último envío tal fecha". Los envíos de prueba siguen visibles en Configuración → Historial → Historial de envíos con el toggle "Incluir envíos de prueba".
+
+---
+
+#### Bloque 3 — Alerta cuando un cliente acumula ≥N facturas vencidas (v9, v10, v11)
+
+**Motivo:** cuando un mismo cliente acumula varias facturas vencidas, hay que enterarse sí o sí antes de emitir la siguiente. Requisito del usuario: modal bloqueante en la app + email periódico.
+
+**Migraciones**
+
+- `add_dunning_v9.sql` — configuración de la alerta:
+  - `dunning_config.multi_alert_enabled` bool (default true)
+  - `multi_alert_threshold` smallint ≥2 (default 2)
+  - `multi_alert_to` text
+  - `multi_alert_cc_emails` text[]
+  - `multi_alert_last_sent_at` timestamptz
+  - `multi_alert_last_summary` jsonb
+
+- `add_dunning_v10.sql` — historial + días de envío:
+  - `multi_alert_send_days` smallint[] (default `{1}` = lunes)
+  - Tabla `dunning_multi_alert_history` — snapshot diario por cliente que supere el umbral. Índice único `(contact_id, ran_date)` para idempotencia. Campos: `invoice_count`, `max_days_overdue`, `total_amount`, `currency`, `invoices` (jsonb), `email_sent`. RLS: solo superadmin.
+
+- `add_dunning_v11.sql` — hora configurable:
+  - `multi_alert_send_hour` smallint (0-23, default 9) — en la timezone del config.
+
+**Backend**
+
+Helpers:
+- `computeMultiOverdueAlerts({ config })` — agrupa vencidas por contact_id y devuelve los que superan el umbral (>=2 por defecto), ordenados por count desc → total_amount desc.
+- `renderMultiOverdueEmail({ alerts, threshold, appUrl })` — HTML con hero rojo, tabla de clientes (Cliente + email · Facturas · Deuda · Máx días) y CTA "Abrir módulo Impagos". Asunto sin corchetes: `Alerta de impagos · CARRER WORLD acumula 3 facturas` o `Alerta de impagos · 5 clientes con facturas vencidas pendientes`.
+- `sendMultiOverdueEmail({ alerts, config, baseUrl })` — TO + CC; si TO vacío usa `ccList[0]` como TO y el resto como CC. Si TO+CC vacío → `no-recipients`.
+- `currentTimeInTz(config)` — devuelve `{ weekday, hour }` en la zona horaria del config.
+- `snapshotMultiOverdueAlerts({ alerts, emailSent })` — upsert por `(contact_id, ran_date)`, idempotente.
+- `maybeDispatchMultiAlert({ config, baseUrl, force })` — orquesta: verifica `enabled` + `sendDays.includes(weekday)` + `hour === sendHour` + anti-spam 20h; si todo pasa, envía y actualiza `last_sent_at`. Con `force=true` (botón manual) ignora schedule y anti-spam.
+
+Integración en el cron:
+- `sync-paid` (diario 06:00 UTC) → **solo snapshot** del historial. No envía email.
+- `run` (horario `0 * * * *`) → dispara `maybeDispatchMultiAlert` en cada tick, independiente del schedule de recordatorios y del `config.enabled` global. Su schedule propio: `multi_alert_send_days` + `multi_alert_send_hour`.
+
+Endpoints REST:
+- `GET /dunning/multi-overdue-alerts` — lista los clientes que superan el umbral ahora + `enabled` + `last_sent_at`. Consume el banner global y el preview de configuración.
+- `POST /dunning/multi-overdue-alerts/send` — force=true. Envía + hace snapshot + actualiza timestamps.
+- `GET /dunning/multi-overdue-history` — dos modos:
+  - Sin `contact_id` → agregado por cliente/mes de los últimos N meses (parametrizable). Devuelve `clients[]` con `months_flagged`, `total_days_flagged`, `peak_invoice_count`, `peak_amount`, `months[]`.
+  - Con `contact_id` → detalle día a día de ese cliente.
+
+Validaciones en `PUT /config`:
+- `multi_alert_cc_emails` inválidos → 400.
+- `multi_alert_to` inválido → 400.
+- `multi_alert_threshold < 2` → 400.
+- `multi_alert_send_hour` fuera de [0, 23] → 400.
+
+**Frontend**
+
+Componente `client/src/features/dunning/MultiOverdueAlertBanner.tsx`:
+- **Modal bloqueante** con overlay negro semi-transparente. Hero rojo con icono, tabla de clientes, totales y CTAs.
+- Solo se pinta para `profile.role === 'superadmin'`.
+- Al montar y en `visibilitychange`/`focus` revalida contra el endpoint.
+- Cierre inmediato (estado local `dismissed=true`), persiste día natural local en `localStorage['dunning:multi-alert:hidden-until-day']`. No vuelve a salir hasta el día siguiente.
+- Botón "Ir al módulo de impagos" navega y cierra a la vez. Texto pequeño avisando "Volverá a aparecer mañana si sigue habiendo alertas".
+
+Se monta en `client/src/components/layout/Layout.tsx` justo después del Header. Aparece en TODA la app.
+
+Configuración (`DunningConfig.tsx` → tarjeta `MultiAlertCard` en pestaña Reglas):
+- Toggle enabled, umbral (min 2), TO (email), CC (`EmailListEditor`), días de la semana (chips), hora (0-23).
+- Preview en vivo del estado actual (recalcular manual).
+- Detección de cambios sin guardar (aviso azul) → botón muta a "Guardar y enviar" cuando hay cambios pendientes (guarda `updateConfig` primero y después dispara `sendMultiOverdueAlert`). Con esto se acabó el "no-recipients" por olvidar guardar.
+- Editar el formulario limpia el resultado de la mutación anterior (evita mostrar mensajes obsoletos).
+- Mensaje `no-recipients` reescrito en lenguaje humano en la UI.
+- "Guardar alerta" desactivado si no hay cambios que guardar.
+
+Nueva pestaña "Reincidentes":
+- Componente `ReincidentsTab` en `DunningConfig.tsx`.
+- Consulta `dunningApi.getMultiOverdueHistory({ months })` con ventana configurable (3/6/12/24 meses).
+- Tabla por cliente: Meses afectados (badge coloreado: rojo si ≥3), Días acumulados, Pico facturas, Pico deuda, y una **línea de tiempo** con chips por mes (color según `max_invoice_count`, tooltip con detalle).
+- Sirve para el cierre mensual: "antes de emitir la siguiente factura a X, mira lo que arrastra".
+
+Tipos TS actualizados en `client/src/lib/api/dunning.ts`:
+- `DunningConfig` extendido con los campos v9/v10/v11.
+- Nuevas interfaces `MultiOverdueAlert`, `MultiOverdueSnapshot`, `MultiOverdueHistoryClient`.
+- Métodos `listMultiOverdueAlerts`, `sendMultiOverdueAlert`, `getMultiOverdueHistory`, `getMultiOverdueContactHistory`.
+
+---
+
+#### Bloque 4 — Reporte periódico de facturas vencidas por email (v12)
+
+**Motivo:** reemplazar el email semanal que salía por n8n con la relación de facturas vencidas. Se pedía que fuera igual pero con una columna extra que indique si a esa factura ya se le envió recordatorio.
+
+**Migración `add_dunning_v12.sql`** — aditiva:
+- `overdue_report_enabled` bool (default false)
+- `overdue_report_to` text
+- `overdue_report_cc_emails` text[]
+- `overdue_report_send_days` smallint[] (default `{1}`)
+- `overdue_report_send_hour` smallint (0-23, default 10)
+- `overdue_report_last_sent_at` timestamptz
+- `overdue_report_last_summary` jsonb
+
+**Backend**
+
+Helpers:
+- `computeOverdueReport({ config })` — trae todas las vencidas de Holded (≥1 día), aplica filtros de min_amount y excluded_contact_ids, y las cruza con `dunning_reminders` (`status=sent`, `is_test=false`) para saber si ya se envió recordatorio real. Por invoice_id, guarda el último enviado (nivel + fecha).
+- `renderOverdueReportEmail({ report, config, appUrl })`:
+  - Header con título + fecha de corte.
+  - Banda de KPIs en 4 columnas separadas por líneas verticales: Total facturas, Total deuda, Estado (críticos/warning), Con recordatorio (X/Y enviados).
+  - Tabla densa (padding vertical 8px) con: Cliente, Nº Factura (mono), Emisión, Vencimiento (dd/mm/aa), Monto (tabular-nums), Días (20px, rojo si crítico, ámbar si warning), Estado (badge CRÍTICO rojo / WARNING ámbar), Recordatorio (✓ Sí · N1/N2/N3 en verde, o No en gris).
+  - Zebra striping en las filas.
+  - CTA "Abrir módulo Impagos →" como bloque propio.
+  - Footer una línea con umbral crítico.
+  - Asunto: `Relación de facturas vencidas · N pendientes · X €`.
+- `sendOverdueReportEmail({ report, config, baseUrl })` — mismo patrón que la alerta: TO principal + CC; si TO vacío usa `ccList[0]`.
+- `maybeDispatchOverdueReport({ config, baseUrl, force })` — verifica `overdue_report_enabled` + día + hora + anti-spam 20h. Si `total_count === 0` y no es `force`, skip con `no-overdue` (no molestar con "0 vencidas"). Con `force` (botón manual) ignora todos los checks.
+
+Integración en el cron:
+- El reporte se dispara en el cron `run` **después de `executeSend`** para que la columna "Recordatorio enviado" refleje lo que acaba de salir.
+- **Importante:** también se dispara en los 3 caminos de skip del cron (system-disabled, not-scheduled, ran-recently) porque su schedule es 100% independiente del de recordatorios. Helper `dispatchReport()` centraliza la llamada, releyendo la config para evitar state stale.
+- El cron `sync-paid` NO envía el reporte (evita doble disparo).
+
+Endpoints REST:
+- `GET /dunning/overdue-report/preview` — devuelve la data que se enviaría ahora (para orientar en la config sin gastar un email).
+- `POST /dunning/overdue-report/send` — force=true. Ignora schedule y anti-spam.
+
+Validaciones en `PUT /config`:
+- `overdue_report_cc_emails` inválidos → 400.
+- `overdue_report_to` inválido → 400.
+- `overdue_report_send_hour` fuera de [0, 23] → 400.
+
+**Frontend**
+
+Tarjeta `OverdueReportCard` en pestaña Reglas (debajo de la alerta multi-vencida):
+- Toggle enabled, TO, CC (`EmailListEditor`), días (chips), hora.
+- Preview en vivo (`previewOverdueReport`).
+- Botón "Guardar y enviar" con la misma mecánica de detección de cambios: si hay pendientes, guarda y envía; si no, solo envía. Mensajes de resultado en lenguaje humano.
+
+Tipos TS: `DunningConfig` extendido, `OverdueReportRow`, `OverdueReportPreview`, métodos `previewOverdueReport`, `sendOverdueReport`.
+
+---
+
+#### Bloque 5 — Refactor del cron `run` para orquestar los 3 flujos
+
+El `cronRunHandler` quedó con esta secuencia por tick horario:
+
+1. Cargar config.
+2. Disparar `maybeDispatchMultiAlert` (independiente).
+3. Guards del sistema de recordatorios:
+   - `!config.enabled` → skip (pero se dispara `dispatchReport` antes de responder).
+   - `!isCronScheduledNow` → skip (idem).
+   - `ran-recently` (<30 min) → skip (idem).
+4. Si pasa los guards: `executeSend` (envío de recordatorios).
+5. `dispatchReport()` — reporte de vencidas.
+6. Log con `summary.multi_alert` y `summary.overdue_report`.
+
+Esta arquitectura permite que los 3 flujos (alerta multi-vencida, recordatorios, reporte) tengan su propio schedule y su propio anti-spam sin acoplarse entre sí.
+
+**Refactor menor de la respuesta del email de alerta multi-vencida:**
+- Asunto sin corchetes, natural: `Alerta de impagos · N clientes con facturas vencidas pendientes`.
+
+---
+
+#### Bug fix: "Enviar alerta ahora" con no-recipients
+
+**Síntoma:** el usuario rellenaba TO en pantalla, pulsaba "Enviar alerta ahora" y recibía "no-recipients" — porque el botón lee de BD y el TO no estaba guardado.
+
+**Fix:** `MultiAlertCard` y `OverdueReportCard` detectan `hasUnsavedChanges` comparando el formulario contra `config` persistida. Si hay cambios, el `sendMutation` guarda con `updateConfig` primero (invalidando la query de config) y después llama al endpoint de envío. El botón cambia de "Enviar alerta ahora" a "Guardar y enviar" cuando hay cambios pendientes. Aviso azul explicando qué va a pasar. "Guardar alerta" desactivado si no hay diff. Editar el formulario limpia el resultado anterior de la mutación.
+
+---
+
+#### Iteraciones de diseño del email de reporte
+
+Cinco commits sucesivos para llegar al equilibrio final:
+1. Primera versión (funcional pero compacta).
+2. `padding 18px` + KPIs con 4 bloques grandes de 26px → demasiado alto, mucho scroll.
+3. Tipografías subidas a 15-20px + padding filas 14px → sigue demasiado alto.
+4. Compacto extremo: KPIs en línea, padding 8px, letras 12.5-13px → muy denso, se pierde jerarquía.
+5. **Versión final:** KPIs de vuelta separados en 4 columnas con líneas verticales pero tamaños medios (20px números principales, 14px mixtos, 11px etiquetas). Padding filas 8px (compacto). Días 14px con color según estado. Botón CTA "Abrir módulo Impagos" como bloque centrado propio. Footer una línea centrada. Tabla densa pero legible.
+
+---
+
+#### Archivos tocados en la rama
+
+**Migraciones nuevas:**
+- `database/migrations/add_dunning_v8.sql` — CC en recordatorios.
+- `database/migrations/add_dunning_v9.sql` — config de alerta multi-vencida.
+- `database/migrations/add_dunning_v10.sql` — días de envío + historial de alertas.
+- `database/migrations/add_dunning_v11.sql` — hora configurable.
+- `database/migrations/add_dunning_v12.sql` — reporte de vencidas.
+
+**Backend:**
+- `services/admin-service/src/routes/dunning.js` — todos los helpers, endpoints y cron.
+
+**Frontend:**
+- `client/src/lib/api/dunning.ts` — tipos y API.
+- `client/src/features/dunning/DunningConfig.tsx` — `EmailListEditor`, `MultiAlertCard`, `OverdueReportCard`, `ReincidentsTab`, nueva pestaña "Reincidentes".
+- `client/src/features/dunning/DunningDashboard.tsx` — buscador + limpieza de contradicción KPI/last_reminder.
+- `client/src/features/dunning/MultiOverdueAlertBanner.tsx` (nuevo) — modal bloqueante con memoria diaria.
+- `client/src/components/layout/Layout.tsx` — montaje global del banner.
+
+---
+
+#### Migraciones a aplicar en Supabase (por orden)
+
+```sql
+-- v8: CC en recordatorios
+ALTER TABLE dunning_config
+    ADD COLUMN IF NOT EXISTS cc_emails text[] NOT NULL DEFAULT ARRAY[]::text[];
+ALTER TABLE dunning_email_overrides
+    ADD COLUMN IF NOT EXISTS override_cc_emails text[] NOT NULL DEFAULT ARRAY[]::text[];
+ALTER TABLE dunning_reminders
+    ADD COLUMN IF NOT EXISTS cc_emails text[] NOT NULL DEFAULT ARRAY[]::text[];
+
+-- v9: alerta multi-vencida
+ALTER TABLE dunning_config
+    ADD COLUMN IF NOT EXISTS multi_alert_enabled       boolean       NOT NULL DEFAULT true,
+    ADD COLUMN IF NOT EXISTS multi_alert_threshold     smallint      NOT NULL DEFAULT 2 CHECK (multi_alert_threshold >= 2),
+    ADD COLUMN IF NOT EXISTS multi_alert_to            text,
+    ADD COLUMN IF NOT EXISTS multi_alert_cc_emails     text[]        NOT NULL DEFAULT ARRAY[]::text[],
+    ADD COLUMN IF NOT EXISTS multi_alert_last_sent_at  timestamptz,
+    ADD COLUMN IF NOT EXISTS multi_alert_last_summary  jsonb         NOT NULL DEFAULT '{}'::jsonb;
+
+-- v10: días + historial
+ALTER TABLE dunning_config
+    ADD COLUMN IF NOT EXISTS multi_alert_send_days smallint[] NOT NULL DEFAULT ARRAY[1];
+-- (+ tabla dunning_multi_alert_history con RLS — ver archivo)
+
+-- v11: hora
+ALTER TABLE dunning_config
+    ADD COLUMN IF NOT EXISTS multi_alert_send_hour smallint NOT NULL DEFAULT 9
+        CHECK (multi_alert_send_hour BETWEEN 0 AND 23);
+
+-- v12: reporte de vencidas
+ALTER TABLE dunning_config
+    ADD COLUMN IF NOT EXISTS overdue_report_enabled        boolean       NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS overdue_report_to             text,
+    ADD COLUMN IF NOT EXISTS overdue_report_cc_emails      text[]        NOT NULL DEFAULT ARRAY[]::text[],
+    ADD COLUMN IF NOT EXISTS overdue_report_send_days      smallint[]    NOT NULL DEFAULT ARRAY[1],
+    ADD COLUMN IF NOT EXISTS overdue_report_send_hour      smallint      NOT NULL DEFAULT 10
+        CHECK (overdue_report_send_hour BETWEEN 0 AND 23),
+    ADD COLUMN IF NOT EXISTS overdue_report_last_sent_at   timestamptz,
+    ADD COLUMN IF NOT EXISTS overdue_report_last_summary   jsonb         NOT NULL DEFAULT '{}'::jsonb;
+```
+
+Todas las migraciones son aditivas — se pueden aplicar en cualquier orden sin perder datos. Consultar los archivos v8-v12 en `database/migrations/` para el SQL completo con RLS y índices.
+
